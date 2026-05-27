@@ -8,7 +8,8 @@ import { INR, INR_SIGNED, getCounterParty, clientByIdFrom } from "../../lib/form
 import { exportCSV } from "../../lib/csv-export";
 import { DOC_TYPE_META, STAGE_META } from "../../lib/constants";
 import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
-import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
+import { isValidGSTIN } from "../../lib/validators-local";
+import { validateGstDocument, applyDocumentTaxFromPos } from "@ca-suite/shared";
 
 import { PartyPanel } from "./PartyPanel";
 import {
@@ -50,6 +51,34 @@ export function ReviewScreen({
     place_of_supply: doc.place_of_supply,
     reverse_charge:  doc.reverse_charge ? "Yes" : "No",
   });
+  const [supplyType, setSupplyType] = useState(doc.supply_type);
+  const [itcEligible, setItcEligible] = useState(doc.itc_eligible !== false);
+  const isPurchase =
+    doc.doc_type === "purchase_invoice" ||
+    doc.doc_type === "debit_note_received" ||
+    doc.doc_type === "credit_note_received";
+
+  function posStateCode(): string {
+    const m = docMeta.place_of_supply.match(/\((\d{2})\)/);
+    return m?.[1] ?? docMeta.place_of_supply.replace(/\D/g, "").slice(0, 2);
+  }
+
+  function applyPosTax(code: string, stateLabel: string) {
+    const pos = `${stateLabel} (${code})`;
+    const { supply_type, lines: newLines } = applyDocumentTaxFromPos(
+      {
+        doc_type: doc.doc_type,
+        place_of_supply: code,
+        supplier,
+        recipient,
+        lines,
+      },
+      code
+    );
+    setDocMeta((p) => ({ ...p, place_of_supply: pos }));
+    setSupplyType(supply_type);
+    setLines(newLines);
+  }
 
   useEffect(() => {
     setLocked(doc.stage === "locked");
@@ -70,37 +99,88 @@ export function ReviewScreen({
       .catch(() => setPreviewUrl(null));
   }, [docId, doc]);
 
+  const computedTaxable = useMemo(() => lines.reduce((s, l) => s + l.taxable, 0), [lines]);
+  const computedTax = useMemo(
+    () => lines.reduce((s, l) => s + l.igst + l.cgst + l.sgst, 0),
+    [lines]
+  );
+  const computedTotal = useMemo(() => lines.reduce((s, l) => s + l.total, 0), [lines]);
+
   const liveErrors = useMemo<FieldWarning[]>(() => {
     if (locked) return [];
-    const e: FieldWarning[] = [];
-    if (!docMeta.doc_number.trim()) e.push({ field: "Document Number", severity: "error", message: "Required — enter the document number" });
-    if (!docMeta.doc_date.trim()) e.push({ field: "Document Date", severity: "error", message: "Required — select the document date" });
-    if (!docMeta.place_of_supply.trim()) e.push({ field: "Place of Supply", severity: "error", message: "Required — select the state" });
-    if (!supplier.gstin.trim()) e.push({ field: "Supplier GSTIN", severity: "error", message: "Required — enter supplier GSTIN" });
-    else if (!isValidGSTIN(supplier.gstin)) e.push({ field: "Supplier GSTIN", severity: "error", message: "Invalid GSTIN format (must be 15 characters)" });
-    if (!recipient.gstin.trim()) e.push({ field: "Recipient GSTIN", severity: "error", message: "Required — enter recipient GSTIN" });
-    else if (!isValidGSTIN(recipient.gstin)) e.push({ field: "Recipient GSTIN", severity: "error", message: "Invalid GSTIN format (must be 15 characters)" });
-    lines.forEach((l, i) => {
-      const expTaxable = Math.round(l.qty * l.rate);
-      if (l.qty > 0 && l.rate > 0 && Math.abs(l.taxable - expTaxable) > 1)
-        e.push({ field: `Line ${i + 1}`, severity: "error", message: `Qty×Rate = ₹${expTaxable.toLocaleString("en-IN")} but taxable is ₹${l.taxable.toLocaleString("en-IN")}` });
-    });
-    return e;
-  }, [locked, docMeta, supplier, recipient, lines]);
+    return validateGstDocument({
+      doc_number: docMeta.doc_number,
+      doc_date: docMeta.doc_date,
+      place_of_supply: posStateCode() || docMeta.place_of_supply,
+      supplier,
+      recipient,
+      lines,
+      supply_type: supplyType,
+      reverse_charge: docMeta.reverse_charge === "Yes",
+      doc_type: doc.doc_type,
+      itc_eligible: itcEligible,
+      taxable_amount: computedTaxable,
+      igst: lines.reduce((s, l) => s + l.igst, 0),
+      cgst: lines.reduce((s, l) => s + l.cgst, 0),
+      sgst: lines.reduce((s, l) => s + l.sgst, 0),
+      total: computedTotal,
+      issues: [],
+    }).filter((i) => i.severity === "error");
+  }, [locked, docMeta, supplier, recipient, lines, supplyType, itcEligible, doc.doc_type, computedTaxable, computedTotal]);
 
   const liveWarnings = useMemo<FieldWarning[]>(() => {
     if (locked) return [];
-    const w: FieldWarning[] = [];
+    const gst = validateGstDocument({
+      doc_number: docMeta.doc_number,
+      doc_date: docMeta.doc_date,
+      place_of_supply: posStateCode() || docMeta.place_of_supply,
+      supplier,
+      recipient,
+      lines,
+      supply_type: supplyType,
+      reverse_charge: docMeta.reverse_charge === "Yes",
+      doc_type: doc.doc_type,
+      itc_eligible: itcEligible,
+      taxable_amount: computedTaxable,
+      igst: lines.reduce((s, l) => s + l.igst, 0),
+      cgst: lines.reduce((s, l) => s + l.cgst, 0),
+      sgst: lines.reduce((s, l) => s + l.sgst, 0),
+      total: computedTotal,
+      issues: [],
+    }).filter((i) => i.severity === "warning");
+    const w: FieldWarning[] = [...gst];
     if (supplier.gstin && isValidGSTIN(supplier.gstin)) {
       const master = partyByGstin[supplier.gstin.toUpperCase()];
-      if (master && master.name !== supplier.name) w.push({ field: "Supplier", severity: "warning", message: `Name differs from master: "${master.name}"` });
+      if (master && master.name !== supplier.name)
+        w.push({
+          field: "Supplier",
+          severity: "warning",
+          message: `Name differs from master: "${master.name}"`,
+        });
     }
     if (recipient.gstin && isValidGSTIN(recipient.gstin)) {
       const master = partyByGstin[recipient.gstin.toUpperCase()];
-      if (master && master.name !== recipient.name) w.push({ field: "Recipient", severity: "warning", message: `Name differs from master: "${master.name}"` });
+      if (master && master.name !== recipient.name)
+        w.push({
+          field: "Recipient",
+          severity: "warning",
+          message: `Name differs from master: "${master.name}"`,
+        });
     }
     return w;
-  }, [locked, supplier, recipient, partyByGstin]);
+  }, [
+    locked,
+    docMeta,
+    supplier,
+    recipient,
+    lines,
+    supplyType,
+    itcEligible,
+    doc.doc_type,
+    computedTaxable,
+    computedTotal,
+    partyByGstin,
+  ]);
 
   const errors   = liveErrors;
   const warnings = liveWarnings;
@@ -123,9 +203,6 @@ export function ReviewScreen({
     }));
   }
 
-  const computedTaxable = lines.reduce((s, l) => s + l.taxable, 0);
-  const computedTax     = lines.reduce((s, l) => s + l.igst + l.cgst + l.sgst, 0);
-  const computedTotal   = lines.reduce((s, l) => s + l.total, 0);
 
   if (rejected) return (
     <div className="flex flex-col items-center justify-center h-80 gap-5">
@@ -250,12 +327,20 @@ export function ReviewScreen({
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Place of Supply <span className="text-red-500">*</span></label>
             <div className="relative">
-              <select disabled={locked} value={docMeta.place_of_supply}
-                onChange={e => setDocMeta(p => ({ ...p, place_of_supply: e.target.value }))}
-                className={inpCls(!docMeta.place_of_supply) + " appearance-none cursor-pointer pr-8"}>
+              <select
+                disabled={locked}
+                value={posStateCode() || ""}
+                onChange={(e) => {
+                  const st = INDIAN_STATES.find((s) => s.code === e.target.value);
+                  if (st) applyPosTax(st.code, st.name);
+                }}
+                className={inpCls(!docMeta.place_of_supply) + " appearance-none cursor-pointer pr-8"}
+              >
                 <option value="">— Select state —</option>
-                {INDIAN_STATES.map(s => (
-                  <option key={s.code} value={`${s.name} (${s.code})`}>{s.name} ({s.code})</option>
+                {INDIAN_STATES.map((s) => (
+                  <option key={s.code} value={s.code}>
+                    {s.name} ({s.code})
+                  </option>
                 ))}
               </select>
               <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -268,6 +353,26 @@ export function ReviewScreen({
               <option>No</option><option>Yes</option>
             </select>
           </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Supply type</label>
+            <p className="text-sm font-semibold text-foreground py-2">
+              {supplyType === "inter_state" ? "Inter-state (IGST)" : "Intra-state (CGST+SGST)"}
+            </p>
+          </div>
+          {isPurchase && (
+            <div className="flex items-center gap-2 pt-6">
+              <input
+                type="checkbox"
+                id="itc-eligible"
+                disabled={locked}
+                checked={itcEligible}
+                onChange={(e) => setItcEligible(e.target.checked)}
+              />
+              <label htmlFor="itc-eligible" className="text-sm text-foreground">
+                ITC eligible
+              </label>
+            </div>
+          )}
         </div>
       </div>
 
@@ -378,7 +483,9 @@ export function ReviewScreen({
                       doc_number: docMeta.doc_number,
                       doc_date: docMeta.doc_date,
                       place_of_supply: docMeta.place_of_supply,
+                      supply_type: supplyType,
                       reverse_charge: docMeta.reverse_charge === "Yes",
+                      itc_eligible: itcEligible,
                       supplier,
                       recipient,
                       lines,

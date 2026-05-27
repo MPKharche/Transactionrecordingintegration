@@ -4,7 +4,13 @@ import { db } from "@ca-suite/db/client";
 import { authSessions, memberships, users } from "@ca-suite/db";
 import type { FastifyReply, FastifyRequest } from "fastify";
 
-export type AuthContext = { tenantId: string; userId: string; email: string; name?: string };
+export type AuthContext = {
+  tenantId: string;
+  userId: string;
+  email: string;
+  name?: string;
+  role: "admin" | "manager" | "operator";
+};
 
 const SESSION_COOKIE = "ca_session";
 const OAUTH_STATE_COOKIE = "ca_oauth_state";
@@ -50,7 +56,7 @@ export async function resolveAuth(
     const tenantId = String(req.headers["x-tenant-id"] ?? "");
     const userId = String(req.headers["x-user-id"] ?? "");
     if (tenantId && userId) {
-      return { tenantId, userId, email: "dev@local", name: "Dev User" };
+      return { tenantId, userId, email: "dev@local", name: "Dev User", role: "admin" };
     }
   }
 
@@ -85,6 +91,7 @@ export async function resolveAuth(
     userId: user.id,
     email: user.email,
     name: user.name ?? user.email,
+    role: membership.role,
   };
 }
 

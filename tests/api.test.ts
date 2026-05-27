@@ -53,13 +53,13 @@ describe.skipIf(!integrationEnabled)("CA Suite API (integration)", () => {
     "x-user-id": userId,
   });
 
-  it("health returns ok", async () => {
+  it("US-API-01: health returns ok", async () => {
     const res = await app.inject({ method: "GET", url: "/api/health" });
     expect(res.statusCode).toBe(200);
     expect(res.json().ok).toBe(true);
   });
 
-  it("creates client", async () => {
+  it("US-API-02: creates client", async () => {
     const res = await app.inject({
       method: "POST",
       url: "/api/clients",
@@ -91,7 +91,7 @@ describe.skipIf(!integrationEnabled)("CA Suite API (integration)", () => {
     expect(Array.isArray(res.json())).toBe(true);
   });
 
-  it("uploads document and persists metadata", async () => {
+  it("US-API-03: uploads document and persists metadata", async () => {
     const boundary = "----vitest";
     const pdf = Buffer.from(`%PDF-1.4 test invoice ${Date.now()}-${Math.random()}`);
     const body = [
@@ -134,7 +134,7 @@ describe.skipIf(!integrationEnabled)("CA Suite API (integration)", () => {
     expect(get.json().filename).toBe("test.pdf");
   });
 
-  it("rejects duplicate upload sha", async () => {
+  it("US-API-04: rejects duplicate upload sha", async () => {
     const boundary = "----dup";
     const pdf = Buffer.from(`%PDF-1.4 duplicate test ${Date.now()}`);
     const body = [

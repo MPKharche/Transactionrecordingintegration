@@ -68,6 +68,9 @@ importers:
       '@ca-suite/shared':
         specifier: workspace:*
         version: link:../../packages/shared
+      '@ca-suite/zoho-schema':
+        specifier: workspace:*
+        version: link:../../packages/zoho-schema
       '@fastify/cookie':
         specifier: ^11.0.1
         version: 11.0.2

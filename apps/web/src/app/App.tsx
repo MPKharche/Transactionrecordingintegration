@@ -13,6 +13,8 @@ export default function App() {
         <Route path="/records/:docId" element={<AuthenticatedApp />} />
         <Route path="/clients" element={<AuthenticatedApp />} />
         <Route path="/clients/:clientId" element={<AuthenticatedApp />} />
+        <Route path="/registers" element={<AuthenticatedApp />} />
+        <Route path="/audit" element={<AuthenticatedApp />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

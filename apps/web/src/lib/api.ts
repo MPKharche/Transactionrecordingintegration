@@ -1,4 +1,4 @@
-import type { Client, GSTDocument, Party } from "@ca-suite/shared";
+import type { AuditLogEntry, Client, GSTDocument, GstRegisterRow, Party, UserRole } from "@ca-suite/shared";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -7,6 +7,7 @@ export type AuthHeaders = {
   userId: string;
   email?: string;
   name?: string;
+  role?: UserRole;
 };
 
 let auth: AuthHeaders | null = null;
@@ -56,8 +57,15 @@ export async function trySession(): Promise<AuthHeaders | null> {
     userId: string;
     email: string;
     name?: string;
+    role?: UserRole;
   };
-  auth = { tenantId: d.tenantId, userId: d.userId, email: d.email, name: d.name };
+  auth = {
+    tenantId: d.tenantId,
+    userId: d.userId,
+    email: d.email,
+    name: d.name,
+    role: d.role,
+  };
   return auth;
 }
 
@@ -84,16 +92,33 @@ export const api = {
       request<Client>("/clients", { method: "POST", body: JSON.stringify(body) }),
     patch: (id: string, body: Partial<Client>) =>
       request<Client>(`/clients/${id}`, { method: "PATCH", body: JSON.stringify(body) }),
+    setAssignments: (id: string, userIds: string[]) =>
+      request<{ user_ids: string[] }>(`/clients/${id}/assignments`, {
+        method: "PUT",
+        body: JSON.stringify({ user_ids: userIds }),
+      }),
   },
   parties: {
     list: () => request<Record<string, Party>>("/parties"),
   },
   documents: {
-    list: (params?: { client_id?: string; stage?: string }) => {
+    list: (params?: {
+      client_id?: string;
+      stage?: string;
+      financial_year?: string;
+      assigned_to?: string;
+      limit?: string;
+      offset?: string;
+    }) => {
       const q = new URLSearchParams(params as Record<string, string>);
       const qs = q.toString();
       return request<GSTDocument[]>(`/documents${qs ? `?${qs}` : ""}`);
     },
+    bulkLock: (ids: string[]) =>
+      request<{ locked: string[]; errors: { id: string; errors: string[] }[] }>(
+        "/documents/bulk-lock",
+        { method: "POST", body: JSON.stringify({ ids }) }
+      ),
     get: (id: string) => request<GSTDocument>(`/documents/${id}`),
     patch: (id: string, body: Partial<GSTDocument>) =>
       request<GSTDocument>(`/documents/${id}`, {
@@ -137,13 +162,39 @@ export const api = {
       return res.json() as Promise<GSTDocument>;
     },
   },
+  registers: {
+    list: (kind: "sales" | "purchase", params?: { client_id?: string; financial_year?: string }) => {
+      const q = new URLSearchParams({ ...(params as Record<string, string>) });
+      const qs = q.toString();
+      return request<GstRegisterRow[]>(`/registers/${kind}${qs ? `?${qs}` : ""}`);
+    },
+  },
+  export: {
+    zoho: async (
+      type: "sales" | "purchase",
+      params?: { client_id?: string; financial_year?: string }
+    ) => {
+      const q = new URLSearchParams({ type, ...(params as Record<string, string>) });
+      const res = await fetch(`${BASE}/export/zoho?${q}`, { credentials: "include" });
+      if (!res.ok) throw new Error(`Export failed (${res.status})`);
+      const blob = await res.blob();
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `zoho_${type}_${params?.financial_year ?? "all"}.csv`;
+      a.click();
+      URL.revokeObjectURL(url);
+    },
+  },
+  auditLog: {
+    list: () => request<AuditLogEntry[]>("/audit-log"),
+  },
+  compliance: {
+    calendar: () =>
+      request<{ month: string; reminders: { return_type: string; due_day: number; note: string }[] }>(
+        "/compliance/calendar"
+      ),
+  },
 };
 
-export function currentFinancialYear(): string {
-  const now = new Date();
-  const y = now.getFullYear();
-  const m = now.getMonth();
-  const start = m >= 3 ? y : y - 1;
-  const end = (start + 1) % 100;
-  return `${start}-${String(end).padStart(2, "0")}`;
-}
+export { currentIndianFinancialYear as currentFinancialYear } from "@ca-suite/shared";

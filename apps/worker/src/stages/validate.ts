@@ -1,6 +1,5 @@
 /**
- * VALIDATE stage — run business rules on the extracted record.
- * Advances to ready_for_review if OK, dead_letter if unrecoverable.
+ * VALIDATE stage — GST business rules on gst_documents + lines.
  */
 import { Job } from "bullmq";
 import { db } from "@ca-suite/db/client";
@@ -9,11 +8,15 @@ import {
   salesInvoiceHeaders,
   purchaseBillHeaders,
   gstDocuments,
+  documentLines,
+  clients,
 } from "@ca-suite/db";
-import { eq } from "drizzle-orm";
-import { isValidGSTIN } from "@ca-suite/shared";
+import { eq, and } from "drizzle-orm";
+import { isValidGSTIN, validateGstDocument } from "@ca-suite/shared";
 import { assertUploadTenant } from "../lib/assert-upload.js";
 import { syncValidationIssuesToGst } from "../lib/sync-gst-document.js";
+import { mapGstRowToDocument } from "../lib/map-gst-doc.js";
+import { saveDocumentIssues } from "../lib/persist-issues.js";
 
 function validateDate(s: string | null | undefined): boolean {
   if (!s) return false;
@@ -23,18 +26,15 @@ function validateDate(s: string | null | undefined): boolean {
 export async function validateStage(uploadId: string, tenantId: string, job: Job): Promise<string | null> {
   const upload = await assertUploadTenant(uploadId, tenantId);
 
-  const [gstDoc] = await db
+  const [gstRow] = await db
     .select()
     .from(gstDocuments)
     .where(eq(gstDocuments.uploadId, uploadId))
     .limit(1);
 
-  const issues: string[] = [];
-
-  const docType = gstDoc?.docType ?? upload.docType;
-  const isSales =
-    docType === "sales_invoice" ||
-    upload.docType === "sales_invoice";
+  const pipelineIssues: string[] = [];
+  const docType = gstRow?.docType ?? upload.docType;
+  const isSales = docType === "sales_invoice" || upload.docType === "sales_invoice";
 
   if (isSales) {
     const [hdr] = await db
@@ -42,18 +42,12 @@ export async function validateStage(uploadId: string, tenantId: string, job: Job
       .from(salesInvoiceHeaders)
       .where(eq(salesInvoiceHeaders.uploadId, uploadId))
       .limit(1);
-    if (!hdr) issues.push("No sales invoice header found");
+    if (!hdr) pipelineIssues.push("No sales invoice header found");
     else {
-      if (!hdr.customerName) issues.push("Customer name missing");
-      if (!hdr.invoiceDate) issues.push("Invoice date missing");
-      else if (!validateDate(hdr.invoiceDate)) issues.push("Invoice date format unrecognized");
-      if (hdr.gstin && !isValidGSTIN(hdr.gstin)) issues.push("GSTIN format invalid");
-    }
-    if (issues.length > 0) {
-      await db
-        .update(salesInvoiceHeaders)
-        .set({ validationIssues: issues.join("; "), updatedAt: new Date() })
-        .where(eq(salesInvoiceHeaders.uploadId, uploadId));
+      if (!hdr.customerName) pipelineIssues.push("Customer name missing");
+      if (!hdr.invoiceDate) pipelineIssues.push("Invoice date missing");
+      else if (!validateDate(hdr.invoiceDate)) pipelineIssues.push("Invoice date format unrecognized");
+      if (hdr.gstin && !isValidGSTIN(hdr.gstin)) pipelineIssues.push("GSTIN format invalid");
     }
   } else {
     const [hdr] = await db
@@ -61,22 +55,39 @@ export async function validateStage(uploadId: string, tenantId: string, job: Job
       .from(purchaseBillHeaders)
       .where(eq(purchaseBillHeaders.uploadId, uploadId))
       .limit(1);
-    if (!hdr) issues.push("No purchase bill header found");
+    if (!hdr) pipelineIssues.push("No purchase bill header found");
     else {
-      if (!hdr.vendorName) issues.push("Vendor name missing");
-      if (!hdr.billDate) issues.push("Bill date missing");
-      else if (!validateDate(hdr.billDate)) issues.push("Bill date format unrecognized");
-      if (hdr.gstin && !isValidGSTIN(hdr.gstin)) issues.push("GSTIN format invalid");
-    }
-    if (issues.length > 0) {
-      await db
-        .update(purchaseBillHeaders)
-        .set({ validationIssues: issues.join("; "), updatedAt: new Date() })
-        .where(eq(purchaseBillHeaders.uploadId, uploadId));
+      if (!hdr.vendorName) pipelineIssues.push("Vendor name missing");
+      if (!hdr.billDate) pipelineIssues.push("Bill date missing");
+      else if (!validateDate(hdr.billDate)) pipelineIssues.push("Bill date format unrecognized");
+      if (hdr.gstin && !isValidGSTIN(hdr.gstin)) pipelineIssues.push("GSTIN format invalid");
     }
   }
 
-  await syncValidationIssuesToGst(uploadId, issues);
+  let gstFieldIssues: { field: string; severity: "error" | "warning"; message: string }[] = [];
+  if (gstRow) {
+    const lines = await db
+      .select()
+      .from(documentLines)
+      .where(eq(documentLines.documentId, gstRow.id))
+      .orderBy(documentLines.seq);
+    const [client] = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.id, gstRow.clientId), eq(clients.tenantId, tenantId)))
+      .limit(1);
+    const doc = mapGstRowToDocument(gstRow, lines);
+    gstFieldIssues = validateGstDocument(doc, { clientGstin: client?.gstin });
+  }
+
+  const allMessages = [
+    ...pipelineIssues,
+    ...gstFieldIssues.map((i) => i.message),
+  ];
+  await syncValidationIssuesToGst(uploadId, pipelineIssues);
+  if (gstRow && gstFieldIssues.length) {
+    await saveDocumentIssues(gstRow.id, gstFieldIssues);
+  }
 
   await db
     .update(uploads)
@@ -86,6 +97,6 @@ export async function validateStage(uploadId: string, tenantId: string, job: Job
   const { syncGstStageFromUpload } = await import("../lib/gst-sync.js");
   await syncGstStageFromUpload(uploadId, "ready_for_review");
 
-  console.log(`[validate] uploadId=${uploadId} issues=${issues.length} → ready_for_review`);
+  console.log(`[validate] uploadId=${uploadId} issues=${allMessages.length} → ready_for_review`);
   return null;
 }

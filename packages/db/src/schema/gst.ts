@@ -117,11 +117,32 @@ export const gstDocuments = pgTable("gst_documents", {
   contentSha256: text("content_sha256").notNull(),
   lockedAt: timestamp("locked_at"),
   rejectionReason: text("rejection_reason"),
+  itcEligible: boolean("itc_eligible").default(true),
+  b2bCategory: text("b2b_category").default("b2b"),
+  originalDocumentId: uuid("original_document_id"),
+  assignedToUserId: uuid("assigned_to_user_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
   tenantShaIdx: uniqueIndex("gst_documents_tenant_sha_uidx").on(t.tenantId, t.contentSha256),
 }));
+
+export const clientAssignments = pgTable(
+  "client_assignments",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id")
+      .notNull()
+      .references(() => clients.id, { onDelete: "cascade" }),
+    userId: uuid("user_id").notNull(),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.tenantId, t.clientId, t.userId] }),
+  })
+);
 
 export const documentLines = pgTable("document_lines", {
   id: uuid("id").primaryKey().defaultRandom(),

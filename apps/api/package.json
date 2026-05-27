@@ -12,6 +12,7 @@
   "dependencies": {
     "@ca-suite/db": "workspace:*",
     "@ca-suite/shared": "workspace:*",
+    "@ca-suite/zoho-schema": "workspace:*",
     "@fastify/cookie": "^11.0.1",
     "@fastify/cors": "^10.0.1",
     "@fastify/multipart": "^9.0.1",

@@ -15,6 +15,7 @@ import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
 import {
   auditLog,
+  clientAssignments,
   clients,
   documentIssues,
   documentLines,
@@ -25,8 +26,15 @@ import {
   users,
   memberships,
 } from "@ca-suite/db";
-import { canLockDocument, isValidGSTIN, isValidPAN } from "@ca-suite/shared";
+import {
+  canLockDocument,
+  isValidGSTIN,
+  isValidPAN,
+  validateGstDocument,
+  type GstRegisterRow,
+} from "@ca-suite/shared";
 import { mapClient, mapDocument, lineToDb } from "./lib/mappers.js";
+import { lockedDocsToZohoPurchaseCsv, lockedDocsToZohoSalesCsv } from "./lib/zoho-export.js";
 import { putObject, sha256, storagePath } from "./lib/minio.js";
 import type { GSTDocument } from "@ca-suite/shared";
 import {
@@ -168,6 +176,7 @@ export async function buildApp() {
         userId: ctx.userId,
         email: ctx.email,
         name: ctx.name,
+        role: ctx.role,
       };
     } catch (err) {
       req.log.error(err);
@@ -255,17 +264,42 @@ export async function buildApp() {
       tenantId: tenant.id,
       userId: user.id,
       email: user.email,
+      role: "admin" as const,
     };
   });
 
-  app.get("/api/clients", async (req) => {
-    const { tenantId } = (req as { auth: AuthContext }).auth;
+  async function clientsForTenant(tenantId: string, userId: string, role: AuthContext["role"]) {
     const rows = await db
       .select()
       .from(clients)
       .where(eq(clients.tenantId, tenantId))
       .orderBy(clients.name);
-    return rows.map(mapClient);
+    const assigns = await db
+      .select()
+      .from(clientAssignments)
+      .where(eq(clientAssignments.tenantId, tenantId));
+    const byClient = new Map<string, string[]>();
+    for (const a of assigns) {
+      const arr = byClient.get(a.clientId) ?? [];
+      arr.push(a.userId);
+      byClient.set(a.clientId, arr);
+    }
+    let list = rows.map((r) => ({
+      ...mapClient(r),
+      assigned_user_ids: byClient.get(r.id) ?? [],
+    }));
+    if (role === "operator") {
+      list = list.filter(
+        (c) =>
+          c.assigned_user_ids.length === 0 || c.assigned_user_ids.includes(userId)
+      );
+    }
+    return list;
+  }
+
+  app.get("/api/clients", async (req) => {
+    const ctx = (req as { auth: AuthContext }).auth;
+    return clientsForTenant(ctx.tenantId, ctx.userId, ctx.role);
   });
 
   app.post<{ Body: Partial<Client> }>("/api/clients", async (req, reply) => {
@@ -382,19 +416,33 @@ export async function buildApp() {
   });
 
   app.get("/api/documents", async (req) => {
-    const { tenantId } = (req as { auth: AuthContext }).auth;
-    const q = req.query as { client_id?: string; stage?: string };
-    let query = db
+    const ctx = (req as { auth: AuthContext }).auth;
+    const q = req.query as {
+      client_id?: string;
+      stage?: string;
+      financial_year?: string;
+      assigned_to?: string;
+      limit?: string;
+      offset?: string;
+    };
+    const rows = await db
       .select()
       .from(gstDocuments)
-      .where(eq(gstDocuments.tenantId, tenantId))
+      .where(eq(gstDocuments.tenantId, ctx.tenantId))
       .orderBy(desc(gstDocuments.updatedAt));
-    const rows = await query;
-    const filtered = rows.filter((r) => {
+    const clientList = await clientsForTenant(ctx.tenantId, ctx.userId, ctx.role);
+    const allowedClientIds = new Set(clientList.map((c) => c.id));
+    let filtered = rows.filter((r) => {
+      if (!allowedClientIds.has(r.clientId)) return false;
       if (q.client_id && r.clientId !== q.client_id) return false;
       if (q.stage && r.stage !== q.stage) return false;
+      if (q.financial_year && r.financialYear !== q.financial_year) return false;
+      if (q.assigned_to === "me" && r.assignedToUserId !== ctx.userId) return false;
       return true;
     });
+    const limit = Math.min(parseInt(q.limit ?? "500", 10) || 500, 2000);
+    const offset = parseInt(q.offset ?? "0", 10) || 0;
+    filtered = filtered.slice(offset, offset + limit);
     const ids = filtered.map((r) => r.id);
     const allLines =
       ids.length > 0
@@ -474,11 +522,19 @@ export async function buildApp() {
           sgst: b.sgst != null ? String(b.sgst) : existing.sgst,
           cess: b.cess != null ? String(b.cess) : existing.cess,
           total: b.total != null ? String(b.total) : existing.total,
+          itcEligible: b.itc_eligible ?? existing.itcEligible,
+          b2bCategory: b.b2b_category ?? existing.b2bCategory,
+          originalDocumentId: b.original_document_id ?? existing.originalDocumentId,
+          assignedToUserId: b.assigned_to_user_id ?? existing.assignedToUserId,
           updatedAt: new Date(),
         })
         .where(eq(gstDocuments.id, req.params.id));
       if (b.lines) await saveDocumentLines(req.params.id, b.lines);
-      if (b.issues) await saveDocumentIssues(req.params.id, b.issues);
+      const merged = await loadDocument(req.params.id, ctx.tenantId);
+      if (merged) {
+        const gstIssues = validateGstDocument(merged);
+        await saveDocumentIssues(req.params.id, b.issues ?? gstIssues);
+      }
       await audit(ctx, "document.update", "document", req.params.id);
       const doc = await loadDocument(req.params.id, ctx.tenantId);
       return doc;
@@ -598,8 +654,35 @@ export async function buildApp() {
       const ctx = (req as { auth: AuthContext }).auth;
       const doc = await loadDocument(req.params.id, ctx.tenantId);
       if (!doc) return reply.status(404).send({ error: "Not found" });
-      const check = canLockDocument(doc);
-      if (!check.ok) return reply.status(400).send({ errors: check.errors });
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(eq(clients.id, doc.client_id), eq(clients.tenantId, ctx.tenantId))
+        )
+        .limit(1);
+      const dupRows = await db
+        .select({ docNumber: gstDocuments.docNumber })
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            eq(gstDocuments.clientId, doc.client_id),
+            eq(gstDocuments.stage, "locked")
+          )
+        );
+      const existingLockedNumbers = dupRows
+        .map((r) => r.docNumber)
+        .filter((n): n is string => Boolean(n?.trim()) && n !== "—");
+      const check = canLockDocument(doc, {
+        clientGstin: client?.gstin,
+        existingLockedNumbers: existingLockedNumbers.filter(
+          (n) => n !== doc.doc_number
+        ),
+      });
+      if (!check.ok) {
+        return reply.status(400).send({ errors: check.errors, warnings: check.warnings });
+      }
 
       for (const p of [doc.supplier, doc.recipient]) {
         if (!p.gstin) continue;
@@ -771,6 +854,190 @@ export async function buildApp() {
       return { url };
     }
   );
+
+  app.get<{ Params: { kind: string } }>("/api/registers/:kind", async (req, reply) => {
+    const ctx = (req as { auth: AuthContext }).auth;
+    const q = req.query as { client_id?: string; financial_year?: string };
+    const kind = req.params.kind;
+    const salesTypes = ["sales_invoice", "debit_note_issued", "credit_note_issued"];
+    const purchTypes = ["purchase_invoice", "debit_note_received", "credit_note_received"];
+    const types = kind === "sales" ? salesTypes : kind === "purchase" ? purchTypes : null;
+    if (!types) return reply.status(400).send({ error: "kind must be sales or purchase" });
+
+    const rows = await db
+      .select()
+      .from(gstDocuments)
+      .where(
+        and(eq(gstDocuments.tenantId, ctx.tenantId), eq(gstDocuments.stage, "locked"))
+      );
+    const filtered = rows.filter((r) => {
+      if (!types.includes(r.docType)) return false;
+      if (q.client_id && r.clientId !== q.client_id) return false;
+      if (q.financial_year && r.financialYear !== q.financial_year) return false;
+      return true;
+    });
+
+    const out: GstRegisterRow[] = filtered.map((r) => {
+      const sup = r.supplier as Record<string, string>;
+      const rec = r.recipient as Record<string, string>;
+      const isSales = salesTypes.includes(r.docType);
+      const party = isSales ? rec : sup;
+      return {
+        document_id: r.id,
+        doc_number: r.docNumber ?? "",
+        doc_date: r.docDate ?? "",
+        party_name: String(party.name ?? ""),
+        party_gstin: String(party.gstin ?? ""),
+        place_of_supply: r.placeOfSupply ?? "",
+        taxable_amount: parseFloat(r.taxableAmount ?? "0"),
+        igst: parseFloat(r.igst ?? "0"),
+        cgst: parseFloat(r.cgst ?? "0"),
+        sgst: parseFloat(r.sgst ?? "0"),
+        cess: parseFloat(r.cess ?? "0"),
+        total: parseFloat(r.total ?? "0"),
+        itc_eligible: r.itcEligible ?? true,
+        reverse_charge: r.reverseCharge ?? false,
+        financial_year: r.financialYear ?? "",
+      };
+    });
+    return out;
+  });
+
+  app.get("/api/export/zoho", async (req, reply) => {
+    const ctx = (req as { auth: AuthContext }).auth;
+    const q = req.query as { type?: string; client_id?: string; financial_year?: string };
+    const type = q.type === "purchase" ? "purchase" : "sales";
+    const all = await db
+      .select()
+      .from(gstDocuments)
+      .where(
+        and(eq(gstDocuments.tenantId, ctx.tenantId), eq(gstDocuments.stage, "locked"))
+      );
+    const ids = all
+      .filter((r) => {
+        if (q.client_id && r.clientId !== q.client_id) return false;
+        if (q.financial_year && r.financialYear !== q.financial_year) return false;
+        return true;
+      })
+      .map((r) => r.id);
+    const docs: GSTDocument[] = [];
+    for (const id of ids) {
+      const d = await loadDocument(id, ctx.tenantId);
+      if (d) docs.push(d);
+    }
+    const csv =
+      type === "purchase"
+        ? lockedDocsToZohoPurchaseCsv(docs)
+        : lockedDocsToZohoSalesCsv(docs);
+    reply.header("Content-Type", "text/csv; charset=utf-8");
+    reply.header(
+      "Content-Disposition",
+      `attachment; filename="zoho_${type}_${q.financial_year ?? "all"}.csv"`
+    );
+    return csv;
+  });
+
+  app.get("/api/audit-log", async (req) => {
+    const ctx = (req as { auth: AuthContext }).auth;
+    const rows = await db
+      .select()
+      .from(auditLog)
+      .where(eq(auditLog.tenantId, ctx.tenantId))
+      .orderBy(desc(auditLog.createdAt))
+      .limit(200);
+    return rows.map((r) => ({
+      id: r.id,
+      action: r.action,
+      entity_type: r.entityType,
+      entity_id: r.entityId,
+      user_id: r.userId,
+      created_at: r.createdAt.toISOString(),
+      ip_address: r.ipAddress ?? undefined,
+    }));
+  });
+
+  app.put<{ Params: { id: string }; Body: { user_ids?: string[] } }>(
+    "/api/clients/:id/assignments",
+    async (req, reply) => {
+      const ctx = (req as { auth: AuthContext }).auth;
+      if (ctx.role === "operator") {
+        return reply.status(403).send({ error: "Managers or admins only" });
+      }
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(eq(clients.id, req.params.id), eq(clients.tenantId, ctx.tenantId))
+        )
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Not found" });
+      const userIds = req.body?.user_ids ?? [];
+      await db
+        .delete(clientAssignments)
+        .where(
+          and(
+            eq(clientAssignments.tenantId, ctx.tenantId),
+            eq(clientAssignments.clientId, req.params.id)
+          )
+        );
+      if (userIds.length) {
+        await db.insert(clientAssignments).values(
+          userIds.map((userId) => ({
+            tenantId: ctx.tenantId,
+            clientId: req.params.id,
+            userId,
+          }))
+        );
+      }
+      await audit(ctx, "client.assign", "client", req.params.id, { userIds });
+      return { user_ids: userIds };
+    }
+  );
+
+  app.post<{ Body: { ids?: string[] } }>("/api/documents/bulk-lock", async (req, reply) => {
+    const ctx = (req as { auth: AuthContext }).auth;
+    const ids = req.body?.ids ?? [];
+    const locked: string[] = [];
+    const errors: { id: string; errors: string[] }[] = [];
+    for (const id of ids) {
+      const doc = await loadDocument(id, ctx.tenantId);
+      if (!doc) {
+        errors.push({ id, errors: ["Not found"] });
+        continue;
+      }
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, doc.client_id), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      const check = canLockDocument(doc, { clientGstin: client?.gstin });
+      if (!check.ok) {
+        errors.push({ id, errors: check.errors });
+        continue;
+      }
+      await db
+        .update(gstDocuments)
+        .set({ stage: "locked", lockedAt: new Date(), updatedAt: new Date() })
+        .where(eq(gstDocuments.id, id));
+      locked.push(id);
+    }
+    return { locked, errors };
+  });
+
+  app.get("/api/compliance/calendar", async () => {
+    const now = new Date();
+    const y = now.getFullYear();
+    const m = now.getMonth();
+    const monthName = now.toLocaleString("en-IN", { month: "long", year: "numeric" });
+    return {
+      month: monthName,
+      reminders: [
+        { return_type: "GSTR-1", due_day: 11, note: "Outward supplies for previous month" },
+        { return_type: "GSTR-3B", due_day: 20, note: "Summary return and tax payment" },
+        { return_type: "GSTR-2B", due_day: 14, note: "Reconcile purchase ITC before 3B" },
+      ],
+    };
+  });
 
   return app;
 }

@@ -35,7 +35,8 @@ function parseLucideImports(src) {
 
 function parseJsxComponents(src) {
   const tags = new Set();
-  const re = /<([A-Z][a-zA-Z0-9]*)\b/g;
+  // JSX only — exclude TS generics like useState<AuditLogEntry[]>
+  const re = /<([A-Z][a-zA-Z0-9]*)(?:\s|\/|>)/g;
   let match;
   while ((match = re.exec(src))) tags.add(match[1]);
   return tags;
@@ -44,6 +45,7 @@ function parseJsxComponents(src) {
 const IGNORE_TAGS = new Set([
   "DocType", "DocStage", "GSTDocument", "Party", "LineItem", "FieldWarning",
   "Client", "Screen", "HTMLInputElement", "Partial", "MemoryRouter",
+  "AuditLogEntry", "GstRegisterRow",
 ]);
 
 let failed = false;

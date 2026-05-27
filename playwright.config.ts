@@ -25,8 +25,17 @@ export default defineConfig({
       cwd: ".",
       env: {
         ...process.env,
+        DATABASE_URL:
+          process.env.DATABASE_URL ??
+          "postgresql://ca_user:ca_pass@localhost:5433/ca_saas",
         AUTH_DEV_BYPASS: "true",
-        VITE_ALLOW_DEV_LOGIN: "true",
+        MINIO_ENDPOINT: process.env.MINIO_ENDPOINT ?? "localhost",
+        MINIO_PORT: process.env.MINIO_PORT ?? "9000",
+        MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY ?? "minioadmin",
+        MINIO_SECRET_KEY: process.env.MINIO_SECRET_KEY ?? "minioadmin",
+        MINIO_BUCKET: process.env.MINIO_BUCKET ?? "ca-uploads",
+        REDIS_HOST: process.env.REDIS_HOST ?? "localhost",
+        REDIS_PORT: process.env.REDIS_PORT ?? "6379",
       },
     },
     {

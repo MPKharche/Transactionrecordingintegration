@@ -56,7 +56,7 @@ describe.skipIf(!integrationEnabled)("Production workflows (API)", () => {
     "x-user-id": userId,
   });
 
-  it("creates client and lists parties (empty initially)", async () => {
+  it("US-WF-01: creates client and lists parties (empty initially)", async () => {
     const gstin = "33AAAAA0000A1Z5";
     const create = await app.inject({
       method: "POST",

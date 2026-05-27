@@ -10,6 +10,8 @@ import { RecordsScreen } from "../features/records/RecordsScreen";
 import { ReviewScreen } from "../features/review/ReviewScreen";
 import { ClientsScreen } from "../features/clients/ClientsScreen";
 import { ClientDetailScreen } from "../features/clients/ClientDetailScreen";
+import { GstRegistersScreen } from "../features/registers/GstRegistersScreen";
+import { AuditLogScreen } from "../features/audit/AuditLogScreen";
 
 export function AppShell() {
   const {
@@ -36,11 +38,15 @@ export function AppShell() {
       ? routeDocId
         ? "review"
         : "records"
-      : location.pathname.startsWith("/clients")
-        ? routeClientId
-          ? "client_detail"
-          : "clients"
-        : "dashboard";
+      : location.pathname.startsWith("/registers")
+        ? "registers"
+        : location.pathname.startsWith("/audit")
+          ? "audit"
+          : location.pathname.startsWith("/clients")
+            ? routeClientId
+              ? "client_detail"
+              : "clients"
+            : "dashboard";
 
   const reviewId = routeDocId ?? null;
   const selectedClientId = routeClientId ?? null;
@@ -53,11 +59,21 @@ export function AppShell() {
     navigate(`/clients/${id}`);
   }
   function navTo(
-    s: "dashboard" | "upload" | "records" | "review" | "clients" | "client_detail"
+    s:
+      | "dashboard"
+      | "upload"
+      | "records"
+      | "review"
+      | "clients"
+      | "client_detail"
+      | "registers"
+      | "audit"
   ) {
     if (s === "dashboard") navigate("/");
     else if (s === "upload") navigate("/upload");
     else if (s === "records") navigate("/records");
+    else if (s === "registers") navigate("/registers");
+    else if (s === "audit") navigate("/audit");
     else if (s === "clients") navigate("/clients");
   }
 
@@ -121,6 +137,10 @@ export function AppShell() {
             onRetry={retryDocument}
           />
         )}
+        {screen === "registers" && (
+          <GstRegistersScreen clients={clients} isDark={isDark} />
+        )}
+        {screen === "audit" && <AuditLogScreen />}
       </>
     );
 
@@ -144,7 +164,7 @@ export function AppShell() {
           setMode={setMode}
           isDark={isDark}
           userName={session?.name ?? session?.email}
-          userRole="Practitioner"
+          userRole={session?.role ?? "operator"}
         />
         <main className="flex-1 overflow-y-auto">
           <div className="max-w-[1440px] mx-auto px-7 py-7">{main}</div>

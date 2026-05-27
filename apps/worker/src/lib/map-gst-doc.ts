@@ -1,26 +1,18 @@
-import type { Client, GSTDocument, LineItem, Party } from "@ca-suite/shared";
-import {
-  clients,
-  documentIssues,
-  documentLines,
-  gstDocuments,
-} from "@ca-suite/db";
+import type { GSTDocument } from "@ca-suite/shared";
+import type { documentLines, gstDocuments } from "@ca-suite/db";
 
 type DocRow = typeof gstDocuments.$inferSelect;
-type ClientRow = typeof clients.$inferSelect;
 type LineRow = typeof documentLines.$inferSelect;
-type IssueRow = typeof documentIssues.$inferSelect;
 
 function num(v: string | null | undefined): number {
   if (v == null) return 0;
   return parseFloat(v);
 }
 
-function partyFromJson(p: Record<string, unknown>): Party {
+function partyFromJson(p: Record<string, unknown>) {
   return {
     name: String(p.name ?? ""),
     gstin: String(p.gstin ?? ""),
-    pan: p.pan ? String(p.pan) : undefined,
     address: String(p.address ?? ""),
     city: String(p.city ?? ""),
     state: String(p.state ?? ""),
@@ -31,26 +23,7 @@ function partyFromJson(p: Record<string, unknown>): Party {
   };
 }
 
-export function mapClient(row: ClientRow): Client {
-  return {
-    id: row.id,
-    name: row.name,
-    gstin: row.gstin,
-    pan: row.pan ?? "",
-    active: row.active,
-    state: row.state ?? "",
-    state_code: row.stateCode ?? "",
-    address: row.address ?? "",
-    mobile: row.mobile ?? "",
-    email: row.email ?? "",
-  };
-}
-
-export function mapDocument(
-  row: DocRow,
-  lines: LineRow[],
-  issues: IssueRow[]
-): GSTDocument {
+export function mapGstRowToDocument(row: DocRow, lines: LineRow[]): GSTDocument {
   return {
     id: row.id,
     filename: row.filename,
@@ -89,36 +62,9 @@ export function mapDocument(
     total: num(row.total),
     stage: row.stage as GSTDocument["stage"],
     extraction_method: (row.extractionMethod ?? "manual") as GSTDocument["extraction_method"],
-    issues: issues.map((i) => ({
-      field: i.field ?? "",
-      severity: i.severity as "error" | "warning",
-      message: i.message,
-    })),
+    issues: [],
     financial_year: row.financialYear ?? undefined,
-    storage_path: row.storagePath,
     itc_eligible: row.itcEligible ?? true,
     b2b_category: (row.b2bCategory as GSTDocument["b2b_category"]) ?? "b2b",
-    original_document_id: row.originalDocumentId ?? undefined,
-    assigned_to_user_id: row.assignedToUserId ?? undefined,
-  };
-}
-
-export function lineToDb(l: LineItem, seq: number) {
-  return {
-    seq,
-    description: l.description,
-    hsnSac: l.hsn_sac,
-    unit: l.unit,
-    qty: String(l.qty),
-    rate: String(l.rate),
-    taxable: String(l.taxable),
-    igstRate: String(l.igst_rate),
-    igst: String(l.igst),
-    cgstRate: String(l.cgst_rate),
-    cgst: String(l.cgst),
-    sgstRate: String(l.sgst_rate),
-    sgst: String(l.sgst),
-    cess: String(l.cess),
-    total: String(l.total),
   };
 }

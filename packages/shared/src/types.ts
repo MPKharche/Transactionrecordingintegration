@@ -82,6 +82,11 @@ export interface GSTDocument {
   issues: FieldWarning[];
   financial_year?: string;
   storage_path?: string;
+  /** Purchase docs: claim input tax credit when true */
+  itc_eligible?: boolean;
+  b2b_category?: "b2b" | "b2c" | "sez" | "export";
+  original_document_id?: string;
+  assigned_to_user_id?: string;
 }
 
 export interface Client {
@@ -95,4 +100,35 @@ export interface Client {
   address: string;
   mobile: string;
   email: string;
+  assigned_user_ids?: string[];
+}
+
+export type UserRole = "admin" | "manager" | "operator";
+
+export interface AuditLogEntry {
+  id: string;
+  action: string;
+  entity_type: string | null;
+  entity_id: string | null;
+  user_id: string | null;
+  created_at: string;
+  ip_address?: string;
+}
+
+export interface GstRegisterRow {
+  document_id: string;
+  doc_number: string;
+  doc_date: string;
+  party_name: string;
+  party_gstin: string;
+  place_of_supply: string;
+  taxable_amount: number;
+  igst: number;
+  cgst: number;
+  sgst: number;
+  cess: number;
+  total: number;
+  itc_eligible?: boolean;
+  reverse_charge: boolean;
+  financial_year: string;
 }

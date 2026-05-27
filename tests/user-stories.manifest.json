@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "product": "CA Suite",
+  "objective": "GST document intake, review, lock, registers, and firm audit trail — API-backed, no silent demo data in production UI.",
+  "stories": [
+    {
+      "id": "US-AUTH-01",
+      "persona": "Any user",
+      "objective": "See trustworthy login entry point",
+      "acceptance": "Login shows CA Suite title and Google sign-in",
+      "layer": "e2e",
+      "test": "us-auth.spec.ts"
+    },
+    {
+      "id": "US-AUTH-02",
+      "persona": "CA staff (dev)",
+      "objective": "Reach dashboard without Google in dev",
+      "acceptance": "Dev login lands on Dashboard with session",
+      "layer": "e2e",
+      "test": "us-auth.spec.ts"
+    },
+    {
+      "id": "US-AUTH-03",
+      "persona": "CA staff",
+      "objective": "Stay signed in across navigation",
+      "acceptance": "Reload dashboard remains authenticated",
+      "layer": "e2e",
+      "test": "us-auth.spec.ts"
+    },
+    {
+      "id": "US-AUTH-04",
+      "persona": "CA staff",
+      "objective": "Sign out securely",
+      "acceptance": "Sign out shows login page",
+      "layer": "e2e",
+      "test": "us-auth.spec.ts"
+    },
+    {
+      "id": "US-DASH-01",
+      "persona": "Partner",
+      "objective": "Practice workload at a glance",
+      "acceptance": "Dashboard KPIs and FY subtitle visible",
+      "layer": "e2e",
+      "test": "us-dashboard.spec.ts"
+    },
+    {
+      "id": "US-CLIENT-01",
+      "persona": "Manager",
+      "objective": "See client portfolio",
+      "acceptance": "Clients screen lists seeded or created clients",
+      "layer": "e2e",
+      "test": "us-clients.spec.ts"
+    },
+    {
+      "id": "US-CLIENT-02",
+      "persona": "Manager",
+      "objective": "Onboard client with valid GSTIN",
+      "acceptance": "Create client form saves and appears in list",
+      "layer": "e2e",
+      "test": "us-clients.spec.ts"
+    },
+    {
+      "id": "US-UPLOAD-01",
+      "persona": "Article clerk",
+      "objective": "Prepare batch upload with FY and type",
+      "acceptance": "Upload screen shows FY selector and doc type",
+      "layer": "e2e",
+      "test": "us-upload.spec.ts"
+    },
+    {
+      "id": "US-UPLOAD-02",
+      "persona": "Article clerk",
+      "objective": "Ingest PDF into pipeline",
+      "acceptance": "Upload succeeds and document appears in list",
+      "layer": "e2e",
+      "test": "us-upload.spec.ts"
+    },
+    {
+      "id": "US-RECORDS-01",
+      "persona": "Article clerk",
+      "objective": "Find documents by client and type",
+      "acceptance": "Records tabs and client filter work",
+      "layer": "e2e",
+      "test": "us-records.spec.ts"
+    },
+    {
+      "id": "US-REVIEW-01",
+      "persona": "Article clerk",
+      "objective": "Review GST fields with validation feedback",
+      "acceptance": "Review screen shows document meta and validation",
+      "layer": "e2e",
+      "test": "us-review.spec.ts"
+    },
+    {
+      "id": "US-REVIEW-02",
+      "persona": "Article clerk",
+      "objective": "Correct tax split from place of supply",
+      "acceptance": "Supply type label reflects inter/intra state",
+      "layer": "e2e",
+      "test": "us-review.spec.ts"
+    },
+    {
+      "id": "US-GST-01",
+      "persona": "Partner",
+      "objective": "View purchase/sales register for filing",
+      "acceptance": "GST Registers screen loads with register table",
+      "layer": "e2e",
+      "test": "us-registers.spec.ts"
+    },
+    {
+      "id": "US-GST-02",
+      "persona": "Partner",
+      "objective": "Export locked data to Zoho CSV",
+      "acceptance": "Zoho export download triggered",
+      "layer": "e2e",
+      "test": "us-registers.spec.ts"
+    },
+    {
+      "id": "US-AUDIT-01",
+      "persona": "Partner",
+      "objective": "Trace who changed records",
+      "acceptance": "Audit log lists recent actions",
+      "layer": "e2e",
+      "test": "us-audit.spec.ts"
+    },
+    {
+      "id": "US-API-01",
+      "persona": "System",
+      "objective": "API health and auth",
+      "acceptance": "Health OK; dev-login returns tenant",
+      "layer": "api",
+      "test": "api.test.ts"
+    },
+    {
+      "id": "US-API-02",
+      "persona": "System",
+      "objective": "Client CRUD tenant-scoped",
+      "acceptance": "Create/list client under tenant",
+      "layer": "api",
+      "test": "api.test.ts"
+    },
+    {
+      "id": "US-API-03",
+      "persona": "System",
+      "objective": "Upload persists file metadata",
+      "acceptance": "Multipart upload returns document id",
+      "layer": "api",
+      "test": "api.test.ts"
+    },
+    {
+      "id": "US-API-04",
+      "persona": "System",
+      "objective": "Duplicate SHA rejected",
+      "acceptance": "Second identical upload returns 409",
+      "layer": "api",
+      "test": "api.test.ts"
+    },
+    {
+      "id": "US-WF-01",
+      "persona": "System",
+      "objective": "End-to-end lock workflow",
+      "acceptance": "Upload → patch → lock → party master",
+      "layer": "api",
+      "test": "workflows.test.ts"
+    },
+    {
+      "id": "US-GST-RULES-01",
+      "persona": "System",
+      "objective": "GST tax rules correctness",
+      "acceptance": "HSN, IGST/CGST split, lock validation",
+      "layer": "unit",
+      "test": "shared.test.ts"
+    },
+    {
+      "id": "US-UI-01",
+      "persona": "System",
+      "objective": "Screens render without runtime errors",
+      "acceptance": "Web smoke tests pass",
+      "layer": "unit",
+      "test": "web-smoke.test.tsx"
+    }
+  ]
+}

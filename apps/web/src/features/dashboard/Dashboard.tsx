@@ -9,6 +9,7 @@ import { DOC_TYPE_META, STAGE_META } from "../../lib/constants";
 import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
 import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
 import type { Screen } from "../../components/layout/Sidebar";
+import { currentFinancialYear } from "../../lib/api";
 
 import {
   ArrowRight, Building2, TrendingUp, AlertTriangle, Download, ChevronRight,
@@ -35,7 +36,10 @@ export function Dashboard({ docs, clients, isDark, onNav }: { docs: GSTDocument[
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Dashboard" subtitle="Practice overview · April 2024 · FY 2024-25" />
+      <PageHeader
+        title="Dashboard"
+        subtitle={`Practice overview · FY ${currentFinancialYear()}`}
+      />
 
       <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
         <KpiCard label="Needs Review" value={needs}  color={isDark ? "#fbbf24" : "#92400e"} sub="Awaiting your action" />

@@ -18,7 +18,9 @@ export type Screen =
   | "records"
   | "review"
   | "clients"
-  | "client_detail";
+  | "client_detail"
+  | "registers"
+  | "audit";
 
 export function Sidebar({
   screen,
@@ -44,7 +46,9 @@ export function Sidebar({
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "upload", label: "Upload", icon: Upload },
     { id: "records", label: "Records", icon: ReceiptText },
+    { id: "registers", label: "GST Registers", icon: FileText },
     { id: "clients", label: "Clients", icon: Users },
+    { id: "audit", label: "Audit log", icon: Shield },
   ];
 
   const displayName = userName ?? "Signed in";

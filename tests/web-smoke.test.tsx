@@ -29,6 +29,10 @@ vi.mock("../apps/web/src/lib/api", () => ({
     },
     parties: { list: () => Promise.resolve({}) },
     logout: vi.fn(),
+    registers: { list: vi.fn() },
+    export: { zoho: vi.fn() },
+    auditLog: { list: () => Promise.resolve([]) },
+    compliance: { calendar: () => Promise.resolve({ month: "", reminders: [] }) },
   },
   trySession: () => Promise.resolve(null),
   getAuth: () => null,
@@ -48,7 +52,7 @@ function wrap(ui: React.ReactElement) {
   );
 }
 
-describe("Web smoke — screens render without ReferenceError", () => {
+describe("US-UI-01: Web smoke — screens render without ReferenceError", () => {
   it("LoginPage shows CA Suite", () => {
     render(
       <MemoryRouter>

@@ -27,6 +27,19 @@ jobs:
         image: redis:7-alpine
         ports:
           - 6379:6379
+      minio:
+        image: minio/minio:latest
+        env:
+          MINIO_ROOT_USER: minioadmin
+          MINIO_ROOT_PASSWORD: minioadmin
+        ports:
+          - 9000:9000
+        options: >-
+          --health-cmd "curl -f http://localhost:9000/minio/health/live || exit 1"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+        command: server /data
     env:
       DATABASE_URL: postgresql://ca_user:ca_pass@localhost:5433/ca_saas
       REDIS_HOST: localhost
@@ -48,6 +61,9 @@ jobs:
           cache: pnpm
       - run: pnpm install
       - run: pnpm db:push
-      - run: pnpm test:audit
-      - run: pnpm test
-      - run: pnpm --filter @ca-suite/web build
+      - run: pnpm db:seed
+      - run: npx playwright install chromium --with-deps
+      - run: pnpm test:regression:ci
+        env:
+          CI: "true"
+          VITE_ALLOW_DEV_LOGIN: "true"
