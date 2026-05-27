@@ -1,0 +1,1375 @@
+import { useState, useEffect, useRef, useMemo } from "react";
+import {
+  LayoutDashboard, FileText, Users, Upload, Shield,
+  CheckCircle, XCircle, AlertTriangle, Search, Eye,
+  RefreshCw, Plus, Lock, Copy, Check, X, ChevronRight,
+  ChevronDown, ExternalLink, Sun, Moon, Monitor,
+  ArrowRight, Building2, ReceiptText, FileWarning, Info,
+  TrendingUp, Clock, Phone, Mail, ArrowLeft, Filter,
+} from "lucide-react";
+
+// ── Theme ─────────────────────────────────────────────────────────────────────
+type ThemeMode = "light" | "dark" | "system";
+function useTheme() {
+  const [mode, setMode] = useState<ThemeMode>(() => (localStorage.getItem("ca-theme") as ThemeMode) ?? "system");
+  const [sysDark, setSysDark] = useState(() => window.matchMedia("(prefers-color-scheme: dark)").matches);
+  useEffect(() => {
+    const mq = window.matchMedia("(prefers-color-scheme: dark)");
+    const h = (e: MediaQueryListEvent) => setSysDark(e.matches);
+    mq.addEventListener("change", h);
+    return () => mq.removeEventListener("change", h);
+  }, []);
+  useEffect(() => { localStorage.setItem("ca-theme", mode); }, [mode]);
+  const isDark = mode === "dark" || (mode === "system" && sysDark);
+  return { mode, setMode, isDark };
+}
+
+// ── Types ─────────────────────────────────────────────────────────────────────
+type Screen = "dashboard" | "upload" | "records" | "review" | "clients" | "client_detail";
+type DocStage = "stored" | "ocr" | "extracting" | "ready_for_review" | "locked" | "failed";
+type DocType = "sales_invoice" | "purchase_invoice" | "debit_note_issued" | "debit_note_received" | "credit_note_issued" | "credit_note_received" | "quotation" | "advance_receipt" | "delivery_challan";
+type ExtractionMethod = "template" | "ai" | "merged" | "manual";
+
+interface Party {
+  name: string;
+  gstin: string;
+  pan?: string;
+  address: string;
+  city: string;
+  state: string;
+  state_code: string;
+  mobile: string;
+  email: string;
+  is_registered: boolean;
+}
+
+interface LineItem {
+  id: string; description: string; hsn_sac: string; unit: string;
+  qty: number; rate: number; taxable: number;
+  igst_rate: number; igst: number; cgst_rate: number; cgst: number;
+  sgst_rate: number; sgst: number; cess: number; total: number;
+}
+
+interface FieldWarning { field: string; severity: "error" | "warning"; message: string; }
+
+interface GSTDocument {
+  id: string; filename: string; client_id: string; doc_type: DocType;
+  doc_number: string; doc_date: string; recorded_at: string;
+  supplier: Party;   // FROM — issues the document
+  recipient: Party;  // TO — receives the document
+  supply_type: "inter_state" | "intra_state" | "exempt" | "nil_rated";
+  reverse_charge: boolean; place_of_supply: string;
+  lines: LineItem[]; taxable_amount: number; igst: number; cgst: number;
+  sgst: number; cess: number; total: number;
+  stage: DocStage; extraction_method: ExtractionMethod; issues: FieldWarning[];
+}
+
+interface Client {
+  id: string; name: string; gstin: string; pan: string; active: boolean;
+  state: string; state_code: string; address: string; mobile: string; email: string;
+}
+
+// ── Master data ───────────────────────────────────────────────────────────────
+const CLIENTS: Client[] = [
+  { id: "c1", name: "Reliance Retail Ltd",  gstin: "27AAACR5055K1ZJ", pan: "AAACR5055K", active: true, state: "Maharashtra", state_code: "27", address: "3rd Floor, Court House, Lokmanya Tilak Marg, Mumbai", mobile: "+91 22 4477 0000", email: "gst@relianceretail.com" },
+  { id: "c2", name: "Tata Motors Pvt Ltd",  gstin: "27AAACD1990F1Z7", pan: "AAACD1990F", active: true, state: "Maharashtra", state_code: "27", address: "Bombay House, 24 Homi Mody Street, Mumbai", mobile: "+91 22 6665 8282", email: "finance@tatamotors.com" },
+  { id: "c3", name: "HDFC Securities Ltd",  gstin: "27AABCH8759A1ZR", pan: "AABCH8759A", active: true, state: "Maharashtra", state_code: "27", address: "I Think Techno Campus, Goregaon East, Mumbai", mobile: "+91 22 3901 9400", email: "accounts@hdfcsec.com" },
+  { id: "c4", name: "Infosys Limited",       gstin: "29AABCI1681G1ZK", pan: "AABCI1681G", active: true, state: "Karnataka",   state_code: "29", address: "Electronics City, Hosur Road, Bengaluru", mobile: "+91 80 2852 0261", email: "gst@infosys.com" },
+  { id: "c5", name: "ITC Limited",           gstin: "19AAACI1223B1ZH", pan: "AAACI1223B", active: true, state: "West Bengal", state_code: "19", address: "Virginia House, 37 Jawaharlal Nehru Road, Kolkata", mobile: "+91 33 2288 9371", email: "gst@itcportal.com" },
+];
+
+const DOC_TYPE_META: Record<DocType, { label: string; short: string; textColor: string; lightBg: string; darkBg: string; darkText: string }> = {
+  sales_invoice:        { label: "Sales Invoice",          short: "Sale",     textColor: "#057a55", lightBg: "#ecfdf5", darkBg: "rgba(5,122,85,0.18)",   darkText: "#34d399" },
+  purchase_invoice:     { label: "Purchase Invoice",       short: "Purchase", textColor: "#1d6af5", lightBg: "#eff6ff", darkBg: "rgba(29,106,245,0.18)", darkText: "#60a5fa" },
+  debit_note_issued:    { label: "Debit Note (Issued)",    short: "DN Out",   textColor: "#b45309", lightBg: "#fffbeb", darkBg: "rgba(180,83,9,0.18)",   darkText: "#fbbf24" },
+  debit_note_received:  { label: "Debit Note (Received)",  short: "DN In",    textColor: "#92400e", lightBg: "#fef3c7", darkBg: "rgba(146,64,14,0.18)",  darkText: "#f59e0b" },
+  credit_note_issued:   { label: "Credit Note (Issued)",   short: "CN Out",   textColor: "#5b21b6", lightBg: "#f5f3ff", darkBg: "rgba(91,33,182,0.18)",  darkText: "#a78bfa" },
+  credit_note_received: { label: "Credit Note (Received)", short: "CN In",    textColor: "#4c1d95", lightBg: "#ede9fe", darkBg: "rgba(76,29,149,0.18)",  darkText: "#c4b5fd" },
+  quotation:            { label: "Quotation",              short: "Quote",    textColor: "#374151", lightBg: "#f9fafb", darkBg: "rgba(55,65,81,0.18)",   darkText: "#9ca3af" },
+  advance_receipt:      { label: "Advance Receipt",        short: "Advance",  textColor: "#0e7490", lightBg: "#ecfeff", darkBg: "rgba(14,116,144,0.18)", darkText: "#67e8f9" },
+  delivery_challan:     { label: "Delivery Challan",       short: "Challan",  textColor: "#4b5563", lightBg: "#f3f4f6", darkBg: "rgba(75,85,99,0.18)",   darkText: "#d1d5db" },
+};
+
+const STAGE_META: Record<DocStage, { label: string; lightText: string; darkText: string; lightBg: string; darkBg: string }> = {
+  stored:           { label: "Stored",       lightText: "#4b5563", darkText: "#9ca3af", lightBg: "#f3f4f6", darkBg: "rgba(156,163,175,0.12)" },
+  ocr:              { label: "OCR",          lightText: "#1d6af5", darkText: "#60a5fa", lightBg: "#eff6ff", darkBg: "rgba(96,165,250,0.12)"  },
+  extracting:       { label: "Extracting",   lightText: "#5b21b6", darkText: "#a78bfa", lightBg: "#f5f3ff", darkBg: "rgba(167,139,250,0.12)" },
+  ready_for_review: { label: "Needs Review", lightText: "#92400e", darkText: "#fbbf24", lightBg: "#fffbeb", darkBg: "rgba(251,191,36,0.12)"  },
+  locked:           { label: "Locked",       lightText: "#065f46", darkText: "#34d399", lightBg: "#ecfdf5", darkBg: "rgba(52,211,153,0.12)"  },
+  failed:           { label: "Failed",       lightText: "#9b1c1c", darkText: "#f87171", lightBg: "#fef2f2", darkBg: "rgba(248,113,113,0.12)" },
+};
+
+// ── Mock data ─────────────────────────────────────────────────────────────────
+function mkLine(id: string, desc: string, hsn: string, qty: number, rate: number, gst: number, inter: boolean): LineItem {
+  const taxable = Math.round(qty * rate);
+  const igst = inter ? Math.round(taxable * gst / 100) : 0;
+  const half = inter ? 0 : Math.round(taxable * gst / 200);
+  return { id, description: desc, hsn_sac: hsn, unit: "NOS", qty, rate, taxable, igst_rate: inter ? gst : 0, igst, cgst_rate: inter ? 0 : gst / 2, cgst: half, sgst_rate: inter ? 0 : gst / 2, sgst: half, cess: 0, total: taxable + igst + half + half };
+}
+
+function mkParty(name: string, gstin: string, pan: string, address: string, city: string, state: string, state_code: string, mobile: string, email: string, is_registered: boolean): Party {
+  return { name, gstin, pan, address, city, state, state_code, mobile, email, is_registered };
+}
+
+// Client party objects
+const P_RELIANCE  = mkParty("Reliance Retail Ltd", "27AAACR5055K1ZJ", "AAACR5055K", "3rd Floor, Court House, Lokmanya Tilak Marg", "Mumbai", "Maharashtra", "27", "+91 22 4477 0000", "gst@relianceretail.com", true);
+const P_TATA      = mkParty("Tata Motors Pvt Ltd", "27AAACD1990F1Z7", "AAACD1990F", "Bombay House, 24 Homi Mody Street", "Mumbai", "Maharashtra", "27", "+91 22 6665 8282", "finance@tatamotors.com", true);
+const P_HDFC      = mkParty("HDFC Securities Ltd", "27AABCH8759A1ZR", "AABCH8759A", "I Think Techno Campus, Goregaon East", "Mumbai", "Maharashtra", "27", "+91 22 3901 9400", "accounts@hdfcsec.com", true);
+const P_INFOSYS   = mkParty("Infosys Limited", "29AABCI1681G1ZK", "AABCI1681G", "Electronics City, Hosur Road", "Bengaluru", "Karnataka", "29", "+91 80 2852 0261", "gst@infosys.com", true);
+const P_ITC       = mkParty("ITC Limited", "19AAACI1223B1ZH", "AAACI1223B", "Virginia House, 37 JNR Road", "Kolkata", "West Bengal", "19", "+91 33 2288 9371", "gst@itcportal.com", true);
+
+// Counter-party objects
+const P_FUTURE    = mkParty("Future Retail Ltd", "27AABCF5474H1ZI", "AABCF5474H", "LBS Marg, Kurla West", "Mumbai", "Maharashtra", "27", "+91 22 4045 8400", "vendor@futureretail.in", true);
+const P_SIEMENS   = mkParty("Siemens Ltd", "27AAICS2127K1ZI", "AAICS2127K", "Worli Naka, Dr Annie Besant Road", "Mumbai", "Maharashtra", "27", "+91 22 3967 7000", "gst@siemens.com", true);
+const P_FORD      = mkParty("Ford India Pvt Ltd", "33AABCF8999H1ZM", "AABCF8999H", "SPL Building, Maraimalai Nagar", "Chennai", "Tamil Nadu", "33", "+91 44 4747 5000", "accounts@fordindia.com", true);
+const P_BLOOMBERG = mkParty("Bloomberg Data Services", "", "AABCB2122F", "DLF Cyber City, Phase II", "Gurugram", "Haryana", "06", "+91 124 469 2000", "invoices@bloomberg.com", false);
+const P_BAJAJ     = mkParty("Bajaj Finance Ltd", "27AAACB2918C1ZK", "AAACB2918C", "Viman Nagar, Pune-Nagar Road", "Pune", "Maharashtra", "27", "+91 20 3957 5152", "gst@bajajfinance.in", true);
+const P_ACCENTURE = mkParty("Accenture Solutions Pvt Ltd", "29AABCA4370J1Z0", "AABCA4370J", "Prestige Shantiniketan, ITPL Main Road", "Bengaluru", "Karnataka", "29", "+91 80 4193 6000", "ap@accenture.com", true);
+const P_MSFT      = mkParty("Microsoft Corporation India", "27AABCM3025E1ZD", "AABCM3025E", "Embassy GolfLinks Business Park", "Bengaluru", "Karnataka", "29", "+91 80 4046 0000", "gst@microsoft.com", true);
+const P_SPENCERS  = mkParty("Spencer's Retail Ltd", "19AABCS5809K1ZE", "AABCS5809K", "Duncan House, 31 Netaji Subhash Road", "Kolkata", "West Bengal", "19", "+91 33 4011 0100", "gst@spencersretail.com", true);
+const P_EMPTY     = mkParty("", "", "", "", "", "", "", "", "", false);
+
+const DOCS: GSTDocument[] = [
+  { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", filename: "Reliance_INV_Apr24_001.pdf", client_id: "c1", doc_type: "sales_invoice", doc_number: "RRL/24-25/0412", doc_date: "2024-04-03", recorded_at: "2024-04-08 11:22", supplier: P_RELIANCE, recipient: P_FUTURE, supply_type: "intra_state", reverse_charge: false, place_of_supply: "Maharashtra (27)", lines: [mkLine("l1","Store Fit-out Services","996512",1,250000,18,false), mkLine("l2","Signage & Branding","998313",1,75000,18,false)], taxable_amount: 325000, igst: 0, cgst: 29250, sgst: 29250, cess: 0, total: 383500, stage: "locked", extraction_method: "template", issues: [] },
+  { id: "b2c3d4e5-f6a7-8901-bcde-f12345678901", filename: "Reliance_PURCH_Siemens.pdf", client_id: "c1", doc_type: "purchase_invoice", doc_number: "SIE/2024/B/00981", doc_date: "2024-04-07", recorded_at: "", supplier: P_SIEMENS, recipient: P_RELIANCE, supply_type: "intra_state", reverse_charge: false, place_of_supply: "Maharashtra (27)", lines: [mkLine("l1","Industrial Compressor Unit","84143090",2,180000,18,false)], taxable_amount: 360000, igst: 0, cgst: 32400, sgst: 32400, cess: 0, total: 424800, stage: "ready_for_review", extraction_method: "ai", issues: [{ field: "GSTIN", severity: "warning", message: "Could not verify against GSTIN registry" }] },
+  { id: "c3d4e5f6-a7b8-9012-cdef-123456789012", filename: "Reliance_CN_Apr24.pdf", client_id: "c1", doc_type: "credit_note_issued", doc_number: "RRL/CN/24-25/0023", doc_date: "2024-04-10", recorded_at: "2024-04-11 09:14", supplier: P_RELIANCE, recipient: P_FUTURE, supply_type: "intra_state", reverse_charge: false, place_of_supply: "Maharashtra (27)", lines: [mkLine("l1","Return: Excess Billing Apr","996512",1,-25000,18,false)], taxable_amount: -25000, igst: 0, cgst: -2250, sgst: -2250, cess: 0, total: -29500, stage: "locked", extraction_method: "merged", issues: [] },
+  { id: "d4e5f6a7-b8c9-0123-defa-234567890123", filename: "TataMotors_INV_export.pdf", client_id: "c2", doc_type: "sales_invoice", doc_number: "TML/EXP/24-25/0091", doc_date: "2024-04-05", recorded_at: "2024-04-09 15:30", supplier: P_TATA, recipient: P_FORD, supply_type: "inter_state", reverse_charge: false, place_of_supply: "Tamil Nadu (33)", lines: [mkLine("l1","Transmission Assembly","87089900",50,12500,18,true), mkLine("l2","Brake Pads Set","87083000",200,850,18,true)], taxable_amount: 795000, igst: 143100, cgst: 0, sgst: 0, cess: 0, total: 938100, stage: "locked", extraction_method: "template", issues: [] },
+  { id: "e5f6a7b8-c9d0-1234-efab-345678901234", filename: "TataMotors_DN_Ford.pdf", client_id: "c2", doc_type: "debit_note_issued", doc_number: "TML/DN/24-25/0011", doc_date: "2024-04-12", recorded_at: "", supplier: P_TATA, recipient: P_FORD, supply_type: "inter_state", reverse_charge: false, place_of_supply: "Tamil Nadu (33)", lines: [mkLine("l1","Price revision — Mar batch","87089900",1,15000,18,true)], taxable_amount: 15000, igst: 2700, cgst: 0, sgst: 0, cess: 0, total: 17700, stage: "ready_for_review", extraction_method: "ai", issues: [{ field: "Place of Supply", severity: "error", message: "Required field — please select the state" }] },
+  { id: "f6a7b8c9-d0e1-2345-fabc-456789012345", filename: "HDFC_purch_Bloomberg.pdf", client_id: "c3", doc_type: "purchase_invoice", doc_number: "BBG/IN/2024/04/41822", doc_date: "2024-04-01", recorded_at: "2024-04-03 10:05", supplier: P_BLOOMBERG, recipient: P_HDFC, supply_type: "inter_state", reverse_charge: true, place_of_supply: "Maharashtra (27)", lines: [mkLine("l1","Data Terminal Subscription","998431",1,62300,18,true)], taxable_amount: 62300, igst: 11214, cgst: 0, sgst: 0, cess: 0, total: 73514, stage: "locked", extraction_method: "merged", issues: [] },
+  { id: "a7b8c9d0-e1f2-3456-abcd-567890123456", filename: "HDFC_INV_services_q1.pdf", client_id: "c3", doc_type: "sales_invoice", doc_number: "HSL/24-25/INV/1102", doc_date: "2024-04-08", recorded_at: "", supplier: P_HDFC, recipient: P_BAJAJ, supply_type: "intra_state", reverse_charge: false, place_of_supply: "Maharashtra (27)", lines: [mkLine("l1","Equity Research Services","997159",1,180000,18,false), mkLine("l2","Portfolio Advisory","997159",1,45000,18,false)], taxable_amount: 225000, igst: 0, cgst: 20250, sgst: 20250, cess: 0, total: 265500, stage: "ready_for_review", extraction_method: "ai", issues: [{ field: "Client", severity: "error", message: "Client not assigned — please select before locking" }, { field: "Counter-party GSTIN", severity: "warning", message: "GSTIN check digits mismatch" }] },
+  { id: "b8c9d0e1-f2a3-4567-bcde-678901234567", filename: "Infosys_INV_Accenture.pdf", client_id: "c4", doc_type: "sales_invoice", doc_number: "INF/24-25/0892", doc_date: "2024-04-06", recorded_at: "2024-04-07 16:45", supplier: P_INFOSYS, recipient: P_ACCENTURE, supply_type: "intra_state", reverse_charge: false, place_of_supply: "Karnataka (29)", lines: [mkLine("l1","IT Staffing Services","998313",3,250000,18,false), mkLine("l2","Cloud Infrastructure Mgmt","998314",1,150000,18,false)], taxable_amount: 900000, igst: 0, cgst: 81000, sgst: 81000, cess: 0, total: 1062000, stage: "locked", extraction_method: "template", issues: [] },
+  { id: "c9d0e1f2-a3b4-5678-cdef-789012345678", filename: "Infosys_PURCH_Microsoft.pdf", client_id: "c4", doc_type: "purchase_invoice", doc_number: "MSFT/INDIA/2024/B09182", doc_date: "2024-04-02", recorded_at: "", supplier: P_MSFT, recipient: P_INFOSYS, supply_type: "inter_state", reverse_charge: false, place_of_supply: "Karnataka (29)", lines: [mkLine("l1","Azure Enterprise License","997331",1,450000,18,true)], taxable_amount: 450000, igst: 81000, cgst: 0, sgst: 0, cess: 0, total: 531000, stage: "extracting", extraction_method: "ai", issues: [] },
+  { id: "d0e1f2a3-b4c5-6789-defa-890123456789", filename: "ITC_FMCG_batch_sale.pdf", client_id: "c5", doc_type: "sales_invoice", doc_number: "ITC/KOL/24-25/3341", doc_date: "2024-04-04", recorded_at: "2024-04-05 09:22", supplier: P_ITC, recipient: P_SPENCERS, supply_type: "intra_state", reverse_charge: false, place_of_supply: "West Bengal (19)", lines: [mkLine("l1","Aashirvaad Atta 5kg","19059090",100,150,5,false), mkLine("l2","Sunfeast Biscuits Assorted","19053100",200,60,5,false)], taxable_amount: 27000, igst: 0, cgst: 675, sgst: 675, cess: 0, total: 28350, stage: "locked", extraction_method: "template", issues: [] },
+  { id: "e1f2a3b4-c5d6-7890-efab-901234567890", filename: "Wipro_corrupt_scan.jpg", client_id: "c4", doc_type: "purchase_invoice", doc_number: "—", doc_date: "", recorded_at: "", supplier: P_EMPTY, recipient: P_INFOSYS, supply_type: "inter_state", reverse_charge: false, place_of_supply: "", lines: [], taxable_amount: 0, igst: 0, cgst: 0, sgst: 0, cess: 0, total: 0, stage: "failed", extraction_method: "ai", issues: [{ field: "Pipeline", severity: "error", message: "OCR failed — image quality too low to process" }] },
+];
+
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const INR = (n: number) => n === 0 ? "—" : "₹" + Math.abs(n).toLocaleString("en-IN");
+const INR_SIGNED = (n: number) => { if (n === 0) return "—"; return (n < 0 ? "−₹" : "₹") + Math.abs(n).toLocaleString("en-IN"); };
+const clientById = (id: string) => CLIENTS.find(c => c.id === id);
+
+// Returns the counter-party from the perspective of the client
+function getCounterParty(doc: GSTDocument): Party {
+  const isSalesType = ["sales_invoice","debit_note_issued","credit_note_issued","delivery_challan","quotation","advance_receipt"].includes(doc.doc_type);
+  return isSalesType ? doc.recipient : doc.supplier;
+}
+
+function DocTypeBadge({ type, isDark }: { type: DocType; isDark: boolean }) {
+  const m = DOC_TYPE_META[type];
+  return (
+    <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium"
+      style={{ color: isDark ? m.darkText : m.textColor, background: isDark ? m.darkBg : m.lightBg }}>
+      {m.short}
+    </span>
+  );
+}
+
+function StageBadge({ stage, isDark }: { stage: DocStage; isDark: boolean }) {
+  const m = STAGE_META[stage];
+  return (
+    <span className="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full text-xs font-medium"
+      style={{ color: isDark ? m.darkText : m.lightText, background: isDark ? m.darkBg : m.lightBg }}>
+      {stage === "locked" && <Lock size={10} />}
+      {stage === "ready_for_review" && <Clock size={10} />}
+      {stage === "failed" && <XCircle size={10} />}
+      {m.label}
+    </span>
+  );
+}
+
+function CopyBtn({ text }: { text: string }) {
+  const [ok, setOk] = useState(false);
+  return (
+    <button onClick={() => { navigator.clipboard.writeText(text).catch(() => {}); setOk(true); setTimeout(() => setOk(false), 1500); }}
+      className="p-1 rounded hover:bg-muted transition-colors" title="Copy">
+      {ok ? <Check size={12} className="text-green-500" /> : <Copy size={12} className="text-muted-foreground" />}
+    </button>
+  );
+}
+
+function ThemeToggle({ mode, setMode }: { mode: ThemeMode; setMode: (m: ThemeMode) => void }) {
+  return (
+    <div className="flex items-center gap-0.5 bg-muted rounded-lg p-1">
+      {([["light", Sun], ["system", Monitor], ["dark", Moon]] as [ThemeMode, React.ElementType][]).map(([id, Icon]) => (
+        <button key={id} onClick={() => setMode(id)} title={id.charAt(0).toUpperCase() + id.slice(1)}
+          className={`p-1.5 rounded-md transition-colors ${mode === id ? "bg-card text-foreground shadow-sm" : "text-muted-foreground hover:text-foreground"}`}>
+          <Icon size={13} />
+        </button>
+      ))}
+    </div>
+  );
+}
+
+// ── Sidebar ───────────────────────────────────────────────────────────────────
+function Sidebar({ screen, onNav, pendingCount, mode, setMode, isDark }:
+  { screen: Screen; onNav: (s: Screen) => void; pendingCount: number; mode: ThemeMode; setMode: (m: ThemeMode) => void; isDark: boolean }) {
+  const NAV = [
+    { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
+    { id: "upload",    label: "Upload",    icon: Upload },
+    { id: "records",   label: "Records",   icon: ReceiptText },
+    { id: "clients",   label: "Clients",   icon: Users },
+  ];
+
+  return (
+    <aside className="w-56 shrink-0 flex flex-col border-r border-border bg-sidebar h-screen sticky top-0">
+      <div className="px-5 py-5 border-b border-sidebar-border">
+        <div className="flex items-center gap-3">
+          <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
+            <Shield size={15} className="text-white" />
+          </div>
+          <div>
+            <p className="text-sm font-bold text-sidebar-foreground leading-tight">CA Suite</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Practice Office</p>
+          </div>
+        </div>
+      </div>
+
+      <nav className="flex-1 px-3 py-4 space-y-1">
+        {NAV.map(({ id, label, icon: Icon }) => {
+          const active = screen === id || (screen === "review" && id === "records") || (screen === "client_detail" && id === "clients");
+          return (
+            <button key={id} onClick={() => onNav(id as Screen)}
+              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+                active ? "bg-primary text-white shadow-sm" : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent"
+              }`}>
+              <Icon size={16} className={active ? "opacity-90" : "opacity-70"} />
+              <span className="flex-1 text-left">{label}</span>
+              {id === "records" && pendingCount > 0 && (
+                <span className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}>
+                  {pendingCount}
+                </span>
+              )}
+            </button>
+          );
+        })}
+
+        <div className="pt-5 pb-2 px-3">
+          <p className="text-xs font-medium text-muted-foreground">Phase 2</p>
+        </div>
+        {["Zoho / Tally Export", "Telegram Intake", "Email Intake"].map(l => (
+          <div key={l} className="flex items-center gap-3 px-3 py-2 opacity-40 cursor-not-allowed">
+            <div className="w-4 h-4 rounded border border-muted-foreground/40 shrink-0" />
+            <span className="text-sm text-muted-foreground line-through">{l}</span>
+          </div>
+        ))}
+      </nav>
+
+      <div className="px-4 py-4 border-t border-sidebar-border space-y-3">
+        <ThemeToggle mode={mode} setMode={setMode} />
+        <div className="flex items-center gap-2.5">
+          <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0 text-xs font-bold text-primary">RS</div>
+          <div className="min-w-0">
+            <p className="text-sm font-semibold text-sidebar-foreground truncate">Rahul Sharma</p>
+            <p className="text-xs text-muted-foreground">Admin · CA</p>
+          </div>
+        </div>
+      </div>
+    </aside>
+  );
+}
+
+function PageHeader({ title, subtitle, action }: { title: string; subtitle?: string; action?: React.ReactNode }) {
+  return (
+    <div className="flex items-start justify-between mb-6">
+      <div>
+        <h1 className="text-xl font-bold text-foreground">{title}</h1>
+        {subtitle && <p className="text-sm text-muted-foreground mt-0.5">{subtitle}</p>}
+      </div>
+      {action && <div className="shrink-0">{action}</div>}
+    </div>
+  );
+}
+
+function KpiCard({ label, value, sub, color }: { label: string; value: string | number; sub?: string; color: string }) {
+  return (
+    <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+      <p className="text-sm text-muted-foreground">{label}</p>
+      <p className="text-3xl font-bold mt-2 font-mono" style={{ color }}>{value}</p>
+      {sub && <p className="text-xs text-muted-foreground mt-1.5">{sub}</p>}
+    </div>
+  );
+}
+
+// ── Dashboard ─────────────────────────────────────────────────────────────────
+function Dashboard({ docs, isDark, onNav }: { docs: GSTDocument[]; isDark: boolean; onNav: (s: Screen) => void }) {
+  const needs  = docs.filter(d => d.stage === "ready_for_review").length;
+  const inpipe = docs.filter(d => ["stored","ocr","extracting"].includes(d.stage)).length;
+  const locked = docs.filter(d => d.stage === "locked").length;
+  const failed = docs.filter(d => d.stage === "failed").length;
+
+  const clientSummary = CLIENTS.filter(c => c.active).map(c => {
+    const cd = docs.filter(d => d.client_id === c.id && d.stage === "locked");
+    return { ...c, count: cd.length, total: cd.reduce((s, d) => s + d.total, 0) };
+  }).filter(c => c.count > 0).sort((a, b) => b.total - a.total);
+
+  const flowSteps = [
+    { label: "Upload",     detail: "PDF / JPG / PNG",        badge: null },
+    { label: "OCR",        detail: "Text extraction",        badge: "AI" },
+    { label: "AI Extract", detail: "Map to schema fields",   badge: "AI" },
+    { label: "Review",     detail: "Practitioner validates", badge: null },
+    { label: "Locked",     detail: "Record confirmed",       badge: null },
+  ];
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Dashboard" subtitle="Practice overview · April 2024 · FY 2024-25" />
+
+      <div className="grid grid-cols-2 lg:grid-cols-4 gap-4">
+        <KpiCard label="Needs Review" value={needs}  color={isDark ? "#fbbf24" : "#92400e"} sub="Awaiting your action" />
+        <KpiCard label="In Pipeline"  value={inpipe} color={isDark ? "#60a5fa" : "#1d6af5"} sub="OCR or extracting" />
+        <KpiCard label="Locked"       value={locked} color={isDark ? "#34d399" : "#065f46"} sub="Confirmed records" />
+        <KpiCard label="Failed"       value={failed} color={isDark ? "#f87171" : "#9b1c1c"} sub="Require attention" />
+      </div>
+
+      <div className="bg-card border border-border rounded-xl p-6 shadow-sm">
+        <p className="text-sm font-semibold text-foreground mb-4">How documents are processed</p>
+        <div className="flex flex-wrap items-center gap-3">
+          {flowSteps.map((s, i) => (
+            <div key={s.label} className="flex items-center gap-3">
+              <div className={`px-4 py-3 rounded-lg border ${
+                isDark
+                  ? i < 3 ? "bg-[#1e1a36] border-[#3b2f7a]" : i === 3 ? "bg-[#281e0a] border-[#7c4b0a]" : "bg-[#0a2218] border-[#0a5c34]"
+                  : i < 3 ? "bg-[#f5f3ff] border-[#ddd6fe]" : i === 3 ? "bg-[#fffbeb] border-[#fde68a]" : "bg-[#ecfdf5] border-[#a7f3d0]"
+              }`}>
+                <div className="flex items-center gap-2">
+                  <span className={`w-5 h-5 rounded-full text-xs font-bold text-white flex items-center justify-center ${i < 3 ? "bg-violet-600" : i === 3 ? "bg-amber-500" : "bg-emerald-600"}`}>{i + 1}</span>
+                  <span className="text-sm font-semibold text-foreground">{s.label}</span>
+                  {s.badge && <span className="text-xs font-semibold px-1.5 py-0.5 rounded bg-violet-600 text-white">{s.badge}</span>}
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 ml-7">{s.detail}</p>
+              </div>
+              {i < flowSteps.length - 1 && <ArrowRight size={16} className="text-muted-foreground shrink-0" />}
+            </div>
+          ))}
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-border">
+          <p className="text-sm font-semibold text-foreground">Locked records by client</p>
+          <button onClick={() => onNav("records")} className="text-sm text-primary font-medium hover:underline flex items-center gap-1">
+            View all <ChevronRight size={14} />
+          </button>
+        </div>
+        {clientSummary.length === 0
+          ? <p className="px-6 py-8 text-center text-sm text-muted-foreground">No locked records yet</p>
+          : clientSummary.map((c, i) => (
+            <div key={c.id} className={`flex items-center gap-4 px-6 py-4 hover:bg-muted/40 cursor-pointer transition-colors ${i < clientSummary.length - 1 ? "border-b border-border" : ""}`}
+              onClick={() => onNav("records")}>
+              <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
+                <Building2 size={16} className="text-primary" />
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-medium text-foreground">{c.name}</p>
+                <p className="text-xs text-muted-foreground font-mono mt-0.5">{c.gstin}</p>
+              </div>
+              <div className="text-right">
+                <p className="text-sm font-bold font-mono text-foreground">{INR(c.total)}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{c.count} document{c.count > 1 ? "s" : ""}</p>
+              </div>
+              <TrendingUp size={16} className="text-emerald-500 shrink-0" />
+            </div>
+          ))
+        }
+      </div>
+
+      {needs > 0 && (
+        <div className={`rounded-xl border px-5 py-4 flex items-start gap-3 ${isDark ? "bg-amber-950/20 border-amber-800/40" : "bg-amber-50 border-amber-200"}`}>
+          <AlertTriangle size={18} className="text-amber-500 shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-semibold" style={{ color: isDark ? "#fbbf24" : "#92400e" }}>
+              {needs} document{needs > 1 ? "s" : ""} waiting for your review
+            </p>
+            <p className="text-sm text-muted-foreground mt-0.5">Review and lock these records to complete processing.</p>
+          </div>
+          <button onClick={() => onNav("records")} className="text-sm font-medium text-amber-600 hover:text-amber-700 whitespace-nowrap">Review now →</button>
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Upload ────────────────────────────────────────────────────────────────────
+function UploadScreen({ docs, isDark, onReview }: { docs: GSTDocument[]; isDark: boolean; onReview: (id: string) => void }) {
+  const [dragging, setDragging] = useState(false);
+  const [selClient, setSelClient] = useState("");
+  const [selType, setSelType] = useState<DocType | "">("");
+  const [queued, setQueued] = useState<{ name: string; size: string }[]>([]);
+  const [stageF, setStageF] = useState<DocStage | "all">("all");
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+
+  function addFiles(files: FileList | null) {
+    if (!files) return;
+    setQueued(p => [...p, ...Array.from(files).map(f => ({ name: f.name, size: (f.size / 1024).toFixed(0) + " KB" }))]);
+  }
+
+  const filtered = docs.filter(d => {
+    if (stageF !== "all" && d.stage !== stageF) return false;
+    const q = search.toLowerCase();
+    if (q && !d.filename.toLowerCase().includes(q) && !(clientById(d.client_id)?.name ?? "").toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Upload Documents" subtitle="Drag and drop PDF, JPG, or PNG files to begin processing"
+        action={
+          <button onClick={() => ref.current?.click()}
+            className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+            <Plus size={16} /> Upload files
+          </button>
+        } />
+
+      <div onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+        onClick={() => ref.current?.click()}
+        className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-4 cursor-pointer transition-all ${
+          dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
+        }`}>
+        <input ref={ref} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => addFiles(e.target.files)} />
+        <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+          <Upload size={26} className="text-primary" />
+        </div>
+        <div className="text-center">
+          <p className="text-base font-semibold text-foreground">Drop files here, or click to browse</p>
+          <p className="text-sm text-muted-foreground mt-1">Supported: PDF, JPG, PNG · Maximum 20 MB per file</p>
+        </div>
+        <div className="flex items-center gap-3 mt-1" onClick={e => e.stopPropagation()}>
+          <div className="relative">
+            <select value={selClient} onChange={e => setSelClient(e.target.value)}
+              className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
+              <option value="">Select client (optional)</option>
+              {CLIENTS.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
+          <div className="relative">
+            <select value={selType} onChange={e => setSelType(e.target.value as DocType | "")}
+              className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
+              <option value="">Document type (optional)</option>
+              {(Object.entries(DOC_TYPE_META) as [DocType, typeof DOC_TYPE_META[DocType]][]).map(([k, v]) =>
+                <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
+        </div>
+      </div>
+
+      {queued.length > 0 && (
+        <div className="bg-card border border-primary/30 rounded-xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-foreground">{queued.length} file{queued.length > 1 ? "s" : ""} ready to upload</p>
+            <button onClick={() => setQueued([])} className="text-sm text-muted-foreground hover:text-foreground">Clear all</button>
+          </div>
+          <div className="space-y-2 max-h-36 overflow-y-auto">
+            {queued.map((f, i) => (
+              <div key={i} className="flex items-center gap-3 py-1">
+                <FileText size={15} className="text-primary shrink-0" />
+                <span className="text-sm text-foreground flex-1 truncate">{f.name}</span>
+                <span className="text-xs text-muted-foreground">{f.size}</span>
+                <button onClick={() => setQueued(p => p.filter((_, j) => j !== i))}><X size={14} className="text-muted-foreground hover:text-foreground" /></button>
+              </div>
+            ))}
+          </div>
+          <button onClick={() => setQueued([])} className="w-full py-2.5 bg-primary rounded-lg text-sm font-semibold text-white hover:bg-primary/90 transition-colors">
+            Start upload
+          </button>
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <div className="relative flex-1 max-w-sm">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by filename or client…"
+              className="w-full bg-card border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary" />
+          </div>
+          <div className="flex gap-1.5">
+            {([["all","All"],["ready_for_review","Needs Review"],["extracting","Processing"],["locked","Locked"],["failed","Failed"]] as [DocStage|"all",string][]).map(([id, label]) => (
+              <button key={id} onClick={() => setStageF(id)}
+                className={`px-3 py-2 text-sm rounded-lg transition-colors ${stageF === id ? "bg-primary text-white font-medium" : "bg-card border border-border text-muted-foreground hover:text-foreground"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                {["Filename", "Client", "Type", "Status", "Issues", ""].map((h, i) => (
+                  <th key={i} className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {filtered.map(d => (
+                <tr key={d.id} className="hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => onReview(d.id)}>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <FileText size={15} className="text-muted-foreground shrink-0" />
+                      <span className="text-sm text-foreground truncate max-w-[200px]">{d.filename}</span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5 text-sm text-muted-foreground">{clientById(d.client_id)?.name ?? <span className="text-red-500 italic">Not assigned</span>}</td>
+                  <td className="px-5 py-3.5"><DocTypeBadge type={d.doc_type} isDark={isDark} /></td>
+                  <td className="px-5 py-3.5"><StageBadge stage={d.stage} isDark={isDark} /></td>
+                  <td className="px-5 py-3.5">
+                    {d.issues.length > 0
+                      ? <span className={`flex items-center gap-1.5 text-sm ${d.issues.some(i => i.severity === "error") ? "text-red-500" : "text-amber-500"}`}>
+                          <FileWarning size={14} />{d.issues.length} issue{d.issues.length > 1 ? "s" : ""}
+                        </span>
+                      : d.stage === "locked" ? <CheckCircle size={16} className="text-emerald-500" /> : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {d.stage === "ready_for_review" && (
+                      <button className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+                        <Eye size={14} /> Review
+                      </button>
+                    )}
+                    {d.stage === "failed" && (
+                      <button className="flex items-center gap-1.5 text-sm text-red-500 hover:underline">
+                        <RefreshCw size={14} /> Retry
+                      </button>
+                    )}
+                    {d.stage === "locked" && (
+                      <button className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+                        <Eye size={14} /> View
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">No documents match your filter</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Records ───────────────────────────────────────────────────────────────────
+const RECORD_TABS: { id: DocType | "all"; label: string }[] = [
+  { id: "all",              label: "All" },
+  { id: "sales_invoice",    label: "Sales Invoices" },
+  { id: "purchase_invoice", label: "Purchase Invoices" },
+  { id: "debit_note_issued",   label: "Debit Notes" },
+  { id: "credit_note_issued",  label: "Credit Notes" },
+];
+
+function RecordsScreen({ docs, isDark, onReview }: { docs: GSTDocument[]; isDark: boolean; onReview: (id: string) => void }) {
+  const [clientId, setClientId] = useState(CLIENTS[0].id);
+  const [docTab, setDocTab] = useState<DocType | "all">("all");
+  const [stageF, setStageF] = useState<"all" | "locked" | "pending">("all");
+  const [search, setSearch] = useState("");
+
+  const client = CLIENTS.find(c => c.id === clientId)!;
+
+  const filtered = useMemo(() => docs.filter(d => {
+    if (d.client_id !== clientId) return false;
+    if (docTab !== "all") {
+      const isDebit  = docTab === "debit_note_issued"  && ["debit_note_issued","debit_note_received"].includes(d.doc_type);
+      const isCredit = docTab === "credit_note_issued" && ["credit_note_issued","credit_note_received"].includes(d.doc_type);
+      if (!isDebit && !isCredit && d.doc_type !== docTab) return false;
+    }
+    if (stageF === "locked" && d.stage !== "locked") return false;
+    if (stageF === "pending" && d.stage !== "ready_for_review") return false;
+    const q = search.toLowerCase();
+    const cp = getCounterParty(d);
+    if (q && !d.doc_number.toLowerCase().includes(q) && !cp.name.toLowerCase().includes(q)) return false;
+    return true;
+  }), [docs, clientId, docTab, stageF, search]);
+
+  const totals = useMemo(() => ({
+    taxable: filtered.reduce((s, d) => s + d.taxable_amount, 0),
+    igst:    filtered.reduce((s, d) => s + d.igst, 0),
+    cgst:    filtered.reduce((s, d) => s + d.cgst, 0),
+    sgst:    filtered.reduce((s, d) => s + d.sgst, 0),
+    total:   filtered.reduce((s, d) => s + d.total, 0),
+  }), [filtered]);
+
+  const tabCount = (id: DocType | "all") => {
+    if (id === "all") return docs.filter(d => d.client_id === clientId).length;
+    const isDN = id === "debit_note_issued";
+    const isCN = id === "credit_note_issued";
+    return docs.filter(d => d.client_id === clientId && (d.doc_type === id || (isDN && d.doc_type === "debit_note_received") || (isCN && d.doc_type === "credit_note_received"))).length;
+  };
+
+  return (
+    <div className="space-y-5">
+      <div className="flex items-start justify-between">
+        <div>
+          <h1 className="text-xl font-bold text-foreground">Records</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Document register by client</p>
+        </div>
+        <div className="relative">
+          <select value={clientId} onChange={e => setClientId(e.target.value)}
+            className="bg-card border border-border rounded-lg pl-10 pr-8 py-2.5 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer shadow-sm min-w-[220px]">
+            {CLIENTS.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+          </select>
+          <Building2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl px-5 py-3.5 flex items-center gap-8 shadow-sm flex-wrap">
+        <div><p className="text-xs text-muted-foreground">GSTIN</p><p className="text-sm font-mono font-semibold text-foreground mt-0.5">{client.gstin}</p></div>
+        <div><p className="text-xs text-muted-foreground">PAN</p><p className="text-sm font-mono font-semibold text-foreground mt-0.5">{client.pan}</p></div>
+        <div><p className="text-xs text-muted-foreground">State</p><p className="text-sm font-semibold text-foreground mt-0.5">{client.state}</p></div>
+        <div className="ml-auto text-xs text-muted-foreground">FY 2024-25</div>
+      </div>
+
+      <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">
+        {[
+          { label: "Documents",   value: String(filtered.length) },
+          { label: "Taxable",     value: INR_SIGNED(totals.taxable) },
+          { label: "Total Tax",   value: INR_SIGNED(totals.igst + totals.cgst + totals.sgst) },
+          { label: "Grand Total", value: INR_SIGNED(totals.total) },
+        ].map(k => (
+          <div key={k.label} className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
+            <p className="text-sm text-muted-foreground">{k.label}</p>
+            <p className="text-xl font-bold font-mono text-foreground mt-1.5">{k.value}</p>
+          </div>
+        ))}
+      </div>
+
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex gap-1 flex-wrap border-b border-border pb-0">
+          {RECORD_TABS.map(t => (
+            <button key={t.id} onClick={() => setDocTab(t.id)}
+              className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors whitespace-nowrap ${
+                docTab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}>
+              {t.label}
+              <span className={`ml-1.5 text-xs ${docTab === t.id ? "text-primary" : "text-muted-foreground"}`}>({tabCount(t.id)})</span>
+            </button>
+          ))}
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <select value={stageF} onChange={e => setStageF(e.target.value as typeof stageF)}
+            className="bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
+            <option value="all">All stages</option>
+            <option value="locked">Locked only</option>
+            <option value="pending">Needs review</option>
+          </select>
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Doc number or party…"
+              className="bg-card border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-52" />
+          </div>
+        </div>
+      </div>
+
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border bg-muted/50">
+              {[
+                { label: "#",            align: "left"  },
+                { label: "Doc Number",   align: "left"  },
+                { label: "Date",         align: "left"  },
+                { label: "Type",         align: "left"  },
+                { label: "Counter-party",align: "left"  },
+                { label: "Taxable",      align: "right" },
+                { label: "IGST",         align: "right" },
+                { label: "CGST+SGST",    align: "right" },
+                { label: "Total",        align: "right" },
+                { label: "Status",       align: "left"  },
+                { label: "Document",     align: "left"  },
+              ].map((h, i) => (
+                <th key={i} className={`px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide ${h.align === "right" ? "text-right" : "text-left"}`}>{h.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {filtered.length === 0 && (
+              <tr><td colSpan={11} className="px-5 py-10 text-center text-sm text-muted-foreground">No documents for this selection</td></tr>
+            )}
+            {filtered.map((d, idx) => {
+              const cp = getCounterParty(d);
+              return (
+                <tr key={d.id} className="hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-3.5 text-sm text-muted-foreground">{idx + 1}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-foreground whitespace-nowrap">{d.doc_number}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-foreground whitespace-nowrap">{d.doc_date || "—"}</td>
+                  <td className="px-4 py-3.5"><DocTypeBadge type={d.doc_type} isDark={isDark} /></td>
+                  <td className="px-4 py-3.5">
+                    <p className="text-sm font-medium text-foreground max-w-[160px] truncate">{cp.name || <span className="text-muted-foreground italic">Unknown</span>}</p>
+                    {cp.city && <p className="text-xs text-muted-foreground mt-0.5">{cp.city}, {cp.state}</p>}
+                  </td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-right text-foreground whitespace-nowrap">{INR(d.taxable_amount)}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-right whitespace-nowrap" style={{ color: isDark ? "#60a5fa" : "#1d6af5" }}>{INR(d.igst)}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-right whitespace-nowrap" style={{ color: isDark ? "#a78bfa" : "#6941c6" }}>{INR(d.cgst + d.sgst)}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm font-bold text-right text-foreground whitespace-nowrap">{INR(d.total)}</td>
+                  <td className="px-4 py-3.5"><StageBadge stage={d.stage} isDark={isDark} /></td>
+                  <td className="px-4 py-3.5">
+                    <button onClick={() => onReview(d.id)} className="flex items-center gap-1.5 text-sm text-primary hover:underline whitespace-nowrap font-medium">
+                      <ExternalLink size={13} /> Open
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {filtered.length > 1 && (
+            <tfoot>
+              <tr className="border-t-2 border-border">
+                <td colSpan={5} className="px-4 py-3 text-sm font-semibold text-muted-foreground">Total — {filtered.length} documents</td>
+                <td className="px-4 py-3 font-mono text-sm font-bold text-right text-foreground">{INR_SIGNED(totals.taxable)}</td>
+                <td className="px-4 py-3 font-mono text-sm font-bold text-right" style={{ color: isDark ? "#60a5fa" : "#1d6af5" }}>{INR_SIGNED(totals.igst)}</td>
+                <td className="px-4 py-3 font-mono text-sm font-bold text-right" style={{ color: isDark ? "#a78bfa" : "#6941c6" }}>{INR_SIGNED(totals.cgst + totals.sgst)}</td>
+                <td className="px-4 py-3 font-mono text-sm font-bold text-right text-foreground">{INR_SIGNED(totals.total)}</td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Party Panel ───────────────────────────────────────────────────────────────
+function PartyPanel({ title, party, locked, onChange }: {
+  title: string; party: Party; locked: boolean; onChange: (p: Party) => void;
+}) {
+  const inp = (cls = "") => `w-full rounded-lg px-3 py-2 text-sm border border-border bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-all ${cls}`;
+  const label = (text: string, icon?: React.ReactNode) => (
+    <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">{icon}{text}</label>
+  );
+  return (
+    <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+      <div className="px-4 py-2.5 border-b border-border bg-muted/40">
+        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</p>
+        <p className="text-sm font-bold text-foreground mt-0.5 truncate">{party.name || <span className="text-muted-foreground italic font-normal">Not captured</span>}</p>
+      </div>
+      <div className="p-4 space-y-3">
+        <div>
+          {label("Legal Name")}
+          <input disabled={locked} value={party.name} onChange={e => onChange({ ...party, name: e.target.value })} placeholder="Enter legal name" className={inp()} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            {label("GSTIN")}
+            <input disabled={locked} value={party.gstin} onChange={e => onChange({ ...party, gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" className={inp("font-mono")} />
+          </div>
+          <div>
+            {label("PAN")}
+            <input disabled={locked} value={party.pan ?? ""} onChange={e => onChange({ ...party, pan: e.target.value })} placeholder="AAAAA0000A" className={inp("font-mono")} />
+          </div>
+        </div>
+        <div>
+          {label("Address")}
+          <input disabled={locked} value={party.address} onChange={e => onChange({ ...party, address: e.target.value })} placeholder="Street / building / area" className={inp()} />
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            {label("City")}
+            <input disabled={locked} value={party.city} onChange={e => onChange({ ...party, city: e.target.value })} className={inp()} />
+          </div>
+          <div>
+            {label("State")}
+            <input disabled={locked} value={party.state} onChange={e => onChange({ ...party, state: e.target.value })} className={inp()} />
+          </div>
+        </div>
+        <div className="grid grid-cols-2 gap-3">
+          <div>
+            {label("Mobile", <Phone size={11} />)}
+            <input disabled={locked} value={party.mobile} onChange={e => onChange({ ...party, mobile: e.target.value })} placeholder="+91 98765 43210" className={inp()} />
+          </div>
+          <div>
+            {label("Email", <Mail size={11} />)}
+            <input disabled={locked} value={party.email} onChange={e => onChange({ ...party, email: e.target.value })} placeholder="gst@company.com" className={inp()} />
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// ── Review ────────────────────────────────────────────────────────────────────
+function ReviewScreen({ docId, docs, isDark, onBack }: { docId: string; docs: GSTDocument[]; isDark: boolean; onBack: () => void }) {
+  const doc = docs.find(d => d.id === docId) ?? docs[0];
+  const [locked, setLocked] = useState(doc.stage === "locked");
+  const [showReject, setShowReject] = useState(false);
+  const [rejected, setRejected] = useState(false);
+  const [rejectReason, setRejectReason] = useState("");
+  const [supplier, setSupplier] = useState<Party>(doc.supplier);
+  const [recipient, setRecipient] = useState<Party>(doc.recipient);
+  const [lines, setLines] = useState<LineItem[]>(doc.lines);
+  const [docMeta, setDocMeta] = useState({
+    doc_number:      doc.doc_number === "—" ? "" : doc.doc_number,
+    doc_date:        doc.doc_date,
+    place_of_supply: doc.place_of_supply,
+    reverse_charge:  doc.reverse_charge ? "Yes" : "No",
+  });
+
+  const errors   = doc.issues.filter(i => i.severity === "error");
+  const warnings = doc.issues.filter(i => i.severity === "warning");
+  const canLock  = errors.length === 0 && !locked;
+
+  function updateLine(id: string, field: keyof LineItem, raw: string) {
+    setLines(prev => prev.map(l => {
+      if (l.id !== id) return l;
+      const isText = field === "description" || field === "hsn_sac" || field === "unit";
+      const val = isText ? raw : (parseFloat(raw) || 0);
+      const updated = { ...l, [field]: val } as LineItem;
+      if (field === "qty" || field === "rate") {
+        updated.taxable = Math.round(updated.qty * updated.rate);
+        updated.igst  = updated.igst_rate  > 0 ? Math.round(updated.taxable * updated.igst_rate  / 100) : 0;
+        updated.cgst  = updated.cgst_rate  > 0 ? Math.round(updated.taxable * updated.cgst_rate  / 100) : 0;
+        updated.sgst  = updated.sgst_rate  > 0 ? Math.round(updated.taxable * updated.sgst_rate  / 100) : 0;
+        updated.total = updated.taxable + updated.igst + updated.cgst + updated.sgst + updated.cess;
+      }
+      return updated;
+    }));
+  }
+
+  const computedTaxable = lines.reduce((s, l) => s + l.taxable, 0);
+  const computedTax     = lines.reduce((s, l) => s + l.igst + l.cgst + l.sgst, 0);
+  const computedTotal   = lines.reduce((s, l) => s + l.total, 0);
+
+  if (rejected) return (
+    <div className="flex flex-col items-center justify-center h-80 gap-5">
+      <div className="w-14 h-14 rounded-full bg-red-100 flex items-center justify-center">
+        <XCircle size={28} className="text-red-500" />
+      </div>
+      <div className="text-center">
+        <p className="text-base font-semibold text-foreground">Document rejected</p>
+        {rejectReason && <p className="text-sm text-muted-foreground mt-1">Reason: {rejectReason}</p>}
+      </div>
+      <button onClick={onBack} className="text-sm text-primary font-medium hover:underline">← Back to Records</button>
+    </div>
+  );
+
+  const inpCls = (err = false) => `w-full rounded-lg px-3 py-2 text-sm border focus:outline-none focus:ring-2 transition-all disabled:opacity-60 disabled:cursor-not-allowed ${err ? "border-red-400 bg-red-50 text-red-800 focus:ring-red-300" : "border-border bg-input text-foreground focus:ring-primary/30"}`;
+
+  return (
+    <div className="space-y-4 pb-8">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 flex-wrap text-sm">
+        <button onClick={onBack} className="text-muted-foreground hover:text-foreground font-medium">Records</button>
+        <ChevronRight size={14} className="text-muted-foreground" />
+        <span className="text-foreground truncate max-w-xs">{doc.filename}</span>
+        <div className="ml-auto flex items-center gap-2">
+          <span className="px-2.5 py-1 rounded-full text-xs font-medium" style={{
+            color: isDark ? { template:"#67e8f9", ai:"#c4b5fd", merged:"#60a5fa", manual:"#9ca3af" }[doc.extraction_method] : { template:"#0e7490", ai:"#5b21b6", merged:"#1d6af5", manual:"#4b5563" }[doc.extraction_method],
+            background: isDark ? { template:"rgba(14,116,144,0.15)", ai:"rgba(91,33,182,0.15)", merged:"rgba(29,106,245,0.15)", manual:"rgba(75,85,99,0.15)" }[doc.extraction_method] : { template:"#ecfeff", ai:"#f5f3ff", merged:"#eff6ff", manual:"#f9fafb" }[doc.extraction_method],
+          }}>
+            {doc.extraction_method === "ai" ? "AI extracted" : doc.extraction_method.charAt(0).toUpperCase() + doc.extraction_method.slice(1)}
+          </span>
+          <DocTypeBadge type={doc.doc_type} isDark={isDark} />
+          <StageBadge stage={locked ? "locked" : doc.stage} isDark={isDark} />
+        </div>
+      </div>
+
+      {/* Doc ID */}
+      <div className="flex items-center gap-3 bg-card border border-border rounded-xl px-4 py-3 shadow-sm">
+        <span className="text-xs text-muted-foreground">Document ID</span>
+        <span className="font-mono text-sm text-foreground">{doc.id}</span>
+        <CopyBtn text={doc.id} />
+        {locked && (
+          <div className="ml-auto flex items-center gap-2 text-sm font-medium" style={{ color: isDark ? "#34d399" : "#065f46" }}>
+            <Lock size={14} /> Locked on {doc.recorded_at}
+          </div>
+        )}
+      </div>
+
+      {/* Issues */}
+      {(errors.length > 0 || warnings.length > 0) && !locked && (
+        <div className="rounded-xl overflow-hidden border border-border">
+          {errors.length > 0 && (
+            <div className="px-5 py-4" style={{ background: isDark ? "rgba(217,45,32,0.07)" : "#fef3f2" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <XCircle size={16} className="text-red-500 shrink-0" />
+                <p className="text-sm font-semibold text-red-600">{errors.length} error{errors.length > 1 ? "s" : ""} — fix these before locking</p>
+              </div>
+              {errors.map((e, i) => (
+                <div key={i} className="flex gap-3 mt-1.5">
+                  <span className="text-sm font-semibold text-red-500 w-40 shrink-0">{e.field}</span>
+                  <span className="text-sm text-red-400">{e.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+          {warnings.length > 0 && (
+            <div className="px-5 py-4" style={{ background: isDark ? "rgba(181,71,8,0.07)" : "#fffbeb" }}>
+              <div className="flex items-center gap-2 mb-2">
+                <AlertTriangle size={16} className="text-amber-500 shrink-0" />
+                <p className="text-sm font-semibold text-amber-700">{warnings.length} warning{warnings.length > 1 ? "s" : ""}</p>
+              </div>
+              {warnings.map((w, i) => (
+                <div key={i} className="flex gap-3 mt-1.5">
+                  <span className="text-sm font-semibold text-amber-500 w-40 shrink-0">{w.field}</span>
+                  <span className="text-sm text-amber-500">{w.message}</span>
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* Document meta */}
+      <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+        <p className="text-sm font-semibold text-foreground border-b border-border pb-2 mb-4">Document Details</p>
+        <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Document Number <span className="text-red-500">*</span></label>
+            <input disabled={locked} value={docMeta.doc_number} onChange={e => setDocMeta(p => ({ ...p, doc_number: e.target.value }))}
+              className={inpCls(!docMeta.doc_number)} placeholder="e.g. INV/24-25/001" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Document Date <span className="text-red-500">*</span></label>
+            <input disabled={locked} value={docMeta.doc_date} onChange={e => setDocMeta(p => ({ ...p, doc_date: e.target.value }))}
+              className={inpCls(!docMeta.doc_date)} placeholder="YYYY-MM-DD" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Place of Supply <span className="text-red-500">*</span></label>
+            <input disabled={locked} value={docMeta.place_of_supply} onChange={e => setDocMeta(p => ({ ...p, place_of_supply: e.target.value }))}
+              className={inpCls(!docMeta.place_of_supply)} placeholder="e.g. Maharashtra (27)" />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-muted-foreground mb-1">Reverse Charge</label>
+            <select disabled={locked} value={docMeta.reverse_charge} onChange={e => setDocMeta(p => ({ ...p, reverse_charge: e.target.value }))}
+              className={inpCls() + " appearance-none cursor-pointer"}>
+              <option>No</option><option>Yes</option>
+            </select>
+          </div>
+        </div>
+      </div>
+
+      {/* Two-party panels */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+        <PartyPanel title="From — Supplier / Issuer" party={supplier} locked={locked} onChange={setSupplier} />
+        <PartyPanel title="To — Recipient / Buyer"   party={recipient} locked={locked} onChange={setRecipient} />
+      </div>
+
+      {/* Editable line items */}
+      {lines.length > 0 && (
+        <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+          <div className="flex items-center justify-between border-b border-border pb-2 mb-4">
+            <p className="text-sm font-semibold text-foreground">Line Items</p>
+            {!locked && (
+              <p className="text-xs text-muted-foreground flex items-center gap-1.5">
+                <Info size={12} /> Click any cell to edit — totals recalculate automatically
+              </p>
+            )}
+          </div>
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[720px]">
+              <thead>
+                <tr className="border-b border-border bg-muted/50">
+                  {["Description", "HSN / SAC", "Unit", "Qty", "Rate (₹)", "Taxable", "Tax %", "Total"].map((h, i) => (
+                    <th key={h} className={`px-3 py-2.5 text-xs font-semibold text-muted-foreground uppercase tracking-wide ${i >= 5 ? "text-right" : "text-left"}`}>{h}</th>
+                  ))}
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-border">
+                {lines.map(l => {
+                  const cellInp = (val: string | number, field: keyof LineItem, mono = false, align = "left", type = "text") => (
+                    locked
+                      ? <span className={`text-sm text-foreground ${mono ? "font-mono" : ""} block ${align === "right" ? "text-right" : ""}`}>{val}</span>
+                      : <input type={type} value={val} onChange={e => updateLine(l.id, field, e.target.value)}
+                          className={`w-full text-sm bg-transparent border border-transparent hover:border-border focus:border-primary focus:bg-input rounded px-2 py-1 focus:outline-none transition-all ${mono ? "font-mono" : ""} ${align === "right" ? "text-right" : ""}`} />
+                  );
+                  return (
+                    <tr key={l.id} className="hover:bg-muted/20 transition-colors">
+                      <td className="px-2 py-2 min-w-[140px]">{cellInp(l.description, "description")}</td>
+                      <td className="px-2 py-2 min-w-[90px]">{cellInp(l.hsn_sac, "hsn_sac", true)}</td>
+                      <td className="px-2 py-2 w-16">{cellInp(l.unit, "unit", false, "center")}</td>
+                      <td className="px-2 py-2 w-20">{cellInp(l.qty, "qty", true, "right", "number")}</td>
+                      <td className="px-2 py-2 w-28">{cellInp(l.rate.toLocaleString("en-IN"), "rate", true, "right", "number")}</td>
+                      <td className="px-3 py-2 font-mono text-sm text-right text-foreground whitespace-nowrap">{INR(l.taxable)}</td>
+                      <td className="px-3 py-2 text-sm text-right text-muted-foreground whitespace-nowrap">
+                        {l.igst > 0 ? `IGST ${l.igst_rate}%` : `${l.cgst_rate}%+${l.sgst_rate}%`}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-sm font-semibold text-right text-foreground whitespace-nowrap">{INR(l.total)}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+              <tfoot>
+                <tr className="border-t-2 border-border bg-muted/30">
+                  <td colSpan={5} className="px-3 py-3 text-sm font-semibold text-muted-foreground">Totals</td>
+                  <td className="px-3 py-3 font-mono text-sm font-bold text-right text-foreground">{INR(computedTaxable)}</td>
+                  <td className="px-3 py-3 font-mono text-sm text-right text-muted-foreground">{INR(computedTax)}</td>
+                  <td className="px-3 py-3 font-mono text-base font-bold text-right" style={{ color: isDark ? "#34d399" : "#065f46" }}>{INR(computedTotal)}</td>
+                </tr>
+              </tfoot>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Action bar */}
+      {!locked && (
+        <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm space-y-2">
+          {!canLock && errors.length > 0 && (
+            <div className="flex items-center gap-2 text-sm text-red-500 mb-2">
+              <Info size={14} />
+              <span>Please fix the {errors.length} error{errors.length > 1 ? "s" : ""} listed above before locking</span>
+            </div>
+          )}
+          {!showReject ? (
+            <div className="flex gap-3">
+              <button disabled={!canLock} onClick={() => setLocked(true)}
+                className={`flex-1 flex items-center justify-center gap-2 py-2.5 rounded-lg text-sm font-semibold transition-all ${
+                  canLock ? "bg-primary text-white hover:bg-primary/90 shadow-sm cursor-pointer" : "bg-muted text-muted-foreground cursor-not-allowed"
+                }`}>
+                <Lock size={15} /> Confirm & lock record
+              </button>
+              <button onClick={() => setShowReject(true)}
+                className="px-4 py-2.5 border border-border rounded-lg text-sm text-muted-foreground hover:text-red-500 hover:border-red-300 transition-colors">
+                Reject
+              </button>
+            </div>
+          ) : (
+            <div className="space-y-2.5">
+              <textarea autoFocus value={rejectReason} onChange={e => setRejectReason(e.target.value)}
+                placeholder="Reason for rejection (optional)" rows={2}
+                className="w-full bg-input border border-red-400/60 rounded-lg px-3.5 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-red-500 resize-none" />
+              <div className="flex gap-2">
+                <button onClick={() => setRejected(true)} className="flex-1 py-2.5 bg-red-600 hover:bg-red-500 rounded-lg text-sm font-semibold text-white transition-colors">Confirm rejection</button>
+                <button onClick={() => setShowReject(false)} className="px-4 py-2.5 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground">Cancel</button>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
+// ── Clients List ──────────────────────────────────────────────────────────────
+function ClientsScreen({ docs, isDark, onClientClick }: { docs: GSTDocument[]; isDark: boolean; onClientClick: (id: string) => void }) {
+  const [search, setSearch] = useState("");
+  const filtered = CLIENTS.filter(c => !search || c.name.toLowerCase().includes(search.toLowerCase()) || c.gstin.includes(search));
+
+  return (
+    <div className="space-y-5">
+      <PageHeader title="Clients" subtitle={`${CLIENTS.filter(c => c.active).length} active service providers managed by your practice`}
+        action={
+          <button className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+            <Plus size={15} /> Add client
+          </button>
+        } />
+
+      <div className="relative max-w-sm">
+        <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+        <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by name or GSTIN…"
+          className="w-full bg-card border border-border rounded-lg pl-9 pr-3 py-2.5 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary" />
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-4">
+        {filtered.map(c => {
+          const clientDocs   = docs.filter(d => d.client_id === c.id);
+          const lockedDocs   = clientDocs.filter(d => d.stage === "locked");
+          const pendingCount = clientDocs.filter(d => d.stage === "ready_for_review").length;
+          const salesLocked  = lockedDocs.filter(d => d.doc_type === "sales_invoice");
+          const purchLocked  = lockedDocs.filter(d => d.doc_type === "purchase_invoice");
+          const totalBiz     = lockedDocs.reduce((s, d) => s + Math.abs(d.total), 0);
+
+          return (
+            <button key={c.id} onClick={() => onClientClick(c.id)}
+              className="bg-card border border-border rounded-xl p-5 shadow-sm text-left hover:shadow-md hover:border-primary/40 transition-all group">
+              <div className="flex items-start gap-3 mb-4">
+                <div className="w-10 h-10 rounded-xl bg-primary/10 flex items-center justify-center shrink-0 group-hover:bg-primary/20 transition-colors">
+                  <Building2 size={18} className="text-primary" />
+                </div>
+                <div className="flex-1 min-w-0">
+                  <p className="text-sm font-bold text-foreground leading-tight truncate group-hover:text-primary transition-colors">{c.name}</p>
+                  <p className="text-xs font-mono text-muted-foreground mt-1">{c.gstin}</p>
+                </div>
+                <ChevronRight size={16} className="text-muted-foreground group-hover:text-primary transition-colors shrink-0 mt-1" />
+              </div>
+
+              <div className="grid grid-cols-2 gap-3 mb-4">
+                <div className="bg-muted/50 rounded-lg px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Sales (locked)</p>
+                  <p className="text-sm font-bold font-mono text-foreground mt-0.5">{salesLocked.length}</p>
+                </div>
+                <div className="bg-muted/50 rounded-lg px-3 py-2">
+                  <p className="text-xs text-muted-foreground">Purchases (locked)</p>
+                  <p className="text-sm font-bold font-mono text-foreground mt-0.5">{purchLocked.length}</p>
+                </div>
+              </div>
+
+              <div className="flex items-end justify-between">
+                <div>
+                  <p className="text-xs text-muted-foreground">Total business</p>
+                  <p className="text-base font-bold font-mono mt-0.5" style={{ color: isDark ? "#34d399" : "#065f46" }}>
+                    {totalBiz > 0 ? INR(totalBiz) : "—"}
+                  </p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700">
+                    <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
+                  </span>
+                  {pendingCount > 0 && (
+                    <span className="inline-flex px-2.5 py-1 rounded-full text-xs font-medium bg-amber-50 text-amber-700">
+                      {pendingCount} pending
+                    </span>
+                  )}
+                </div>
+              </div>
+
+              <div className="mt-3 pt-3 border-t border-border flex items-center gap-3 text-xs text-muted-foreground">
+                <span>{c.state}</span>
+                <span>·</span>
+                <span className="font-mono">{c.pan}</span>
+              </div>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+// ── Client Detail ─────────────────────────────────────────────────────────────
+const CLIENT_DETAIL_TABS: { id: DocType | "all"; label: string; types: DocType[] }[] = [
+  { id: "all",              label: "All Documents",     types: ["sales_invoice","purchase_invoice","debit_note_issued","debit_note_received","credit_note_issued","credit_note_received","quotation","advance_receipt","delivery_challan"] },
+  { id: "sales_invoice",    label: "Sales Invoices",    types: ["sales_invoice"] },
+  { id: "purchase_invoice", label: "Purchase Invoices", types: ["purchase_invoice"] },
+  { id: "debit_note_issued",   label: "Debit Notes",    types: ["debit_note_issued","debit_note_received"] },
+  { id: "credit_note_issued",  label: "Credit Notes",   types: ["credit_note_issued","credit_note_received"] },
+];
+
+function ClientDetailScreen({ clientId, docs, isDark, onBack, onReview }: {
+  clientId: string; docs: GSTDocument[]; isDark: boolean; onBack: () => void; onReview: (id: string) => void;
+}) {
+  const client = CLIENTS.find(c => c.id === clientId)!;
+  const [activeTab, setActiveTab] = useState<DocType | "all">("all");
+  const [stageF, setStageF] = useState<"all" | "locked" | "pending">("all");
+  const [search, setSearch] = useState("");
+
+  const allClientDocs = docs.filter(d => d.client_id === clientId);
+
+  const filtered = useMemo(() => {
+    const tabTypes = CLIENT_DETAIL_TABS.find(t => t.id === activeTab)?.types ?? [];
+    return allClientDocs.filter(d => {
+      if (activeTab !== "all" && !tabTypes.includes(d.doc_type)) return false;
+      if (stageF === "locked" && d.stage !== "locked") return false;
+      if (stageF === "pending" && d.stage !== "ready_for_review") return false;
+      const q = search.toLowerCase();
+      const cp = getCounterParty(d);
+      if (q && !d.doc_number.toLowerCase().includes(q) && !cp.name.toLowerCase().includes(q) && !d.filename.toLowerCase().includes(q)) return false;
+      return true;
+    });
+  }, [allClientDocs, activeTab, stageF, search]);
+
+  const totals = useMemo(() => ({
+    taxable: filtered.reduce((s, d) => s + d.taxable_amount, 0),
+    tax:     filtered.reduce((s, d) => s + d.igst + d.cgst + d.sgst, 0),
+    total:   filtered.reduce((s, d) => s + d.total, 0),
+  }), [filtered]);
+
+  const salesLocked    = allClientDocs.filter(d => d.doc_type === "sales_invoice" && d.stage === "locked");
+  const purchaseLocked = allClientDocs.filter(d => d.doc_type === "purchase_invoice" && d.stage === "locked");
+  const salesTotal     = salesLocked.reduce((s, d) => s + d.total, 0);
+  const purchaseTotal  = purchaseLocked.reduce((s, d) => s + d.total, 0);
+  const pendingCount   = allClientDocs.filter(d => d.stage === "ready_for_review").length;
+
+  return (
+    <div className="space-y-5 pb-8">
+      {/* Breadcrumb */}
+      <div className="flex items-center gap-2 text-sm">
+        <button onClick={onBack} className="flex items-center gap-1.5 text-muted-foreground hover:text-foreground font-medium">
+          <ArrowLeft size={14} /> Clients
+        </button>
+        <ChevronRight size={14} className="text-muted-foreground" />
+        <span className="text-foreground font-semibold">{client.name}</span>
+      </div>
+
+      {/* Client header */}
+      <div className="bg-card border border-border rounded-xl p-5 shadow-sm">
+        <div className="flex items-start gap-4">
+          <div className="w-12 h-12 rounded-xl bg-primary/10 flex items-center justify-center shrink-0">
+            <Building2 size={22} className="text-primary" />
+          </div>
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-4">
+              <div>
+                <h1 className="text-lg font-bold text-foreground">{client.name}</h1>
+                <p className="text-sm text-muted-foreground mt-0.5">{client.address}</p>
+              </div>
+              <span className="inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium bg-emerald-50 text-emerald-700 shrink-0">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-500" /> Active
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-6 mt-3">
+              <div><p className="text-xs text-muted-foreground">GSTIN</p><p className="text-sm font-mono font-semibold text-foreground mt-0.5">{client.gstin}</p></div>
+              <div><p className="text-xs text-muted-foreground">PAN</p><p className="text-sm font-mono font-semibold text-foreground mt-0.5">{client.pan}</p></div>
+              <div><p className="text-xs text-muted-foreground">State</p><p className="text-sm font-semibold text-foreground mt-0.5">{client.state}</p></div>
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground"><Phone size={13} />{client.mobile}</div>
+              <div className="flex items-center gap-1.5 text-sm text-muted-foreground"><Mail size={13} />{client.email}</div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* KPIs */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
+          <p className="text-sm text-muted-foreground">Total Sales</p>
+          <p className="text-xl font-bold font-mono mt-1.5" style={{ color: isDark ? "#34d399" : "#065f46" }}>{INR(salesTotal)}</p>
+          <p className="text-xs text-muted-foreground mt-1">{salesLocked.length} invoices locked</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
+          <p className="text-sm text-muted-foreground">Total Purchases</p>
+          <p className="text-xl font-bold font-mono mt-1.5" style={{ color: isDark ? "#60a5fa" : "#1d6af5" }}>{INR(purchaseTotal)}</p>
+          <p className="text-xs text-muted-foreground mt-1">{purchaseLocked.length} invoices locked</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
+          <p className="text-sm text-muted-foreground">Total Documents</p>
+          <p className="text-xl font-bold font-mono mt-1.5 text-foreground">{allClientDocs.length}</p>
+          <p className="text-xs text-muted-foreground mt-1">{allClientDocs.filter(d => d.stage === "locked").length} locked</p>
+        </div>
+        <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
+          <p className="text-sm text-muted-foreground">Needs Review</p>
+          <p className="text-xl font-bold font-mono mt-1.5" style={{ color: pendingCount > 0 ? (isDark ? "#fbbf24" : "#b45309") : undefined }}>{pendingCount}</p>
+          <p className="text-xs text-muted-foreground mt-1">Awaiting your action</p>
+        </div>
+      </div>
+
+      {/* Tabs + filters */}
+      <div className="flex items-center gap-3 flex-wrap">
+        <div className="flex gap-1 border-b border-border pb-0 flex-wrap">
+          {CLIENT_DETAIL_TABS.map(t => {
+            const count = allClientDocs.filter(d => t.id === "all" || t.types.includes(d.doc_type)).length;
+            return (
+              <button key={t.id} onClick={() => setActiveTab(t.id)}
+                className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors whitespace-nowrap ${
+                  activeTab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+                }`}>
+                {t.label}
+                <span className={`ml-1.5 text-xs ${activeTab === t.id ? "text-primary" : "text-muted-foreground"}`}>({count})</span>
+              </button>
+            );
+          })}
+        </div>
+        <div className="flex items-center gap-2 ml-auto">
+          <Filter size={14} className="text-muted-foreground" />
+          <select value={stageF} onChange={e => setStageF(e.target.value as typeof stageF)}
+            className="bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
+            <option value="all">All stages</option>
+            <option value="locked">Locked</option>
+            <option value="pending">Needs review</option>
+          </select>
+          <div className="relative">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Doc number, party, file…"
+              className="bg-card border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-56" />
+          </div>
+        </div>
+      </div>
+
+      {/* Table */}
+      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+        <table className="w-full">
+          <thead>
+            <tr className="border-b border-border bg-muted/50">
+              {[
+                { label: "#",            align: "left"  },
+                { label: "Doc Number",   align: "left"  },
+                { label: "Date",         align: "left"  },
+                { label: "Type",         align: "left"  },
+                { label: "Counter-party",align: "left"  },
+                { label: "Taxable",      align: "right" },
+                { label: "Tax",          align: "right" },
+                { label: "Total",        align: "right" },
+                { label: "Status",       align: "left"  },
+                { label: "",             align: "left"  },
+              ].map((h, i) => (
+                <th key={i} className={`px-4 py-3 text-xs font-semibold text-muted-foreground uppercase tracking-wide ${h.align === "right" ? "text-right" : "text-left"}`}>{h.label}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-border">
+            {filtered.length === 0 && (
+              <tr><td colSpan={10} className="px-5 py-10 text-center text-sm text-muted-foreground">No documents match your filter</td></tr>
+            )}
+            {filtered.map((d, idx) => {
+              const cp = getCounterParty(d);
+              return (
+                <tr key={d.id} className="hover:bg-muted/30 transition-colors">
+                  <td className="px-4 py-3.5 text-sm text-muted-foreground">{idx + 1}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-foreground whitespace-nowrap">{d.doc_number}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-muted-foreground whitespace-nowrap">{d.doc_date || "—"}</td>
+                  <td className="px-4 py-3.5"><DocTypeBadge type={d.doc_type} isDark={isDark} /></td>
+                  <td className="px-4 py-3.5">
+                    <p className="text-sm font-medium text-foreground max-w-[160px] truncate">{cp.name || "—"}</p>
+                    {cp.city && <p className="text-xs text-muted-foreground mt-0.5">{cp.city}</p>}
+                  </td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-right text-foreground whitespace-nowrap">{INR(d.taxable_amount)}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm text-right text-muted-foreground whitespace-nowrap">{INR(d.igst + d.cgst + d.sgst)}</td>
+                  <td className="px-4 py-3.5 font-mono text-sm font-bold text-right text-foreground whitespace-nowrap">{INR(d.total)}</td>
+                  <td className="px-4 py-3.5"><StageBadge stage={d.stage} isDark={isDark} /></td>
+                  <td className="px-4 py-3.5">
+                    <button onClick={() => onReview(d.id)} className="flex items-center gap-1.5 text-sm text-primary hover:underline font-medium whitespace-nowrap">
+                      <ExternalLink size={13} /> Open
+                    </button>
+                  </td>
+                </tr>
+              );
+            })}
+          </tbody>
+          {filtered.length > 1 && (
+            <tfoot>
+              <tr className="border-t-2 border-border bg-muted/20">
+                <td colSpan={5} className="px-4 py-3 text-sm font-semibold text-muted-foreground">Total — {filtered.length} documents</td>
+                <td className="px-4 py-3 font-mono text-sm font-bold text-right text-foreground">{INR_SIGNED(totals.taxable)}</td>
+                <td className="px-4 py-3 font-mono text-sm font-bold text-right text-muted-foreground">{INR_SIGNED(totals.tax)}</td>
+                <td className="px-4 py-3 font-mono text-sm font-bold text-right text-foreground">{INR_SIGNED(totals.total)}</td>
+                <td colSpan={2} />
+              </tr>
+            </tfoot>
+          )}
+        </table>
+      </div>
+    </div>
+  );
+}
+
+// ── Root ──────────────────────────────────────────────────────────────────────
+export default function App() {
+  const { mode, setMode, isDark } = useTheme();
+  const [screen, setScreen] = useState<Screen>("dashboard");
+  const [reviewId, setReviewId] = useState<string | null>(null);
+  const [selectedClientId, setSelectedClientId] = useState<string | null>(null);
+
+  function openReview(id: string) { setReviewId(id); setScreen("review"); }
+  function openClient(id: string) { setSelectedClientId(id); setScreen("client_detail"); }
+  function navTo(s: Screen) {
+    setScreen(s);
+    if (s !== "review") setReviewId(null);
+    if (s !== "client_detail") setSelectedClientId(null);
+  }
+
+  const pending = DOCS.filter(d => d.stage === "ready_for_review").length;
+
+  return (
+    <div className={isDark ? "dark" : ""} style={{ fontFamily: "'Inter', system-ui, sans-serif", colorScheme: isDark ? "dark" : "light" }}>
+      <div className="flex h-screen bg-background text-foreground overflow-hidden">
+        <Sidebar screen={screen} onNav={navTo} pendingCount={pending} mode={mode} setMode={setMode} isDark={isDark} />
+        <main className="flex-1 overflow-y-auto">
+          <div className="max-w-[1440px] mx-auto px-7 py-7">
+            {screen === "dashboard"     && <Dashboard docs={DOCS} isDark={isDark} onNav={navTo} />}
+            {screen === "upload"        && <UploadScreen docs={DOCS} isDark={isDark} onReview={openReview} />}
+            {screen === "records"       && <RecordsScreen docs={DOCS} isDark={isDark} onReview={openReview} />}
+            {screen === "review"        && reviewId && <ReviewScreen docId={reviewId} docs={DOCS} isDark={isDark} onBack={() => setScreen("records")} />}
+            {screen === "clients"       && <ClientsScreen docs={DOCS} isDark={isDark} onClientClick={openClient} />}
+            {screen === "client_detail" && selectedClientId && (
+              <ClientDetailScreen clientId={selectedClientId} docs={DOCS} isDark={isDark} onBack={() => setScreen("clients")} onReview={openReview} />
+            )}
+          </div>
+        </main>
+      </div>
+    </div>
+  );
+}
