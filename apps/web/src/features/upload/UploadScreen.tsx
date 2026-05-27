@@ -1,0 +1,250 @@
+import { useState, useRef, useMemo } from "react";
+import type { Client, GSTDocument, DocStage, DocType, Party, LineItem, FieldWarning } from "@ca-suite/shared";
+import { PageHeader, KpiCard } from "../../components/layout/PageHeader";
+import { DocTypeBadge, StageBadge } from "../../components/badges/DocTypeBadge";
+import { CopyBtn } from "../../components/ui/CopyBtn";
+import { INR, INR_SIGNED, getCounterParty, clientByIdFrom } from "../../lib/format";
+import { exportCSV } from "../../lib/csv-export";
+import { DOC_TYPE_META, STAGE_META } from "../../lib/constants";
+import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
+import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
+import { useAppData } from "../../context/AppDataContext";
+import { currentFinancialYear } from "../../lib/api";
+import {
+  Plus, Search, Download, Upload, ChevronDown, FileText, X,
+  FileWarning, CheckCircle, Eye, RefreshCw,
+} from "lucide-react";
+
+export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void }) {
+  const { uploadFile } = useAppData();
+  const clientById = (id: string) => clientByIdFrom(clients, id);
+  const [dragging, setDragging] = useState(false);
+  const [selClient, setSelClient] = useState(clients[0]?.id ?? "");
+  const [selType, setSelType] = useState<DocType | "">("purchase_invoice");
+  const [queued, setQueued] = useState<{ file: File; name: string; size: string }[]>([]);
+  const [uploading, setUploading] = useState(false);
+  const [uploadError, setUploadError] = useState("");
+  const [financialYear, setFinancialYear] = useState(currentFinancialYear());
+  const [stageF, setStageF] = useState<DocStage | "all">("all");
+  const [search, setSearch] = useState("");
+  const ref = useRef<HTMLInputElement>(null);
+
+  function addFiles(files: FileList | null) {
+    if (!files) return;
+    setQueued((p) => [
+      ...p,
+      ...Array.from(files).map((f) => ({
+        file: f,
+        name: f.name,
+        size: (f.size / 1024).toFixed(0) + " KB",
+      })),
+    ]);
+  }
+
+  async function startUpload() {
+    if (!selClient || !selType) {
+      setUploadError("Select a client and document type before uploading.");
+      return;
+    }
+    setUploadError("");
+    setUploading(true);
+    try {
+      const concurrency = 3;
+      for (let i = 0; i < queued.length; i += concurrency) {
+        const batch = queued.slice(i, i + concurrency);
+        await Promise.all(
+          batch.map((item) => uploadFile(item.file, selClient, selType, financialYear))
+        );
+      }
+      setQueued([]);
+    } catch (e) {
+      const err = e as Error & { existingId?: string };
+      setUploadError(
+        err.existingId
+          ? `${err.message} — open Records to find document ${err.existingId.slice(0, 8)}…`
+          : err.message || "Upload failed"
+      );
+    } finally {
+      setUploading(false);
+    }
+  }
+
+  const filtered = docs.filter(d => {
+    if (stageF !== "all" && d.stage !== stageF) return false;
+    const q = search.toLowerCase();
+    if (q && !d.filename.toLowerCase().includes(q) && !(clientById(d.client_id)?.name ?? "").toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  return (
+    <div className="space-y-6">
+      <PageHeader title="Upload Documents" subtitle="Drag and drop PDF, JPG, or PNG files to begin processing"
+        action={
+          <button onClick={() => ref.current?.click()}
+            className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+            <Plus size={16} /> Upload files
+          </button>
+        } />
+
+      <div onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+        onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
+        onClick={() => ref.current?.click()}
+        className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-4 cursor-pointer transition-all ${
+          dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
+        }`}>
+        <input ref={ref} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => addFiles(e.target.files)} />
+        <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
+          <Upload size={26} className="text-primary" />
+        </div>
+        <div className="text-center">
+          <p className="text-base font-semibold text-foreground">Drop files here, or click to browse</p>
+          <p className="text-sm text-muted-foreground mt-1">Supported: PDF, JPG, PNG · Maximum 50 MB per file</p>
+        </div>
+        <div className="flex items-center gap-3 mt-1" onClick={e => e.stopPropagation()}>
+          <div className="relative">
+            <select value={selClient} onChange={e => setSelClient(e.target.value)}
+              className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
+              <option value="">Select client</option>
+              {clients.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
+          <div className="relative">
+            <select value={selType} onChange={e => setSelType(e.target.value as DocType | "")}
+              className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
+              <option value="">Document type</option>
+              {(Object.entries(DOC_TYPE_META) as [DocType, typeof DOC_TYPE_META[DocType]][]).map(([k, v]) =>
+                <option key={k} value={k}>{v.label}</option>)}
+            </select>
+            <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
+          <div className="relative">
+            <select
+              value={financialYear}
+              onChange={(e) => setFinancialYear(e.target.value)}
+              className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer"
+              aria-label="Financial year"
+            >
+              {["2022-23", "2023-24", "2024-25", "2025-26"].map((fy) => (
+                <option key={fy} value={fy}>
+                  FY {fy}
+                </option>
+              ))}
+            </select>
+            <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
+        </div>
+      </div>
+
+      {queued.length > 0 && (
+        <div className="bg-card border border-primary/30 rounded-xl p-5 space-y-3">
+          <div className="flex items-center justify-between">
+            <p className="text-sm font-semibold text-foreground">{queued.length} file{queued.length > 1 ? "s" : ""} ready to upload</p>
+            <button onClick={() => setQueued([])} className="text-sm text-muted-foreground hover:text-foreground">Clear all</button>
+          </div>
+          <div className="space-y-2 max-h-36 overflow-y-auto">
+            {queued.map((f, i) => (
+              <div key={i} className="flex items-center gap-3 py-1">
+                <FileText size={15} className="text-primary shrink-0" />
+                <span className="text-sm text-foreground flex-1 truncate">{f.name}</span>
+                <span className="text-xs text-muted-foreground">{f.size}</span>
+                <button onClick={() => setQueued(p => p.filter((_, j) => j !== i))}><X size={14} className="text-muted-foreground hover:text-foreground" /></button>
+              </div>
+            ))}
+          </div>
+          {uploadError && (
+            <p className="text-sm text-red-500">{uploadError}</p>
+          )}
+          <button
+            type="button"
+            disabled={uploading}
+            onClick={startUpload}
+            className="w-full py-2.5 bg-primary rounded-lg text-sm font-semibold text-white hover:bg-primary/90 transition-colors disabled:opacity-60"
+          >
+            {uploading ? "Uploading…" : "Start upload"}
+          </button>
+        </div>
+      )}
+
+      <div>
+        <div className="flex items-center gap-3 mb-3 flex-wrap">
+          <div className="relative flex-1 max-w-sm">
+            <Search size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
+            <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by filename or client…"
+              className="w-full bg-card border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary" />
+          </div>
+          <button onClick={() => {
+            exportCSV("all_documents.csv",
+              ["Filename","Client","Doc Number","Date","Type","Status","Issues"],
+              filtered.map(d => [d.filename, clientById(d.client_id)?.name ?? "", d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type].label, STAGE_META[d.stage].label, d.issues.length])
+            );
+          }} className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors">
+            <Download size={14} /> Export CSV
+          </button>
+          <div className="flex gap-1.5">
+            {([["all","All"],["ready_for_review","Needs Review"],["extracting","Processing"],["locked","Locked"],["failed","Failed"]] as [DocStage|"all",string][]).map(([id, label]) => (
+              <button key={id} onClick={() => setStageF(id)}
+                className={`px-3 py-2 text-sm rounded-lg transition-colors ${stageF === id ? "bg-primary text-white font-medium" : "bg-card border border-border text-muted-foreground hover:text-foreground"}`}>
+                {label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+          <table className="w-full">
+            <thead>
+              <tr className="border-b border-border bg-muted/50">
+                {["Filename", "Client", "Type", "Status", "Issues", ""].map((h, i) => (
+                  <th key={i} className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
+                ))}
+              </tr>
+            </thead>
+            <tbody className="divide-y divide-border">
+              {filtered.map(d => (
+                <tr key={d.id} className="hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => onReview(d.id)}>
+                  <td className="px-5 py-3.5">
+                    <div className="flex items-center gap-2.5">
+                      <FileText size={15} className="text-muted-foreground shrink-0" />
+                      <span className="text-sm text-foreground truncate max-w-[200px]">{d.filename}</span>
+                    </div>
+                  </td>
+                  <td className="px-5 py-3.5 text-sm text-muted-foreground">{clientById(d.client_id)?.name ?? <span className="text-red-500 italic">Not assigned</span>}</td>
+                  <td className="px-5 py-3.5"><DocTypeBadge type={d.doc_type} isDark={isDark} /></td>
+                  <td className="px-5 py-3.5"><StageBadge stage={d.stage} isDark={isDark} /></td>
+                  <td className="px-5 py-3.5">
+                    {d.issues.length > 0
+                      ? <span className={`flex items-center gap-1.5 text-sm ${d.issues.some(i => i.severity === "error") ? "text-red-500" : "text-amber-500"}`}>
+                          <FileWarning size={14} />{d.issues.length} issue{d.issues.length > 1 ? "s" : ""}
+                        </span>
+                      : d.stage === "locked" ? <CheckCircle size={16} className="text-emerald-500" /> : <span className="text-muted-foreground">—</span>}
+                  </td>
+                  <td className="px-5 py-3.5">
+                    {d.stage === "ready_for_review" && (
+                      <button className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
+                        <Eye size={14} /> Review
+                      </button>
+                    )}
+                    {d.stage === "failed" && (
+                      <span className="flex items-center gap-1.5 text-sm text-red-500">
+                        <RefreshCw size={14} /> Failed — retry from Records
+                      </span>
+                    )}
+                    {d.stage === "locked" && (
+                      <button className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
+                        <Eye size={14} /> View
+                      </button>
+                    )}
+                  </td>
+                </tr>
+              ))}
+              {filtered.length === 0 && (
+                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">No documents match your filter</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  );
+}

@@ -1,0 +1,156 @@
+import {
+  pgTable,
+  text,
+  timestamp,
+  uuid,
+  integer,
+  boolean,
+  numeric,
+  pgEnum,
+  jsonb,
+  primaryKey,
+  uniqueIndex,
+} from "drizzle-orm/pg-core";
+import { tenants } from "./tenants";
+
+export const gstDocStageEnum = pgEnum("gst_doc_stage", [
+  "stored",
+  "ocr",
+  "extracting",
+  "ready_for_review",
+  "locked",
+  "failed",
+  "rejected",
+]);
+
+export const gstDocTypeEnum = pgEnum("gst_doc_type", [
+  "sales_invoice",
+  "purchase_invoice",
+  "debit_note_issued",
+  "debit_note_received",
+  "credit_note_issued",
+  "credit_note_received",
+  "quotation",
+  "advance_receipt",
+  "delivery_challan",
+]);
+
+export const extractionMethodEnum = pgEnum("extraction_method", [
+  "template",
+  "ai",
+  "merged",
+  "manual",
+]);
+
+export const clients = pgTable("clients", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  name: text("name").notNull(),
+  gstin: text("gstin").notNull(),
+  pan: text("pan"),
+  active: boolean("active").default(true).notNull(),
+  state: text("state"),
+  stateCode: text("state_code"),
+  address: text("address"),
+  mobile: text("mobile"),
+  email: text("email"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  tenantGstinIdx: uniqueIndex("clients_tenant_gstin_uidx").on(t.tenantId, t.gstin),
+}));
+
+export const partyMaster = pgTable(
+  "party_master",
+  {
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    gstin: text("gstin").notNull(),
+    name: text("name"),
+    pan: text("pan"),
+    address: text("address"),
+    city: text("city"),
+    state: text("state"),
+    stateCode: text("state_code"),
+    mobile: text("mobile"),
+    email: text("email"),
+    isRegistered: boolean("is_registered").default(true),
+    lastSeen: timestamp("last_seen").defaultNow(),
+  },
+  (t) => ({
+    pk: primaryKey({ columns: [t.tenantId, t.gstin] }),
+  })
+);
+
+export const gstDocuments = pgTable("gst_documents", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  clientId: uuid("client_id")
+    .notNull()
+    .references(() => clients.id, { onDelete: "cascade" }),
+  uploadId: uuid("upload_id"),
+  filename: text("filename").notNull(),
+  docType: gstDocTypeEnum("doc_type").notNull().default("purchase_invoice"),
+  docNumber: text("doc_number").default(""),
+  docDate: text("doc_date").default(""),
+  recordedAt: text("recorded_at").default(""),
+  supplier: jsonb("supplier").notNull().$type<Record<string, unknown>>(),
+  recipient: jsonb("recipient").notNull().$type<Record<string, unknown>>(),
+  supplyType: text("supply_type").default("intra_state"),
+  reverseCharge: boolean("reverse_charge").default(false),
+  placeOfSupply: text("place_of_supply").default(""),
+  taxableAmount: numeric("taxable_amount", { precision: 18, scale: 2 }).default("0"),
+  igst: numeric("igst", { precision: 18, scale: 2 }).default("0"),
+  cgst: numeric("cgst", { precision: 18, scale: 2 }).default("0"),
+  sgst: numeric("sgst", { precision: 18, scale: 2 }).default("0"),
+  cess: numeric("cess", { precision: 18, scale: 2 }).default("0"),
+  total: numeric("total", { precision: 18, scale: 2 }).default("0"),
+  stage: gstDocStageEnum("stage").notNull().default("stored"),
+  extractionMethod: extractionMethodEnum("extraction_method").default("manual"),
+  financialYear: text("financial_year").default("2024-25"),
+  storagePath: text("storage_path").notNull(),
+  contentSha256: text("content_sha256").notNull(),
+  lockedAt: timestamp("locked_at"),
+  rejectionReason: text("rejection_reason"),
+  createdAt: timestamp("created_at").defaultNow().notNull(),
+  updatedAt: timestamp("updated_at").defaultNow().notNull(),
+}, (t) => ({
+  tenantShaIdx: uniqueIndex("gst_documents_tenant_sha_uidx").on(t.tenantId, t.contentSha256),
+}));
+
+export const documentLines = pgTable("document_lines", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => gstDocuments.id, { onDelete: "cascade" }),
+  seq: integer("seq").notNull(),
+  description: text("description"),
+  hsnSac: text("hsn_sac"),
+  unit: text("unit"),
+  qty: numeric("qty", { precision: 18, scale: 4 }),
+  rate: numeric("rate", { precision: 18, scale: 4 }),
+  taxable: numeric("taxable", { precision: 18, scale: 2 }),
+  igstRate: numeric("igst_rate", { precision: 6, scale: 2 }),
+  igst: numeric("igst", { precision: 18, scale: 2 }),
+  cgstRate: numeric("cgst_rate", { precision: 6, scale: 2 }),
+  cgst: numeric("cgst", { precision: 18, scale: 2 }),
+  sgstRate: numeric("sgst_rate", { precision: 6, scale: 2 }),
+  sgst: numeric("sgst", { precision: 18, scale: 2 }),
+  cess: numeric("cess", { precision: 18, scale: 2 }),
+  total: numeric("total", { precision: 18, scale: 2 }),
+});
+
+export const documentIssues = pgTable("document_issues", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => gstDocuments.id, { onDelete: "cascade" }),
+  field: text("field"),
+  severity: text("severity", { enum: ["error", "warning"] }).notNull(),
+  message: text("message").notNull(),
+});

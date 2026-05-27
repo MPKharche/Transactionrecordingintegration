@@ -1,0 +1,53 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_DB: ca_saas
+          POSTGRES_USER: ca_user
+          POSTGRES_PASSWORD: ca_pass
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U ca_user -d ca_saas"
+          --health-interval 10s
+          --health-timeout 5s
+          --health-retries 5
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+    env:
+      DATABASE_URL: postgresql://ca_user:ca_pass@localhost:5433/ca_saas
+      REDIS_HOST: localhost
+      REDIS_PORT: "6379"
+      AUTH_DEV_BYPASS: "true"
+      MINIO_ENDPOINT: localhost
+      MINIO_PORT: "9000"
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+      MINIO_BUCKET: ca-uploads
+    steps:
+      - uses: actions/checkout@v4
+      - uses: pnpm/action-setup@v4
+        with:
+          version: 9
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: pnpm
+      - run: pnpm install
+      - run: pnpm db:push
+      - run: pnpm test:audit
+      - run: pnpm test
+      - run: pnpm --filter @ca-suite/web build
