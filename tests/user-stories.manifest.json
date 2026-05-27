@@ -84,6 +84,14 @@
       "test": "us-records.spec.ts"
     },
     {
+      "id": "US-RECORDS-02",
+      "persona": "Article clerk",
+      "objective": "Bulk approve (lock) reviewed documents",
+      "acceptance": "Select multiple ready_for_review rows and bulk lock via API",
+      "layer": "ui",
+      "test": "RecordsScreen.tsx"
+    },
+    {
       "id": "US-REVIEW-01",
       "persona": "Article clerk",
       "objective": "Review GST fields with validation feedback",

@@ -35,6 +35,7 @@ Every user story ID must appear in at least one test file. E2E tests **fail loud
 | US-UPLOAD-01 | Clerk | FY + doc type on upload | e2e | `us-upload.spec.ts` |
 | US-UPLOAD-02 | Clerk | PDF ingest | e2e | `us-upload.spec.ts` |
 | US-RECORDS-01 | Clerk | Records filters | e2e | `us-records.spec.ts` |
+| US-RECORDS-02 | Clerk | Bulk lock ready docs | ui | `RecordsScreen.tsx` |
 | US-REVIEW-01 | Clerk | Review validation UI | e2e | `us-review.spec.ts` |
 | US-REVIEW-02 | Clerk | POS → supply type | e2e | `us-review.spec.ts` |
 | US-GST-01 | Partner | GST registers | e2e | `us-registers.spec.ts` |

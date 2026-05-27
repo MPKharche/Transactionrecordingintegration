@@ -96,12 +96,15 @@ export async function syncGstFromExtractor(
   let supplyType = "intra_state";
   const lineRows: (typeof documentLines.$inferInsert)[] = [];
 
+  const rawMethod = result.extractionMethod ?? "";
   const extractionMethod =
-    result.extractionMethod === "ai"
+    rawMethod === "ai" || rawMethod === "openrouter"
       ? "ai"
-      : result.extractionMethod === "template"
+      : rawMethod === "template"
         ? "template"
-        : "merged";
+        : rawMethod === "merged"
+          ? "merged"
+          : "ai";
 
   if (result.docType === "sales_invoice" && result.salesInvoice) {
     const inv = result.salesInvoice as Record<string, unknown>;

@@ -25,7 +25,8 @@ function verifyStoryCoverage() {
   const e2eDir = path.join(root, "tests/e2e");
   const unitDir = path.join(root, "tests");
   const blobs = [];
-  for (const dir of [e2eDir, unitDir]) {
+  const featuresDir = path.join(root, "apps/web/src/features");
+  for (const dir of [e2eDir, unitDir, featuresDir]) {
     for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
       if (f.isFile() && /\.(ts|tsx)$/.test(f.name)) {
         blobs.push(fs.readFileSync(path.join(dir, f.name), "utf8"));

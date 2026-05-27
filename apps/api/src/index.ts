@@ -999,6 +999,8 @@ export async function buildApp() {
     const ids = req.body?.ids ?? [];
     const locked: string[] = [];
     const errors: { id: string; errors: string[] }[] = [];
+    const lockedNumbersByClient = new Map<string, Set<string>>();
+
     for (const id of ids) {
       const doc = await loadDocument(id, ctx.tenantId);
       if (!doc) {
@@ -1010,15 +1012,94 @@ export async function buildApp() {
         .from(clients)
         .where(and(eq(clients.id, doc.client_id), eq(clients.tenantId, ctx.tenantId)))
         .limit(1);
-      const check = canLockDocument(doc, { clientGstin: client?.gstin });
+      let existingLockedNumbers =
+        lockedNumbersByClient.get(doc.client_id) ??
+        new Set(
+          (
+            await db
+              .select({ docNumber: gstDocuments.docNumber })
+              .from(gstDocuments)
+              .where(
+                and(
+                  eq(gstDocuments.tenantId, ctx.tenantId),
+                  eq(gstDocuments.clientId, doc.client_id),
+                  eq(gstDocuments.stage, "locked")
+                )
+              )
+          )
+            .map((r) => r.docNumber)
+            .filter((n): n is string => Boolean(n?.trim()) && n !== "—")
+        );
+      if (!lockedNumbersByClient.has(doc.client_id)) {
+        lockedNumbersByClient.set(doc.client_id, existingLockedNumbers);
+      }
+
+      const check = canLockDocument(doc, {
+        clientGstin: client?.gstin,
+        existingLockedNumbers: [...existingLockedNumbers].filter((n) => n !== doc.doc_number),
+      });
       if (!check.ok) {
         errors.push({ id, errors: check.errors });
         continue;
       }
+
+      for (const p of [doc.supplier, doc.recipient]) {
+        if (!p.gstin) continue;
+        await db
+          .insert(partyMaster)
+          .values({
+            gstin: p.gstin.toUpperCase(),
+            tenantId: ctx.tenantId,
+            name: p.name,
+            pan: p.pan,
+            address: p.address,
+            city: p.city,
+            state: p.state,
+            stateCode: p.state_code,
+            mobile: p.mobile,
+            email: p.email,
+            isRegistered: p.is_registered,
+          })
+          .onConflictDoUpdate({
+            target: [partyMaster.tenantId, partyMaster.gstin],
+            set: {
+              name: p.name,
+              pan: p.pan,
+              address: p.address,
+              city: p.city,
+              state: p.state,
+              stateCode: p.state_code,
+              mobile: p.mobile,
+              email: p.email,
+              isRegistered: p.is_registered,
+              lastSeen: new Date(),
+            },
+          });
+      }
+
       await db
         .update(gstDocuments)
-        .set({ stage: "locked", lockedAt: new Date(), updatedAt: new Date() })
+        .set({
+          stage: "locked",
+          lockedAt: new Date(),
+          recordedAt: new Date().toISOString(),
+          updatedAt: new Date(),
+        })
         .where(eq(gstDocuments.id, id));
+
+      const issueRows = await db
+        .select()
+        .from(documentIssues)
+        .where(eq(documentIssues.documentId, id));
+      const errorIds = issueRows.filter((i) => i.severity === "error").map((i) => i.id);
+      if (errorIds.length) {
+        await db.delete(documentIssues).where(inArray(documentIssues.id, errorIds));
+      }
+
+      if (doc.doc_number && doc.doc_number !== "—") {
+        existingLockedNumbers.add(doc.doc_number);
+      }
+      await audit(ctx, "document.lock", "document", id, { bulk: true }, req);
       locked.push(id);
     }
     return { locked, errors };

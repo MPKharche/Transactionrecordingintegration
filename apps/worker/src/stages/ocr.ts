@@ -26,11 +26,17 @@ async function downloadFromMinio(storagePath: string): Promise<Buffer> {
 }
 
 async function extractPdfText(buffer: Buffer): Promise<string> {
-  // Simple heuristic: look for text between BT and ET markers in PDF
-  const text = buffer.toString("latin1");
-  const matches = text.match(/BT([\s\S]*?)ET/g) ?? [];
+  try {
+    const pdfParse = (await import("pdf-parse")).default;
+    const parsed = await pdfParse(buffer);
+    const text = (parsed.text ?? "").replace(/\s+/g, " ").trim();
+    if (text.length >= 40) return text.slice(0, 8000);
+  } catch (err) {
+    console.warn("[ocr] pdf-parse failed, using fallback:", err);
+  }
+  const latin = buffer.toString("latin1");
+  const matches = latin.match(/BT([\s\S]*?)ET/g) ?? [];
   const raw = matches.join(" ").replace(/\(|\)/g, " ").replace(/Tj|TJ|Td|Tm|Tf/g, " ").trim();
-  // Fallback: return printable ASCII
   return raw.replace(/[^\x20-\x7E\n]/g, " ").replace(/\s+/g, " ").slice(0, 8000);
 }
 

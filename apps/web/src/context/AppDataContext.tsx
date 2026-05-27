@@ -22,6 +22,9 @@ type Ctx = {
   patchClient: (id: string, patch: Partial<Client>) => Promise<void>;
   patchDocument: (id: string, patch: Partial<GSTDocument>) => Promise<void>;
   lockDocument: (id: string) => Promise<void>;
+  bulkLockDocuments: (
+    ids: string[]
+  ) => Promise<{ locked: string[]; errors: { id: string; errors: string[] }[] }>;
   rejectDocument: (id: string, reason?: string) => Promise<void>;
   retryDocument: (id: string) => Promise<void>;
   uploadFile: (
@@ -113,6 +116,23 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setPartyByGstin(parties);
   }, []);
 
+  const bulkLockDocuments = useCallback(async (ids: string[]) => {
+    const res = await api.documents.bulkLock(ids);
+    const lockedSet = new Set(res.locked);
+    setDocs((prev) =>
+      prev.map((d) =>
+        lockedSet.has(d.id)
+          ? { ...d, stage: "locked" as const, recorded_at: new Date().toISOString().slice(0, 10) }
+          : d
+      )
+    );
+    if (res.locked.length > 0) {
+      const parties = await api.parties.list();
+      setPartyByGstin(parties);
+    }
+    return res;
+  }, []);
+
   const rejectDocument = useCallback(async (id: string, reason?: string) => {
     const updated = await api.documents.reject(id, reason);
     setDocs((prev) => prev.map((d) => (d.id === id ? updated : d)));
@@ -145,6 +165,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       patchClient,
       patchDocument,
       lockDocument,
+      bulkLockDocuments,
       rejectDocument,
       retryDocument,
       uploadFile,
@@ -161,6 +182,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       patchClient,
       patchDocument,
       lockDocument,
+      bulkLockDocuments,
       rejectDocument,
       retryDocument,
       uploadFile,

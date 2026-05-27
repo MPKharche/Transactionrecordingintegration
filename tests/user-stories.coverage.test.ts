@@ -18,6 +18,7 @@ describe("User story manifest coverage", () => {
   const blobs = [
     ...readTestFiles(path.join(process.cwd(), "tests/e2e")),
     ...readTestFiles(path.join(process.cwd(), "tests")),
+    ...readTestFiles(path.join(process.cwd(), "apps/web/src/features")),
   ].join("\n");
 
   for (const story of manifest.stories) {

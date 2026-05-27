@@ -11,10 +11,10 @@ import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
 import type { Screen } from "../../components/layout/Sidebar";
 
 import {
-  Search, Filter, Download, Eye, ChevronRight, ExternalLink,
-  Building2, ChevronDown,
+  Search, Download, ExternalLink, Building2, ChevronDown, Lock, X,
 } from "lucide-react";
 
+/** US-RECORDS-02: bulk lock (approve) for ready_for_review documents */
 const RECORD_TABS: { id: DocType | "all"; label: string }[] = [
   { id: "all", label: "All" },
   { id: "sales_invoice", label: "Sales Invoices" },
@@ -29,17 +29,26 @@ export function RecordsScreen({
   isDark,
   onReview,
   onRetry,
+  onBulkLock,
 }: {
   docs: GSTDocument[];
   clients: Client[];
   isDark: boolean;
   onReview: (id: string) => void;
   onRetry?: (id: string) => Promise<void>;
+  onBulkLock?: (
+    ids: string[]
+  ) => Promise<{ locked: string[]; errors: { id: string; errors: string[] }[] }>;
 }) {
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
   const [docTab, setDocTab] = useState<DocType | "all">("all");
   const [stageF, setStageF] = useState<"all" | "locked" | "pending">("all");
   const [search, setSearch] = useState("");
+  const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [bulkBusy, setBulkBusy] = useState(false);
+  const [bulkMsg, setBulkMsg] = useState<{ ok: number; fail: number; detail?: string } | null>(
+    null
+  );
 
   const client = clients.find((c) => c.id === clientId) ?? clients[0];
   if (!client) {
@@ -75,6 +84,77 @@ export function RecordsScreen({
     total:   filtered.reduce((s, d) => s + d.total, 0),
   }), [filtered]);
 
+  const lockableInView = useMemo(
+    () => filtered.filter((d) => d.stage === "ready_for_review"),
+    [filtered]
+  );
+
+  const allLockableSelected =
+    lockableInView.length > 0 && lockableInView.every((d) => selected.has(d.id));
+
+  function toggleSelect(id: string) {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function toggleSelectAllLockable() {
+    if (allLockableSelected) {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        lockableInView.forEach((d) => next.delete(d.id));
+        return next;
+      });
+    } else {
+      setSelected((prev) => {
+        const next = new Set(prev);
+        lockableInView.forEach((d) => next.add(d.id));
+        return next;
+      });
+    }
+  }
+
+  async function runBulkLock() {
+    if (!onBulkLock || selected.size === 0) return;
+    const ids = [...selected].filter((id) => {
+      const d = docs.find((x) => x.id === id);
+      return d?.stage === "ready_for_review";
+    });
+    if (ids.length === 0) return;
+    setBulkBusy(true);
+    setBulkMsg(null);
+    try {
+      const res = await onBulkLock(ids);
+      setBulkMsg({
+        ok: res.locked.length,
+        fail: res.errors.length,
+        detail:
+          res.errors.length > 0
+            ? res.errors
+                .slice(0, 3)
+                .map((e) => `${e.id.slice(0, 8)}…: ${e.errors.join(", ")}`)
+                .join(" · ")
+            : undefined,
+      });
+      setSelected((prev) => {
+        const next = new Set(prev);
+        res.locked.forEach((id) => next.delete(id));
+        return next;
+      });
+    } catch (err) {
+      setBulkMsg({
+        ok: 0,
+        fail: ids.length,
+        detail: err instanceof Error ? err.message : "Bulk lock failed",
+      });
+    } finally {
+      setBulkBusy(false);
+    }
+  }
+
   const tabCount = (id: DocType | "all") => {
     if (id === "all") return docs.filter(d => d.client_id === clientId).length;
     const isDN = id === "debit_note_issued";
@@ -89,7 +169,18 @@ export function RecordsScreen({
           <h1 className="text-xl font-bold text-foreground">Records</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Document register by client</p>
         </div>
-        <div className="flex items-center gap-2">
+        <div className="flex items-center gap-2 flex-wrap justify-end">
+          {onBulkLock && selected.size > 0 && (
+            <button
+              type="button"
+              disabled={bulkBusy}
+              onClick={runBulkLock}
+              className="flex items-center gap-1.5 px-3 py-2 bg-primary text-white text-sm font-semibold rounded-lg hover:bg-primary/90 disabled:opacity-60 transition-colors shadow-sm"
+            >
+              <Lock size={14} />
+              {bulkBusy ? "Locking…" : `Lock selected (${selected.size})`}
+            </button>
+          )}
           <button onClick={() => {
             const cp = (d: GSTDocument) => getCounterParty(d);
             exportCSV(`records_${clientId}.csv`,
@@ -131,6 +222,37 @@ export function RecordsScreen({
         ))}
       </div>
 
+      {bulkMsg && (
+        <div
+          className={`flex items-start justify-between gap-3 rounded-xl border px-4 py-3 text-sm ${
+            bulkMsg.fail > 0
+              ? "border-amber-500/40 bg-amber-500/10 text-foreground"
+              : "border-emerald-500/40 bg-emerald-500/10 text-foreground"
+          }`}
+        >
+          <p>
+            <span className="font-semibold">{bulkMsg.ok} locked</span>
+            {bulkMsg.fail > 0 && (
+              <span className="text-muted-foreground">
+                {" "}
+                · {bulkMsg.fail} could not be locked
+              </span>
+            )}
+            {bulkMsg.detail && (
+              <span className="block text-xs text-muted-foreground mt-1">{bulkMsg.detail}</span>
+            )}
+          </p>
+          <button
+            type="button"
+            onClick={() => setBulkMsg(null)}
+            className="text-muted-foreground hover:text-foreground shrink-0"
+            aria-label="Dismiss"
+          >
+            <X size={16} />
+          </button>
+        </div>
+      )}
+
       <div className="flex items-center gap-3 flex-wrap">
         <div className="flex gap-1 flex-wrap border-b border-border pb-0">
           {RECORD_TABS.map(t => (
@@ -162,6 +284,18 @@ export function RecordsScreen({
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-muted/50">
+              {onBulkLock && (
+                <th className="px-3 py-3 w-10">
+                  <input
+                    type="checkbox"
+                    checked={allLockableSelected}
+                    disabled={lockableInView.length === 0}
+                    onChange={toggleSelectAllLockable}
+                    title="Select all ready for review in this list"
+                    className="rounded border-border"
+                  />
+                </th>
+              )}
               {[
                 { label: "#",            align: "left"  },
                 { label: "Doc Number",   align: "left"  },
@@ -181,12 +315,25 @@ export function RecordsScreen({
           </thead>
           <tbody className="divide-y divide-border">
             {filtered.length === 0 && (
-              <tr><td colSpan={11} className="px-5 py-10 text-center text-sm text-muted-foreground">No documents for this selection</td></tr>
+              <tr><td colSpan={onBulkLock ? 12 : 11} className="px-5 py-10 text-center text-sm text-muted-foreground">No documents for this selection</td></tr>
             )}
             {filtered.map((d, idx) => {
               const cp = getCounterParty(d);
               return (
                 <tr key={d.id} className="hover:bg-muted/30 transition-colors">
+                  {onBulkLock && (
+                    <td className="px-3 py-3.5">
+                      {d.stage === "ready_for_review" ? (
+                        <input
+                          type="checkbox"
+                          checked={selected.has(d.id)}
+                          onChange={() => toggleSelect(d.id)}
+                          className="rounded border-border"
+                          aria-label={`Select ${d.doc_number}`}
+                        />
+                      ) : null}
+                    </td>
+                  )}
                   <td className="px-4 py-3.5 text-sm text-muted-foreground">{idx + 1}</td>
                   <td className="px-4 py-3.5 font-mono text-sm text-foreground whitespace-nowrap">{d.doc_number}</td>
                   <td className="px-4 py-3.5 font-mono text-sm text-foreground whitespace-nowrap">{d.doc_date || "—"}</td>
@@ -226,12 +373,12 @@ export function RecordsScreen({
           {filtered.length > 1 && (
             <tfoot>
               <tr className="border-t-2 border-border">
-                <td colSpan={5} className="px-4 py-3 text-sm font-semibold text-muted-foreground">Total — {filtered.length} documents</td>
+                <td colSpan={onBulkLock ? 6 : 5} className="px-4 py-3 text-sm font-semibold text-muted-foreground">Total — {filtered.length} documents</td>
                 <td className="px-4 py-3 font-mono text-sm font-bold text-right text-foreground">{INR_SIGNED(totals.taxable)}</td>
                 <td className="px-4 py-3 font-mono text-sm font-bold text-right" style={{ color: isDark ? "#60a5fa" : "#1d6af5" }}>{INR_SIGNED(totals.igst)}</td>
                 <td className="px-4 py-3 font-mono text-sm font-bold text-right" style={{ color: isDark ? "#a78bfa" : "#6941c6" }}>{INR_SIGNED(totals.cgst + totals.sgst)}</td>
                 <td className="px-4 py-3 font-mono text-sm font-bold text-right text-foreground">{INR_SIGNED(totals.total)}</td>
-                <td colSpan={2} />
+                <td colSpan={onBulkLock ? 3 : 2} />
               </tr>
             </tfoot>
           )}

@@ -63,6 +63,7 @@ class ExtractRequest(BaseModel):
     storage_path: str
     ocr_text: str = ""
     source_url: str = ""
+    mime_type: str = ""
 
 class SalesLineItem(BaseModel):
     """Zoho sales invoice line columns (subset + extras)."""
@@ -226,124 +227,86 @@ class ExtractorResponse(BaseModel):
     salesInvoice: Optional[SalesInvoice] = None
     purchaseBill: Optional[PurchaseBill] = None
 
-# ─── LLM extraction ───────────────────────────────────────────────────────────
-
-SYSTEM_PROMPT = """You are a GST document parser for Indian invoices and bills.
-Output must align with Zoho Books CSV import field names (camelCase below).
-Return ONLY valid JSON. Use null for missing values. All amounts and quantities as strings.
-
-Classify docType:
-- "sales_invoice": tax invoice / bill of supply issued by seller to buyer
-- "purchase_bill": invoice received from vendor (inward supply / expense bill)
-- "unknown": cannot determine
-
-Top-level:
-{
-  "docType": "sales_invoice" | "purchase_bill" | "unknown",
-  "confidence": "high" | "medium" | "low",
-  "salesInvoice": { ... } | null,
-  "purchaseBill": { ... } | null,
-  "issues": []
-}
-
-salesInvoice (include every field you can infer from the document):
-- Header: invoiceNumber, estimateNumber, invoiceDate, invoiceStatus, customerName, gstTreatment,
-  tcsTaxName, tcsPercentage, tcsAmount, natureOfCollection, tcsPayableAccount, tcsReceivableAccount,
-  gstin, tdsName, tdsPercentage, tdsSectionCode, tdsAmount, placeOfSupply, purchaseOrder,
-  expenseReferenceId, paymentTerms, paymentTermsLabel, dueDate, expectedPaymentDate, salesperson,
-  shippingChargeTaxName, shippingChargeTaxType, shippingChargeTaxPct, shippingCharge,
-  shippingChargeTaxExemptionCode, shippingChargeSacCode, currencyCode, exchangeRate,
-  isExportWithoutLutBond, taxCollectedFromCustomer, projectName, supplyType, discountType,
-  isDiscountBeforeTax, entityDiscountPercent, entityDiscountAmount, adjustment, adjustmentDescription,
-  ecommerceOperatorName, ecommerceOperatorGstin, paypal, razorpay, partialPayments, templateName,
-  notes, termsAndConditions, branchName, warehouseName
-- lines[] (sales): account, itemName, sku, itemDesc, itemType, hsnSac, quantity, usageUnit,
-  itemPrice, itemTaxExemptionReason, isInclusiveTax, itemTax, itemTaxType, itemTaxPct,
-  reverseChargeTaxName, reverseChargeTaxRate, reverseChargeTaxType, discount, discountAmount
-
-purchaseBill:
-- Header: billDate, billNumber, purchaseOrder, billStatus, sourceOfSupply, destinationOfSupply,
-  gstTreatment, gstin, isInclusiveTax, tdsPercentage, tdsAmount, tdsSectionCode, tdsName,
-  vendorName, dueDate, currencyCode, exchangeRate, attachmentId, attachmentPreviewId,
-  attachmentName, attachmentType, attachmentSize, adjustment, subtotal, total, balance,
-  vendorNotes, termsAndConditions, paymentTerms, paymentTermsLabel, isBillable, customerName,
-  projectName, purchaseOrderNumber, isDiscountBeforeTax, entityDiscountAmount, discountAccount,
-  isLandedCost, warehouseName, branchName, cfTransporteName, tcsTaxName, tcsPercentage,
-  natureOfCollection, tcsAmount, supplyType, itcEligibility
-- lines[] (purchase): itemName, sku, itemDescription, account, usageUnit, quantity, rate,
-  itemType, taxName, taxPercentage, taxAmount, taxType, itemExemptionCode,
-  reverseChargeTaxName, reverseChargeTaxRate, reverseChargeTaxType, itemTotal, hsnSac
-
-Rules: Dates YYYY-MM-DD preferred. Indian state codes 2 letters for place/source/destination of supply.
-GSTIN: 15-char GST format when visible.
-""".strip()
-
-async def llm_extract(text: str) -> dict:
-    if not OPENROUTER_API_KEY:
-        return {"docType": "unknown", "confidence": "low", "issues": ["No OpenRouter API key configured"], "extractionMethod": "stub"}
-
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={"Authorization": f"Bearer {OPENROUTER_API_KEY}", "Content-Type": "application/json"},
-            json={
-                "model": MODEL,
-                "messages": [
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": f"Document text:\n\n{text[:6000]}"},
-                ],
-                "temperature": 0.1,
-            },
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-
-    # Extract JSON from response (may be wrapped in markdown)
-    match = re.search(r"\{[\s\S]*\}", content)
-    if not match:
-        return {"docType": "unknown", "confidence": "low", "issues": ["LLM did not return valid JSON"], "extractionMethod": "openrouter"}
-    return json.loads(match.group())
-
-
-def extract_pdf_text(path: Path) -> str:
-    if PdfReader is None:
-        return ""
-    try:
-        reader = PdfReader(str(path))
-        return " ".join(p.extract_text() or "" for p in reader.pages)[:8000]
-    except Exception as e:
-        log.warning(f"PDF text extraction failed: {e}")
-        return ""
+from extractor_core import (
+    extract_document_text,
+    llm_extract,
+    merge_results,
+    template_to_extractor_shape,
+    try_invoice2data,
+)
+from minio_fetch import fetch_object
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
-    return {"status": "ok", "invoice2data": HAS_INVOICE2DATA, "tesseract": HAS_TESSERACT}
+    from extractor_core import HAS_PDF2IMAGE, HAS_TESSERACT as _TESS
+    return {
+        "status": "ok",
+        "invoice2data": HAS_INVOICE2DATA,
+        "tesseract": _TESS,
+        "pdf_ocr": HAS_PDF2IMAGE,
+        "openrouter": bool(OPENROUTER_API_KEY),
+        "model": MODEL,
+    }
 
 @app.post("/extract", response_model=ExtractorResponse, dependencies=[Depends(require_auth)])
 async def extract(req: ExtractRequest):
-    ocr_text = req.ocr_text.strip()
-    method = "ocr_text" if ocr_text else "unknown"
+    ocr_text = (req.ocr_text or "").strip()
+    file_bytes = fetch_object(req.storage_path)
+    mime = req.mime_type or ""
 
-    # If caller provided OCR text, use it directly; otherwise we can't do much without file access
-    combined_text = ocr_text[:8000] if ocr_text else ""
+    combined_text = ocr_text
+    text_method = "worker_ocr" if ocr_text else ""
+
+    if file_bytes:
+        file_text, file_method = extract_document_text(file_bytes, mime, req.storage_path)
+        if len(file_text) > len(combined_text):
+            combined_text = file_text
+            text_method = file_method
+
+    combined_text = combined_text[:8000].strip()
 
     if not combined_text:
         return ExtractorResponse(
-            docType="unknown", confidence="low",
+            docType="unknown",
+            confidence="low",
             extractionMethod="stub",
-            issues=["No text extracted from document"],
+            issues=["No text extracted — ensure PDF has a text layer or image is readable"],
         )
 
+    template_result = None
+    if file_bytes:
+        tpl_raw = try_invoice2data(file_bytes, req.storage_path)
+        if tpl_raw:
+            template_result = template_to_extractor_shape(tpl_raw)
+
     try:
-        result = await llm_extract(combined_text)
-        result["extractionMethod"] = "openrouter"
+        llm_result = await llm_extract(combined_text)
+        if template_result and llm_result.get("extractionMethod") != "stub":
+            result = merge_results(template_result, llm_result)
+        elif template_result and llm_result.get("extractionMethod") == "stub":
+            result = template_result
+            result["issues"] = list(
+                set((result.get("issues") or []) + (llm_result.get("issues") or []))
+            )
+        else:
+            result = llm_result
+
+        if text_method and result.get("extractionMethod") not in ("stub",):
+            result.setdefault("issues", [])
+            if text_method not in str(result["issues"]):
+                result["issues"] = [f"Text via {text_method}", *result["issues"][:5]]
+
         return ExtractorResponse(**result)
     except Exception as e:
-        log.error(f"LLM extraction failed: {e}")
+        log.error("Extraction failed: %s", e)
+        if template_result:
+            template_result["issues"] = [f"LLM failed: {e}", *(template_result.get("issues") or [])]
+            return ExtractorResponse(**template_result)
         return ExtractorResponse(
-            docType="unknown", confidence="low",
+            docType="unknown",
+            confidence="low",
             extractionMethod="stub",
             issues=[f"Extraction failed: {str(e)}"],
         )

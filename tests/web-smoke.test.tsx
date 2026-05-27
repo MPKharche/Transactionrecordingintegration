@@ -22,6 +22,7 @@ vi.mock("../apps/web/src/lib/api", () => ({
       list: () => Promise.resolve([]),
       patch: vi.fn(),
       lock: vi.fn(),
+      bulkLock: vi.fn(),
       retry: vi.fn(),
       reject: vi.fn(),
       upload: vi.fn(),

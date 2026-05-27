@@ -24,6 +24,7 @@ export function AppShell() {
     refresh,
     patchDocument,
     lockDocument,
+    bulkLockDocuments,
     rejectDocument,
     retryDocument,
   } = useAppData();
@@ -109,6 +110,7 @@ export function AppShell() {
             isDark={isDark}
             onReview={openReview}
             onRetry={retryDocument}
+            onBulkLock={bulkLockDocuments}
           />
         )}
         {screen === "review" && reviewId && (
