@@ -6,6 +6,7 @@ import {
   ChevronDown, ExternalLink, Sun, Moon, Monitor,
   ArrowRight, Building2, ReceiptText, FileWarning, Info,
   TrendingUp, Clock, Phone, Mail, ArrowLeft, Filter,
+  Download,
 } from "lucide-react";
 
 // ── Theme ─────────────────────────────────────────────────────────────────────
@@ -129,6 +130,12 @@ const P_MSFT      = mkParty("Microsoft Corporation India", "27AABCM3025E1ZD", "A
 const P_SPENCERS  = mkParty("Spencer's Retail Ltd", "19AABCS5809K1ZE", "AABCS5809K", "Duncan House, 31 Netaji Subhash Road", "Kolkata", "West Bengal", "19", "+91 33 4011 0100", "gst@spencersretail.com", true);
 const P_EMPTY     = mkParty("", "", "", "", "", "", "", "", "", false);
 
+const GSTIN_MASTER: Record<string, Party> = {};
+[P_RELIANCE, P_TATA, P_HDFC, P_INFOSYS, P_ITC, P_FUTURE, P_SIEMENS, P_FORD,
+ P_BAJAJ, P_ACCENTURE, P_MSFT, P_SPENCERS].forEach(p => {
+  if (p.gstin) GSTIN_MASTER[p.gstin.toUpperCase()] = { ...p };
+});
+
 const DOCS: GSTDocument[] = [
   { id: "a1b2c3d4-e5f6-7890-abcd-ef1234567890", filename: "Reliance_INV_Apr24_001.pdf", client_id: "c1", doc_type: "sales_invoice", doc_number: "RRL/24-25/0412", doc_date: "2024-04-03", recorded_at: "2024-04-08 11:22", supplier: P_RELIANCE, recipient: P_FUTURE, supply_type: "intra_state", reverse_charge: false, place_of_supply: "Maharashtra (27)", lines: [mkLine("l1","Store Fit-out Services","996512",1,250000,18,false), mkLine("l2","Signage & Branding","998313",1,75000,18,false)], taxable_amount: 325000, igst: 0, cgst: 29250, sgst: 29250, cess: 0, total: 383500, stage: "locked", extraction_method: "template", issues: [] },
   { id: "b2c3d4e5-f6a7-8901-bcde-f12345678901", filename: "Reliance_PURCH_Siemens.pdf", client_id: "c1", doc_type: "purchase_invoice", doc_number: "SIE/2024/B/00981", doc_date: "2024-04-07", recorded_at: "", supplier: P_SIEMENS, recipient: P_RELIANCE, supply_type: "intra_state", reverse_charge: false, place_of_supply: "Maharashtra (27)", lines: [mkLine("l1","Industrial Compressor Unit","84143090",2,180000,18,false)], taxable_amount: 360000, igst: 0, cgst: 32400, sgst: 32400, cess: 0, total: 424800, stage: "ready_for_review", extraction_method: "ai", issues: [{ field: "GSTIN", severity: "warning", message: "Could not verify against GSTIN registry" }] },
@@ -147,6 +154,44 @@ const DOCS: GSTDocument[] = [
 const INR = (n: number) => n === 0 ? "—" : "₹" + Math.abs(n).toLocaleString("en-IN");
 const INR_SIGNED = (n: number) => { if (n === 0) return "—"; return (n < 0 ? "−₹" : "₹") + Math.abs(n).toLocaleString("en-IN"); };
 const clientById = (id: string) => CLIENTS.find(c => c.id === id);
+
+// ── Validators ────────────────────────────────────────────────────────────────
+const isValidGSTIN  = (g: string) => /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g.toUpperCase());
+const isValidPAN    = (p: string) => /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(p.toUpperCase());
+const GST_SLABS = [0, 0.1, 0.25, 1, 1.5, 2, 3, 5, 6, 7.5, 12, 18, 28];
+
+const INDIAN_STATES: { code: string; name: string }[] = [
+  { code: "01", name: "Jammu & Kashmir" }, { code: "02", name: "Himachal Pradesh" },
+  { code: "03", name: "Punjab" }, { code: "04", name: "Chandigarh" },
+  { code: "05", name: "Uttarakhand" }, { code: "06", name: "Haryana" },
+  { code: "07", name: "Delhi" }, { code: "08", name: "Rajasthan" },
+  { code: "09", name: "Uttar Pradesh" }, { code: "10", name: "Bihar" },
+  { code: "11", name: "Sikkim" }, { code: "12", name: "Arunachal Pradesh" },
+  { code: "13", name: "Nagaland" }, { code: "14", name: "Manipur" },
+  { code: "15", name: "Mizoram" }, { code: "16", name: "Tripura" },
+  { code: "17", name: "Meghalaya" }, { code: "18", name: "Assam" },
+  { code: "19", name: "West Bengal" }, { code: "20", name: "Jharkhand" },
+  { code: "21", name: "Odisha" }, { code: "22", name: "Chhattisgarh" },
+  { code: "23", name: "Madhya Pradesh" }, { code: "24", name: "Gujarat" },
+  { code: "26", name: "Dadra & Nagar Haveli and Daman & Diu" },
+  { code: "27", name: "Maharashtra" }, { code: "28", name: "Andhra Pradesh (new)" },
+  { code: "29", name: "Karnataka" }, { code: "30", name: "Goa" },
+  { code: "31", name: "Lakshadweep" }, { code: "32", name: "Kerala" },
+  { code: "33", name: "Tamil Nadu" }, { code: "34", name: "Puducherry" },
+  { code: "35", name: "Andaman & Nicobar Islands" }, { code: "36", name: "Telangana" },
+  { code: "37", name: "Andhra Pradesh" }, { code: "38", name: "Ladakh" },
+];
+
+// ── CSV Export ────────────────────────────────────────────────────────────────
+function exportCSV(filename: string, headers: string[], rows: (string | number)[][]) {
+  const csv = [headers, ...rows]
+    .map(r => r.map(v => `"${String(v).replace(/"/g, '""')}"`).join(","))
+    .join("\n");
+  const a = document.createElement("a");
+  a.href = URL.createObjectURL(new Blob([csv], { type: "text/csv" }));
+  a.download = filename;
+  a.click();
+}
 
 // Returns the counter-party from the perspective of the client
 function getCounterParty(doc: GSTDocument): Party {
@@ -218,8 +263,8 @@ function Sidebar({ screen, onNav, pendingCount, mode, setMode, isDark }:
             <Shield size={15} className="text-white" />
           </div>
           <div>
-            <p className="text-sm font-bold text-sidebar-foreground leading-tight">CA Suite</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Practice Office</p>
+            <p className="text-sm font-bold text-sidebar-foreground leading-tight">CompliDesk</p>
+            <p className="text-xs text-muted-foreground mt-0.5">GST Practice Suite</p>
           </div>
         </div>
       </div>
@@ -347,9 +392,19 @@ function Dashboard({ docs, isDark, onNav }: { docs: GSTDocument[]; isDark: boole
       <div className="bg-card border border-border rounded-xl shadow-sm overflow-hidden">
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <p className="text-sm font-semibold text-foreground">Locked records by client</p>
-          <button onClick={() => onNav("records")} className="text-sm text-primary font-medium hover:underline flex items-center gap-1">
-            View all <ChevronRight size={14} />
-          </button>
+          <div className="flex items-center gap-3">
+            <button onClick={() => {
+              exportCSV("dashboard_client_summary.csv",
+                ["Client","GSTIN","State","Locked Docs","Total (₹)"],
+                clientSummary.map(c => [c.name, c.gstin, c.state, c.count, c.total])
+              );
+            }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
+              <Download size={13} /> Export
+            </button>
+            <button onClick={() => onNav("records")} className="text-sm text-primary font-medium hover:underline flex items-center gap-1">
+              View all <ChevronRight size={14} />
+            </button>
+          </div>
         </div>
         {clientSummary.length === 0
           ? <p className="px-6 py-8 text-center text-sm text-muted-foreground">No locked records yet</p>
@@ -485,6 +540,14 @@ function UploadScreen({ docs, isDark, onReview }: { docs: GSTDocument[]; isDark:
             <input value={search} onChange={e => setSearch(e.target.value)} placeholder="Search by filename or client…"
               className="w-full bg-card border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary" />
           </div>
+          <button onClick={() => {
+            exportCSV("all_documents.csv",
+              ["Filename","Client","Doc Number","Date","Type","Status","Issues"],
+              filtered.map(d => [d.filename, clientById(d.client_id)?.name ?? "", d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type].label, STAGE_META[d.stage].label, d.issues.length])
+            );
+          }} className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors">
+            <Download size={14} /> Export CSV
+          </button>
           <div className="flex gap-1.5">
             {([["all","All"],["ready_for_review","Needs Review"],["extracting","Processing"],["locked","Locked"],["failed","Failed"]] as [DocStage|"all",string][]).map(([id, label]) => (
               <button key={id} onClick={() => setStageF(id)}
@@ -607,13 +670,24 @@ function RecordsScreen({ docs, isDark, onReview }: { docs: GSTDocument[]; isDark
           <h1 className="text-xl font-bold text-foreground">Records</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Document register by client</p>
         </div>
-        <div className="relative">
-          <select value={clientId} onChange={e => setClientId(e.target.value)}
-            className="bg-card border border-border rounded-lg pl-10 pr-8 py-2.5 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer shadow-sm min-w-[220px]">
-            {CLIENTS.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
-          </select>
-          <Building2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
-          <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+        <div className="flex items-center gap-2">
+          <button onClick={() => {
+            const cp = (d: GSTDocument) => getCounterParty(d);
+            exportCSV(`records_${clientId}.csv`,
+              ["#","Doc Number","Date","Type","Counter-party","GSTIN","Taxable","IGST","CGST+SGST","Total","Status"],
+              filtered.map((d, i) => [i+1, d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type].label, cp(d).name, cp(d).gstin, d.taxable_amount, d.igst, d.cgst+d.sgst, d.total, STAGE_META[d.stage].label])
+            );
+          }} className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors">
+            <Download size={14} /> Export CSV
+          </button>
+          <div className="relative">
+            <select value={clientId} onChange={e => setClientId(e.target.value)}
+              className="bg-card border border-border rounded-lg pl-10 pr-8 py-2.5 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer shadow-sm min-w-[220px]">
+              {CLIENTS.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
+            </select>
+            <Building2 size={15} className="absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            <ChevronDown size={14} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+          </div>
         </div>
       </div>
 
@@ -738,52 +812,108 @@ function RecordsScreen({ docs, isDark, onReview }: { docs: GSTDocument[]; isDark
 function PartyPanel({ title, party, locked, onChange }: {
   title: string; party: Party; locked: boolean; onChange: (p: Party) => void;
 }) {
-  const inp = (cls = "") => `w-full rounded-lg px-3 py-2 text-sm border border-border bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-all ${cls}`;
-  const label = (text: string, icon?: React.ReactNode) => (
-    <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">{icon}{text}</label>
+  const inp = (err = false, cls = "") =>
+    `w-full rounded-lg px-3 py-2 text-sm border bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-all ${err ? "border-red-400" : "border-border"} ${cls}`;
+  const lbl = (text: string, required = false, icon?: React.ReactNode) => (
+    <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">
+      {icon}{text}{required && <span className="text-red-500">*</span>}
+    </label>
   );
+
+  const gstinValid = party.gstin ? isValidGSTIN(party.gstin) : null;
+  const panValid   = party.pan   ? isValidPAN(party.pan)     : null;
+  const masterMatch = party.gstin && gstinValid ? GSTIN_MASTER[party.gstin.toUpperCase()] : null;
+
+  function applyGSTINMaster() {
+    if (masterMatch) onChange({ ...party, ...masterMatch });
+  }
+
+  function handleGSTINChange(raw: string) {
+    const g = raw.toUpperCase();
+    const master = GSTIN_MASTER[g];
+    if (master) {
+      onChange({ ...party, gstin: g, ...master });
+    } else {
+      onChange({ ...party, gstin: g });
+    }
+  }
+
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-      <div className="px-4 py-2.5 border-b border-border bg-muted/40">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</p>
-        <p className="text-sm font-bold text-foreground mt-0.5 truncate">{party.name || <span className="text-muted-foreground italic font-normal">Not captured</span>}</p>
+      <div className="px-4 py-2.5 border-b border-border bg-muted/40 flex items-center justify-between gap-2">
+        <div className="min-w-0">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</p>
+          <p className="text-sm font-bold text-foreground mt-0.5 truncate">{party.name || <span className="text-muted-foreground italic font-normal">Not captured</span>}</p>
+        </div>
+        {masterMatch && masterMatch.name !== party.name && !locked && (
+          <button onClick={applyGSTINMaster}
+            className="text-xs px-2 py-1 rounded bg-amber-100 text-amber-700 border border-amber-300 hover:bg-amber-200 transition-colors whitespace-nowrap shrink-0">
+            Apply master
+          </button>
+        )}
       </div>
       <div className="p-4 space-y-3">
         <div>
-          {label("Legal Name")}
-          <input disabled={locked} value={party.name} onChange={e => onChange({ ...party, name: e.target.value })} placeholder="Enter legal name" className={inp()} />
+          {lbl("Legal Name", true)}
+          <input disabled={locked} value={party.name} onChange={e => onChange({ ...party, name: e.target.value })} placeholder="Enter legal name" className={inp(!party.name && !locked)} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            {label("GSTIN")}
-            <input disabled={locked} value={party.gstin} onChange={e => onChange({ ...party, gstin: e.target.value })} placeholder="22AAAAA0000A1Z5" className={inp("font-mono")} />
+            {lbl("GSTIN", true)}
+            <input disabled={locked} value={party.gstin} onChange={e => handleGSTINChange(e.target.value)}
+              placeholder="22AAAAA0000A1Z5" maxLength={15}
+              className={inp((!party.gstin || gstinValid === false) && !locked, "font-mono uppercase")} />
+            {party.gstin && gstinValid === false && <p className="text-xs text-red-500 mt-0.5">Invalid GSTIN format</p>}
+            {party.gstin && gstinValid === true && masterMatch && masterMatch.name !== party.name && (
+              <p className="text-xs text-amber-600 mt-0.5">Master name: {masterMatch.name}</p>
+            )}
+            {party.gstin && gstinValid === true && !masterMatch && (
+              <p className="text-xs text-muted-foreground mt-0.5">Valid format — not in local master</p>
+            )}
           </div>
           <div>
-            {label("PAN")}
-            <input disabled={locked} value={party.pan ?? ""} onChange={e => onChange({ ...party, pan: e.target.value })} placeholder="AAAAA0000A" className={inp("font-mono")} />
+            {lbl("PAN")}
+            <input disabled={locked} value={party.pan ?? ""} onChange={e => onChange({ ...party, pan: e.target.value.toUpperCase() })}
+              placeholder="AAAAA0000A" maxLength={10}
+              className={inp(panValid === false, "font-mono uppercase")} />
+            {party.pan && panValid === false && <p className="text-xs text-red-500 mt-0.5">Invalid PAN format</p>}
           </div>
         </div>
         <div>
-          {label("Address")}
+          {lbl("Address")}
           <input disabled={locked} value={party.address} onChange={e => onChange({ ...party, address: e.target.value })} placeholder="Street / building / area" className={inp()} />
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            {label("City")}
+            {lbl("City")}
             <input disabled={locked} value={party.city} onChange={e => onChange({ ...party, city: e.target.value })} className={inp()} />
           </div>
           <div>
-            {label("State")}
-            <input disabled={locked} value={party.state} onChange={e => onChange({ ...party, state: e.target.value })} className={inp()} />
+            {lbl("State")}
+            {locked
+              ? <input disabled value={party.state} className={inp()} />
+              : <div className="relative">
+                  <select value={party.state_code}
+                    onChange={e => {
+                      const s = INDIAN_STATES.find(x => x.code === e.target.value);
+                      if (s) onChange({ ...party, state: s.name, state_code: s.code });
+                    }}
+                    className={inp() + " appearance-none cursor-pointer pr-7"}>
+                    <option value="">— Select —</option>
+                    {INDIAN_STATES.map(s => <option key={s.code} value={s.code}>{s.name}</option>)}
+                  </select>
+                  <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+                </div>
+            }
           </div>
         </div>
         <div className="grid grid-cols-2 gap-3">
           <div>
-            {label("Mobile", <Phone size={11} />)}
+            {lbl("Mobile", false, <Phone size={11} />)}
             <input disabled={locked} value={party.mobile} onChange={e => onChange({ ...party, mobile: e.target.value })} placeholder="+91 98765 43210" className={inp()} />
           </div>
           <div>
-            {label("Email", <Mail size={11} />)}
+            {lbl("Email", false, <Mail size={11} />)}
             <input disabled={locked} value={party.email} onChange={e => onChange({ ...party, email: e.target.value })} placeholder="gst@company.com" className={inp()} />
           </div>
         </div>
@@ -809,8 +939,40 @@ function ReviewScreen({ docId, docs, isDark, onBack }: { docId: string; docs: GS
     reverse_charge:  doc.reverse_charge ? "Yes" : "No",
   });
 
-  const errors   = doc.issues.filter(i => i.severity === "error");
-  const warnings = doc.issues.filter(i => i.severity === "warning");
+  const liveErrors = useMemo<FieldWarning[]>(() => {
+    if (locked) return [];
+    const e: FieldWarning[] = [];
+    if (!docMeta.doc_number.trim()) e.push({ field: "Document Number", severity: "error", message: "Required — enter the document number" });
+    if (!docMeta.doc_date.trim()) e.push({ field: "Document Date", severity: "error", message: "Required — select the document date" });
+    if (!docMeta.place_of_supply.trim()) e.push({ field: "Place of Supply", severity: "error", message: "Required — select the state" });
+    if (!supplier.gstin.trim()) e.push({ field: "Supplier GSTIN", severity: "error", message: "Required — enter supplier GSTIN" });
+    else if (!isValidGSTIN(supplier.gstin)) e.push({ field: "Supplier GSTIN", severity: "error", message: "Invalid GSTIN format (must be 15 characters)" });
+    if (!recipient.gstin.trim()) e.push({ field: "Recipient GSTIN", severity: "error", message: "Required — enter recipient GSTIN" });
+    else if (!isValidGSTIN(recipient.gstin)) e.push({ field: "Recipient GSTIN", severity: "error", message: "Invalid GSTIN format (must be 15 characters)" });
+    lines.forEach((l, i) => {
+      const expTaxable = Math.round(l.qty * l.rate);
+      if (l.qty > 0 && l.rate > 0 && Math.abs(l.taxable - expTaxable) > 1)
+        e.push({ field: `Line ${i + 1}`, severity: "error", message: `Qty×Rate = ₹${expTaxable.toLocaleString("en-IN")} but taxable is ₹${l.taxable.toLocaleString("en-IN")}` });
+    });
+    return e;
+  }, [locked, docMeta, supplier, recipient, lines]);
+
+  const liveWarnings = useMemo<FieldWarning[]>(() => {
+    if (locked) return [];
+    const w: FieldWarning[] = [];
+    if (supplier.gstin && isValidGSTIN(supplier.gstin)) {
+      const master = GSTIN_MASTER[supplier.gstin.toUpperCase()];
+      if (master && master.name !== supplier.name) w.push({ field: "Supplier", severity: "warning", message: `Name differs from master: "${master.name}"` });
+    }
+    if (recipient.gstin && isValidGSTIN(recipient.gstin)) {
+      const master = GSTIN_MASTER[recipient.gstin.toUpperCase()];
+      if (master && master.name !== recipient.name) w.push({ field: "Recipient", severity: "warning", message: `Name differs from master: "${master.name}"` });
+    }
+    return w;
+  }, [locked, supplier, recipient]);
+
+  const errors   = liveErrors;
+  const warnings = liveWarnings;
   const canLock  = errors.length === 0 && !locked;
 
   function updateLine(id: string, field: keyof LineItem, raw: string) {
@@ -925,13 +1087,22 @@ function ReviewScreen({ docId, docs, isDark, onBack }: { docId: string; docs: GS
           </div>
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Document Date <span className="text-red-500">*</span></label>
-            <input disabled={locked} value={docMeta.doc_date} onChange={e => setDocMeta(p => ({ ...p, doc_date: e.target.value }))}
-              className={inpCls(!docMeta.doc_date)} placeholder="YYYY-MM-DD" />
+            <input type="date" disabled={locked} value={docMeta.doc_date} onChange={e => setDocMeta(p => ({ ...p, doc_date: e.target.value }))}
+              className={inpCls(!docMeta.doc_date)} />
           </div>
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Place of Supply <span className="text-red-500">*</span></label>
-            <input disabled={locked} value={docMeta.place_of_supply} onChange={e => setDocMeta(p => ({ ...p, place_of_supply: e.target.value }))}
-              className={inpCls(!docMeta.place_of_supply)} placeholder="e.g. Maharashtra (27)" />
+            <div className="relative">
+              <select disabled={locked} value={docMeta.place_of_supply}
+                onChange={e => setDocMeta(p => ({ ...p, place_of_supply: e.target.value }))}
+                className={inpCls(!docMeta.place_of_supply) + " appearance-none cursor-pointer pr-8"}>
+                <option value="">— Select state —</option>
+                {INDIAN_STATES.map(s => (
+                  <option key={s.code} value={`${s.name} (${s.code})`}>{s.name} ({s.code})</option>
+                ))}
+              </select>
+              <ChevronDown size={13} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
+            </div>
           </div>
           <div>
             <label className="block text-xs font-medium text-muted-foreground mb-1">Reverse Charge</label>
@@ -971,11 +1142,13 @@ function ReviewScreen({ docId, docs, isDark, onBack }: { docId: string; docs: GS
               </thead>
               <tbody className="divide-y divide-border">
                 {lines.map(l => {
+                  const isInter = l.igst_rate > 0;
+                  const currentSlab = isInter ? l.igst_rate : (l.cgst_rate * 2);
                   const cellInp = (val: string | number, field: keyof LineItem, mono = false, align = "left", type = "text") => (
                     locked
                       ? <span className={`text-sm text-foreground ${mono ? "font-mono" : ""} block ${align === "right" ? "text-right" : ""}`}>{val}</span>
                       : <input type={type} value={val} onChange={e => updateLine(l.id, field, e.target.value)}
-                          className={`w-full text-sm bg-transparent border border-transparent hover:border-border focus:border-primary focus:bg-input rounded px-2 py-1 focus:outline-none transition-all ${mono ? "font-mono" : ""} ${align === "right" ? "text-right" : ""}`} />
+                          className={`w-full text-sm bg-transparent border border-border focus:border-primary focus:bg-input rounded px-2 py-1 focus:outline-none transition-all ${mono ? "font-mono" : ""} ${align === "right" ? "text-right" : ""}`} />
                   );
                   return (
                     <tr key={l.id} className="hover:bg-muted/20 transition-colors">
@@ -983,10 +1156,32 @@ function ReviewScreen({ docId, docs, isDark, onBack }: { docId: string; docs: GS
                       <td className="px-2 py-2 min-w-[90px]">{cellInp(l.hsn_sac, "hsn_sac", true)}</td>
                       <td className="px-2 py-2 w-16">{cellInp(l.unit, "unit", false, "center")}</td>
                       <td className="px-2 py-2 w-20">{cellInp(l.qty, "qty", true, "right", "number")}</td>
-                      <td className="px-2 py-2 w-28">{cellInp(l.rate.toLocaleString("en-IN"), "rate", true, "right", "number")}</td>
+                      <td className="px-2 py-2 w-28">{cellInp(l.rate, "rate", true, "right", "number")}</td>
                       <td className="px-3 py-2 font-mono text-sm text-right text-foreground whitespace-nowrap">{INR(l.taxable)}</td>
-                      <td className="px-3 py-2 text-sm text-right text-muted-foreground whitespace-nowrap">
-                        {l.igst > 0 ? `IGST ${l.igst_rate}%` : `${l.cgst_rate}%+${l.sgst_rate}%`}
+                      <td className="px-2 py-2 w-28">
+                        {locked
+                          ? <span className="text-sm text-muted-foreground block text-right">{isInter ? `IGST ${l.igst_rate}%` : `${l.cgst_rate}%+${l.sgst_rate}%`}</span>
+                          : <select value={currentSlab}
+                              onChange={e => {
+                                const slab = parseFloat(e.target.value);
+                                const auto = supplier.state_code === recipient.state_code ? "intra" : "inter";
+                                setLines(prev => prev.map(li => {
+                                  if (li.id !== l.id) return li;
+                                  const taxable = li.taxable;
+                                  if (auto === "inter") {
+                                    const igst = Math.round(taxable * slab / 100);
+                                    return { ...li, igst_rate: slab, igst, cgst_rate: 0, cgst: 0, sgst_rate: 0, sgst: 0, total: taxable + igst + li.cess };
+                                  } else {
+                                    const half = slab / 2;
+                                    const tax = Math.round(taxable * half / 100);
+                                    return { ...li, igst_rate: 0, igst: 0, cgst_rate: half, cgst: tax, sgst_rate: half, sgst: tax, total: taxable + tax * 2 + li.cess };
+                                  }
+                                }));
+                              }}
+                              className="w-full text-sm bg-transparent border border-border focus:border-primary focus:bg-input rounded px-2 py-1 focus:outline-none transition-all text-right appearance-none cursor-pointer">
+                              {GST_SLABS.map(s => <option key={s} value={s}>{s === 0 ? "Exempt (0%)" : `${s}%`}</option>)}
+                            </select>
+                        }
                       </td>
                       <td className="px-3 py-2 font-mono text-sm font-semibold text-right text-foreground whitespace-nowrap">{INR(l.total)}</td>
                     </tr>
@@ -1009,10 +1204,10 @@ function ReviewScreen({ docId, docs, isDark, onBack }: { docId: string; docs: GS
       {/* Action bar */}
       {!locked && (
         <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm space-y-2">
-          {!canLock && errors.length > 0 && (
+          {!canLock && liveErrors.length > 0 && (
             <div className="flex items-center gap-2 text-sm text-red-500 mb-2">
               <Info size={14} />
-              <span>Please fix the {errors.length} error{errors.length > 1 ? "s" : ""} listed above before locking</span>
+              <span>Please fix the {liveErrors.length} error{liveErrors.length > 1 ? "s" : ""} listed above before locking</span>
             </div>
           )}
           {!showReject ? (
@@ -1184,6 +1379,19 @@ function ClientDetailScreen({ clientId, docs, isDark, onBack, onReview }: {
         </button>
         <ChevronRight size={14} className="text-muted-foreground" />
         <span className="text-foreground font-semibold">{client.name}</span>
+        <div className="ml-auto">
+          <button onClick={() => {
+            exportCSV(`${client.name.replace(/\s+/g,"_")}_documents.csv`,
+              ["#","Doc Number","Date","Type","Counter-party","GSTIN","Taxable","IGST","CGST","SGST","Total","Status"],
+              filtered.map((d, i) => {
+                const cp = getCounterParty(d);
+                return [i+1, d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type].label, cp.name, cp.gstin, d.taxable_amount, d.igst, d.cgst, d.sgst, d.total, STAGE_META[d.stage].label];
+              })
+            );
+          }} className="flex items-center gap-1.5 px-3 py-1.5 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors">
+            <Download size={13} /> Export CSV
+          </button>
+        </div>
       </div>
 
       {/* Client header */}
