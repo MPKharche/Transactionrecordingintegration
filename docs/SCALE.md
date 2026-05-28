@@ -1,69 +1,102 @@
-# Throughput & lightweight footprint
+# Throughput & footprint
 
-Target: **~100 concurrent users** (browsing, review, lock), **10–20 parallel uploads**, fast pipeline without dropping extraction quality.
+## Profiles
 
-## Architecture (single VPS)
+| Profile | RAM (stack peak) | CPU | Uploads | Users browsing |
+|---------|------------------|-----|---------|----------------|
+| **constrained** (default) | **≤ ~1.5 GB** | 2 cores, ~30% free | 2 parallel ingest, 1 LLM at a time | 100 OK (mostly API/DB) |
+| standard | ~2.5–4 GB | 4+ cores | 5–10 parallel | 100+ |
 
-| Service | Role | Default footprint |
-|---------|------|-------------------|
-| nginx | Static + API proxy, gzip, keepalive | ~10 MB |
-| web | Vite SPA (static) | ~20 MB |
-| api | Fastify, pool 20 connections | ~150 MB |
-| worker | BullMQ + OCR (1 Tesseract pool) | ~512 MB–1.5 GB |
-| extractor | Python 2× uvicorn + LLM semaphore | ~512 MB–1 GB |
-| postgres / redis / minio | Data layer | ~400 MB combined |
+Set on the server:
 
-**No extra worker replicas** by default — concurrency is tunable in one process.
+```bash
+cp .env.production.example .env
+# edit secrets, then:
+DEPLOY_PROFILE=constrained
+```
 
-## Pipeline backpressure
+## Constrained VPS (your case: 2 cores @ 70% used, ≤1.5 GB RAM)
 
-Stages share `WORKER_CONCURRENCY` (default **12**) BullMQ slots. Heavy stages have separate caps:
+### What we did in software
 
-| Stage | Env | Default | Why |
-|-------|-----|---------|-----|
-| OCR (images) | `OCR_CONCURRENCY` | 6 | CPU / Tesseract |
-| Extract (LLM) | `EXTRACT_LLM_CONCURRENCY` | 4 | OpenRouter rate + latency |
-| Extractor service | `EXTRACT_MAX_CONCURRENT` | 4 | Python semaphore |
-| Extractor processes | `EXTRACTOR_WORKERS` | 2 | uvicorn workers |
+| Change | Saves | Quality |
+|--------|-------|---------|
+| `WORKER_CONCURRENCY=2` | RAM + CPU | Queue still runs full pipeline |
+| `EXTRACT_LLM_CONCURRENCY=1` | CPU, OpenRouter stability | No LLM timeouts |
+| `EXTRACTOR_WORKERS=1`, `EXTRACT_MAX_CONCURRENT=1` | ~300 MB RAM | Same model, serialized extracts |
+| **No Tesseract in worker** (`WORKER_DEFER_IMAGE_OCR=true`) | **~150–250 MB** | Image OCR in extractor only |
+| PDF OCR stays `pdf-parse` in worker | Light CPU | Text-layer PDFs fast |
+| Docker `mem_limit` per service (~1.46 GB sum) | OOM protection | — |
+| Redis 48 MB, Postgres `shared_buffers=48MB` | RAM | — |
+| UI `VITE_UPLOAD_CONCURRENCY=2` | Burst CPU/RAM | Users upload in small batches |
 
-Normalize + validate stay fast and use spare slots — uploads stay moving while LLM runs.
+### Docker memory caps (hard limits)
+
+| Service | Limit |
+|---------|-------|
+| postgres | 220m |
+| redis | 64m |
+| minio | 220m |
+| extractor | 400m |
+| worker | 320m |
+| api | 140m |
+| web + nginx | 48m each |
+| **Total caps** | **~1.46 GB** |
+
+Actual RSS is usually **below** caps at idle; peak rises during PDF + one LLM extract.
+
+### CPU caps (≈0.6 core for app stack)
+
+| Service | cpus |
+|---------|------|
+| worker | 0.45 |
+| extractor | 0.45 |
+| api | 0.25 |
+| postgres + minio + redis + nginx | 0.65 combined |
+
+With **70% already used**, expect **2–4 min per document** when the pipeline is busy (one extract at a time). That is normal — raising concurrency on this box will cause timeouts and *worse* extraction quality.
+
+### What you cannot do on this box
+
+- **Not** `WORKER_CONCURRENCY=12` — will thrash CPU and blow RAM.
+- **Not** multiple extractor workers — each adds ~200 MB.
+- **Not** 10–20 true parallel LLM extracts — need a bigger host or external managed Postgres/Redis/MinIO + separate extract GPU/LLM box.
+
+### What still works well
+
+- **100 users** reading dashboard, records, review (light API + static web).
+- **Sequential uploads** (2 at a time from UI); queue drains reliably.
+- **Full quality path**: invoice2data + LLM merge unchanged.
+
+## Standard profile (bigger VPS)
+
+```env
+DEPLOY_PROFILE=standard
+WORKER_CONCURRENCY=12
+OCR_CONCURRENCY=6
+EXTRACT_LLM_CONCURRENCY=4
+EXTRACTOR_WORKERS=2
+EXTRACT_MAX_CONCURRENT=4
+DATABASE_POOL_MAX=20
+VITE_UPLOAD_CONCURRENCY=5
+WORKER_DEFER_IMAGE_OCR=false
+```
 
 ## After every deploy
 
 ```bash
-# On the server (from repo root, .env present)
 pnpm prod:bootstrap
-# or Docker-only:
-docker compose -f infra/docker-compose.yml --env-file .env run --rm worker node scripts/flush-pipeline-queue.mjs
 ```
 
-`deploy-prod.sh` runs bootstrap automatically (db push + queue flush).
+## If RAM still spikes over 1.5 GB
 
-## Tuning on a bigger box
-
-Add to `.env` (see `.env.example`):
-
-```env
-WORKER_CONCURRENCY=16
-OCR_CONCURRENCY=8
-EXTRACT_LLM_CONCURRENCY=6
-EXTRACTOR_WORKERS=3
-EXTRACT_MAX_CONCURRENT=6
-DATABASE_POOL_MAX=30
-UPLOAD_CLIENT_CONCURRENCY=8
-VITE_UPLOAD_CONCURRENCY=8
-```
-
-Do **not** raise LLM concurrency beyond what OpenRouter tier allows — quality drops when requests time out or get throttled.
-
-## Quality preserved
-
-- Full pipeline: normalize → OCR (pdf-parse / Tesseract) → extract (invoice2data + template merge + LLM) → validate
-- No skipped stages; semaphores only **queue** work, not simplify it
-- OCR uses a **reused** Tesseract worker (faster, same accuracy)
+1. Confirm `docker stats` — which container grows?
+2. Move **MinIO** or **Postgres** to managed/host services (biggest win off-box).
+3. Stop MinIO console port `9001` exposure in production.
+4. Process uploads **off-peak** in batches of 2.
 
 ## Monitoring
 
-- API: `GET /api/health`
-- Extractor: `GET http://extractor:8000/health` (`openrouter: true` required)
-- Worker logs: `[worker] Started — concurrency=12 ocr=6 extract=4`
+- Worker log: `[worker] Started — concurrency=2 ocr=1 extract=1`
+- Extractor: `GET /health` → `"openrouter": true`
+- `docker stats --no-stream`

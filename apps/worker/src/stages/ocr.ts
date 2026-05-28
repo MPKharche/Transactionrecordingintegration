@@ -5,6 +5,7 @@ import { Job } from "bullmq";
 import { db } from "@ca-suite/db/client";
 import { uploads, pipelineJobs } from "@ca-suite/db";
 import { eq } from "drizzle-orm";
+import { WORKER_DEFER_IMAGE_OCR } from "@ca-suite/shared";
 import { Client as MinioClient } from "minio";
 
 const minio = new MinioClient({
@@ -60,7 +61,12 @@ export async function ocrStage(uploadId: string, tenantId: string, job: Job): Pr
   if (upload.mimeType === "application/pdf") {
     ocrText = await extractPdfText(buffer);
   } else if (upload.mimeType.startsWith("image/")) {
-    ocrText = await ocrImage(buffer, upload.mimeType);
+    if (WORKER_DEFER_IMAGE_OCR) {
+      // Extractor runs Tesseract once per doc — avoids duplicate RAM in worker (~200 MB)
+      ocrText = "";
+    } else {
+      ocrText = await ocrImage(buffer, upload.mimeType);
+    }
   }
 
   // Store OCR text in the pipeline job output for the extract stage

@@ -72,10 +72,10 @@ const baseDoc = {
 };
 
 describe("throughput defaults", () => {
-  it("exposes sane production defaults", () => {
-    expect(WORKER_CONCURRENCY).toBeGreaterThanOrEqual(8);
+  it("keeps OCR and extract within worker pool", () => {
     expect(OCR_CONCURRENCY).toBeLessThanOrEqual(WORKER_CONCURRENCY);
     expect(EXTRACT_LLM_CONCURRENCY).toBeLessThanOrEqual(WORKER_CONCURRENCY);
+    expect(WORKER_CONCURRENCY).toBeGreaterThanOrEqual(1);
   });
 });
 

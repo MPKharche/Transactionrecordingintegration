@@ -74,7 +74,15 @@ Extractor health should show `"openrouter": true`.
 
 ## 5. Throughput tuning
 
-Defaults support ~100 concurrent users and 10–20 parallel uploads on one VPS. See [`docs/SCALE.md`](SCALE.md) for env vars (`WORKER_CONCURRENCY`, `OCR_CONCURRENCY`, `EXTRACT_LLM_CONCURRENCY`, etc.).
+**Default is the constrained profile** (≤1.5 GB RAM, 2 busy cores). On the server:
+
+```bash
+cp .env.production.example .env
+# merge your secrets (OpenRouter, Google OAuth, passwords)
+pnpm prod:bootstrap
+```
+
+See [`docs/SCALE.md`](SCALE.md) for constrained vs standard profiles.
 
 ## 6. Updates (pull latest `main`)
 
