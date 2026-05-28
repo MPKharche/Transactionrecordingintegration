@@ -16,31 +16,9 @@ import {
 import { eq, and } from "drizzle-orm";
 import type { ExtractorResponse } from "@ca-suite/zoho-schema";
 
-const EXTRACTOR_URL = process.env.EXTRACTOR_URL ?? "http://localhost:8000";
-const EXTRACTOR_SECRET = process.env.EXTRACTOR_SHARED_SECRET ?? "";
-
-async function callExtractor(
-  storagePath: string,
-  ocrText: string,
-  minioUrl: string,
-  mimeType: string
-): Promise<ExtractorResponse> {
-  const res = await fetch(`${EXTRACTOR_URL}/extract`, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      ...(EXTRACTOR_SECRET ? { Authorization: `Bearer ${EXTRACTOR_SECRET}` } : {}),
-    },
-    body: JSON.stringify({
-      storage_path: storagePath,
-      ocr_text: ocrText,
-      source_url: minioUrl,
-      mime_type: mimeType,
-    }),
-  });
-  if (!res.ok) throw new Error(`Extractor returned ${res.status}: ${await res.text()}`);
-  return res.json() as Promise<ExtractorResponse>;
-}
+import { isUploadPastStage } from "@ca-suite/shared";
+import { callExtractorResilient } from "../lib/extractor-client.js";
+import { loadUploadOrThrow } from "../lib/upload-guard.js";
 
 /** Sum numeric-looking strings for purchase bill totals when document omits them. */
 function sumLineAmounts(lines: { quantity?: string | null; rate?: string | null }[]): string {
@@ -54,8 +32,11 @@ function sumLineAmounts(lines: { quantity?: string | null; rate?: string | null 
 }
 
 export async function extractStage(uploadId: string, tenantId: string, job: Job): Promise<string> {
-  const { assertUploadTenant } = await import("../lib/assert-upload.js");
-  const upload = await assertUploadTenant(uploadId, tenantId);
+  const upload = await loadUploadOrThrow(uploadId, tenantId);
+
+  if (isUploadPastStage(upload.currentStage, "extracted")) {
+    return "validate";
+  }
 
   const ocrJob = await db
     .select()
@@ -68,7 +49,7 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
 
   let result: ExtractorResponse;
   try {
-    result = await callExtractor(upload.storagePath, ocrText, minioInternal, upload.mimeType);
+    result = await callExtractorResilient(upload.storagePath, ocrText, minioInternal, upload.mimeType);
   } catch (err: any) {
     result = {
       docType: "unknown",

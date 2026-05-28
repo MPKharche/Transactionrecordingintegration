@@ -9,7 +9,12 @@ import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
-import { getPipelineQueue } from "./lib/pipeline-queue.js";
+import {
+  assertPipelineCapacity,
+  enqueuePipelineJob,
+  getPipelineQueueMetrics,
+} from "./lib/pipeline-queue.js";
+import { MAX_UPLOAD_BYTES } from "@ca-suite/shared";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
@@ -51,11 +56,6 @@ import {
 } from "./lib/auth.js";
 
 export type { AuthContext };
-
-const connection = {
-  host: process.env.REDIS_HOST ?? "localhost",
-  port: parseInt(process.env.REDIS_PORT ?? "6379", 10),
-};
 
 function emptyParty() {
   return {
@@ -166,11 +166,33 @@ export async function buildApp() {
     (req as { auth: AuthContext }).auth = ctx;
   });
 
-  app.get("/api/health", async () => ({
-    ok: true,
-    service: "ca-suite-api",
-    time: new Date().toISOString(),
-  }));
+  app.get("/api/health", async () => {
+    let pipeline: Awaited<ReturnType<typeof getPipelineQueueMetrics>> | null = null;
+    try {
+      pipeline = await getPipelineQueueMetrics();
+    } catch {
+      pipeline = null;
+    }
+    return {
+      ok: true,
+      service: "ca-suite-api",
+      time: new Date().toISOString(),
+      pipeline,
+    };
+  });
+
+  app.get("/api/pipeline/status", async (req, reply) => {
+    try {
+      await resolveAuth(req);
+    } catch {
+      return reply.status(401).send({ error: "Unauthorized" });
+    }
+    const metrics = await getPipelineQueueMetrics();
+    return {
+      ...metrics,
+      profile: process.env.DEPLOY_PROFILE ?? "standard",
+    };
+  });
 
   app.get("/api/auth/session", async (req, reply) => {
     try {
@@ -548,6 +570,18 @@ export async function buildApp() {
 
   app.post("/api/documents/upload", async (req, reply) => {
     const ctx = (req as { auth: AuthContext }).auth;
+    try {
+      await assertPipelineCapacity();
+    } catch (err: unknown) {
+      const e = err as Error & { statusCode?: number; retryAfterSec?: number };
+      if (e.statusCode === 503) {
+        return reply
+          .status(503)
+          .header("Retry-After", String(e.retryAfterSec ?? 30))
+          .send({ error: e.message, retryAfterSec: e.retryAfterSec ?? 30 });
+      }
+      throw err;
+    }
     const data = await req.file();
     if (!data) return reply.status(400).send({ error: "file required" });
     const clientIdField = data.fields.client_id;
@@ -578,6 +612,12 @@ export async function buildApp() {
     if (!client) return reply.status(404).send({ error: "Client not found" });
 
     const buf = await data.toBuffer();
+    if (buf.length > MAX_UPLOAD_BYTES) {
+      return reply.status(413).send({
+        error: `File too large (max ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))} MB)`,
+        maxBytes: MAX_UPLOAD_BYTES,
+      });
+    }
     const hash = sha256(buf);
     const dup = await db
       .select({ id: gstDocuments.id })
@@ -641,11 +681,10 @@ export async function buildApp() {
       })
       .returning();
 
-    const jobId = `${uploadRow.id}-normalize`;
-    await getPipelineQueue().add(
+    await enqueuePipelineJob(
       "normalize",
       { uploadId: uploadRow.id, tenantId: ctx.tenantId, stage: "normalize", gstDocumentId: docId },
-      { jobId, deduplication: { id: jobId } }
+      `${uploadRow.id}-normalize`
     );
 
     await audit(ctx, "document.upload", "document", docId, { uploadId: uploadRow.id });
@@ -821,8 +860,7 @@ export async function buildApp() {
         .update(uploads)
         .set({ currentStage: "received", updatedAt: new Date() })
         .where(eq(uploads.id, row.uploadId));
-      const jobId = `${row.uploadId}-normalize`;
-      await getPipelineQueue().add(
+      await enqueuePipelineJob(
         "normalize",
         {
           uploadId: row.uploadId,

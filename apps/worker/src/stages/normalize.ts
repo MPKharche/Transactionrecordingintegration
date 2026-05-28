@@ -5,16 +5,13 @@ import { Job } from "bullmq";
 import { db } from "@ca-suite/db/client";
 import { uploads } from "@ca-suite/db";
 import { eq } from "drizzle-orm";
-import { assertUploadTenant } from "../lib/assert-upload.js";
+import { isUploadPastStage } from "@ca-suite/shared";
+import { loadUploadOrThrow } from "../lib/upload-guard.js";
 
-export async function normalizeStage(uploadId: string, tenantId: string, job: Job): Promise<string> {
-  const upload = await assertUploadTenant(uploadId, tenantId);
+export async function normalizeStage(uploadId: string, tenantId: string, _job: Job): Promise<string> {
+  const upload = await loadUploadOrThrow(uploadId, tenantId);
 
-  // Already normalized or further — idempotent no-op
-  const stageOrder = ["received", "normalized", "ocr", "extracted", "validated", "ready_for_review", "approved", "exported"];
-  const currentIdx = stageOrder.indexOf(upload.currentStage ?? "received");
-  if (currentIdx > 0) {
-    console.log(`[normalize] already past normalize for ${uploadId}, skipping`);
+  if (isUploadPastStage(upload.currentStage, "normalized")) {
     return "ocr";
   }
 

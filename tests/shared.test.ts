@@ -12,6 +12,9 @@ import {
   WORKER_CONCURRENCY,
   OCR_CONCURRENCY,
   EXTRACT_LLM_CONCURRENCY,
+  isUploadPastStage,
+  summarizeQueueCounts,
+  PIPELINE_MAX_QUEUE_DEPTH,
 } from "@ca-suite/shared";
 
 const baseLine = {
@@ -70,6 +73,22 @@ const baseDoc = {
   total: 1180,
   issues: [] as { severity: string }[],
 };
+
+describe("pipeline resilience", () => {
+  it("detects upload stage progress", () => {
+    expect(isUploadPastStage("ocr", "normalized")).toBe(true);
+    expect(isUploadPastStage("received", "normalized")).toBe(false);
+    expect(isUploadPastStage("ready_for_review", "extracted")).toBe(true);
+  });
+
+  it("computes queue backpressure", () => {
+    const m = summarizeQueueCounts({ waiting: 30, active: 15, delayed: 0 }, 40);
+    expect(m.depth).toBe(45);
+    expect(m.acceptingUploads).toBe(false);
+    const ok = summarizeQueueCounts({ waiting: 5, active: 2, delayed: 0 }, PIPELINE_MAX_QUEUE_DEPTH);
+    expect(ok.acceptingUploads).toBe(true);
+  });
+});
 
 describe("throughput defaults", () => {
   it("keeps OCR and extract within worker pool", () => {

@@ -81,12 +81,25 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       if (document.visibilityState === "visible") refresh(true);
     };
     document.addEventListener("visibilitychange", onVis);
-    const t = setInterval(() => refresh(true), 30_000);
+
+    let timer: ReturnType<typeof setTimeout>;
+    const schedule = () => {
+      const processing = docs.some((d) =>
+        ["stored", "processing", "review"].includes(d.stage)
+      );
+      const ms = document.hidden ? 60_000 : processing ? 12_000 : 30_000;
+      timer = setTimeout(async () => {
+        await refresh(true);
+        schedule();
+      }, ms);
+    };
+    schedule();
+
     return () => {
-      clearInterval(t);
+      clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [refresh]);
+  }, [refresh, docs]);
 
   const createClient = useCallback(async (body: Partial<Client>) => {
     const created = await api.clients.create(body);

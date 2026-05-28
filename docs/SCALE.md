@@ -95,8 +95,23 @@ pnpm prod:bootstrap
 3. Stop MinIO console port `9001` exposure in production.
 4. Process uploads **off-peak** in batches of 2.
 
+## Resilience (built-in)
+
+| Mechanism | Behavior |
+|-----------|----------|
+| Queue depth cap | API returns **503** + `Retry-After` when `PIPELINE_MAX_QUEUE_DEPTH` (40) exceeded |
+| Upload retries | Browser retries 503 up to 4 times with backoff |
+| Job attempts | 3 tries per stage, exponential backoff |
+| Stage timeouts | Per-stage BullMQ timeout (extract up to 180s) |
+| Idempotent stages | Safe re-run if job retried or reconciled |
+| Stuck job reconcile | Every 5 min, `running` > 10 min → re-queue |
+| Extractor client | HTTP timeout + retry on network/429/503 |
+| Adaptive UI poll | 12s when docs processing, 30s idle, 60s hidden tab |
+
 ## Monitoring
 
-- Worker log: `[worker] Started — concurrency=2 ocr=1 extract=1`
+- Worker log: `[worker] Started — concurrency=2 ocr=1 extract=1 lockMs=...`
+- API: `GET /api/health` includes `pipeline.depth`
+- Auth: `GET /api/pipeline/status`
 - Extractor: `GET /health` → `"openrouter": true`
 - `docker stats --no-stream`

@@ -13,7 +13,8 @@ import {
 } from "@ca-suite/db";
 import { eq, and } from "drizzle-orm";
 import { isValidGSTIN, validateGstDocument } from "@ca-suite/shared";
-import { assertUploadTenant } from "../lib/assert-upload.js";
+import { isUploadPastStage } from "@ca-suite/shared";
+import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import { syncValidationIssuesToGst } from "../lib/sync-gst-document.js";
 import { mapGstRowToDocument } from "../lib/map-gst-doc.js";
 import { saveDocumentIssues } from "../lib/persist-issues.js";
@@ -23,8 +24,15 @@ function validateDate(s: string | null | undefined): boolean {
   return /\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4}|\d{2}\/\d{2}\/\d{4}/.test(s);
 }
 
-export async function validateStage(uploadId: string, tenantId: string, job: Job): Promise<string | null> {
-  const upload = await assertUploadTenant(uploadId, tenantId);
+export async function validateStage(uploadId: string, tenantId: string, _job: Job): Promise<string | null> {
+  const upload = await loadUploadOrThrow(uploadId, tenantId);
+
+  if (
+    isUploadPastStage(upload.currentStage, "validated") ||
+    upload.currentStage === "ready_for_review"
+  ) {
+    return null;
+  }
 
   const [gstRow] = await db
     .select()

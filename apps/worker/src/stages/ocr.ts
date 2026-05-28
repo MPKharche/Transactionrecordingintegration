@@ -5,7 +5,8 @@ import { Job } from "bullmq";
 import { db } from "@ca-suite/db/client";
 import { uploads, pipelineJobs } from "@ca-suite/db";
 import { eq } from "drizzle-orm";
-import { WORKER_DEFER_IMAGE_OCR } from "@ca-suite/shared";
+import { WORKER_DEFER_IMAGE_OCR, isUploadPastStage } from "@ca-suite/shared";
+import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import { Client as MinioClient } from "minio";
 
 const minio = new MinioClient({
@@ -52,8 +53,11 @@ async function ocrImage(buffer: Buffer, _mimeType: string): Promise<string> {
 }
 
 export async function ocrStage(uploadId: string, tenantId: string, job: Job): Promise<string> {
-  const { assertUploadTenant } = await import("../lib/assert-upload.js");
-  const upload = await assertUploadTenant(uploadId, tenantId);
+  const upload = await loadUploadOrThrow(uploadId, tenantId);
+
+  if (isUploadPastStage(upload.currentStage, "ocr")) {
+    return "extract";
+  }
 
   const buffer = await downloadFromMinio(upload.storagePath);
 

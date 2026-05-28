@@ -142,25 +142,43 @@ export const api = {
       fd.append("client_id", clientId);
       fd.append("doc_type", docType);
       fd.append("financial_year", fy ?? currentFinancialYear());
-      const res = await fetch(`${BASE}/documents/upload`, {
-        method: "POST",
-        credentials: "include",
-        body: fd,
-      });
-      if (!res.ok) {
+
+      const maxAttempts = 4;
+      for (let attempt = 0; attempt < maxAttempts; attempt++) {
+        const res = await fetch(`${BASE}/documents/upload`, {
+          method: "POST",
+          credentials: "include",
+          body: fd,
+        });
+        if (res.ok) return res.json() as Promise<GSTDocument>;
+
         const body = await res.json().catch(() => ({}));
-        const b = body as { error?: string; existingId?: string };
+        const b = body as { error?: string; existingId?: string; retryAfterSec?: number };
+
         if (b.existingId) {
-          const err = new Error(b.error ?? "Duplicate document") as Error & {
-            existingId?: string;
-          };
+          const err = new Error(b.error ?? "Duplicate document") as Error & { existingId?: string };
           err.existingId = b.existingId;
           throw err;
         }
+
+        if (res.status === 503 && attempt < maxAttempts - 1) {
+          const waitSec = b.retryAfterSec ?? 8 + attempt * 4;
+          await new Promise((r) => setTimeout(r, waitSec * 1000));
+          continue;
+        }
+
         throw new Error(b.error ?? `HTTP ${res.status}`);
       }
-      return res.json() as Promise<GSTDocument>;
+      throw new Error("Upload failed after retries");
     },
+    pipelineStatus: () =>
+      request<{
+        depth: number;
+        maxDepth: number;
+        acceptingUploads: boolean;
+        waiting: number;
+        active: number;
+      }>("/pipeline/status"),
   },
   registers: {
     list: (kind: "sales" | "purchase", params?: { client_id?: string; financial_year?: string }) => {

@@ -1,5 +1,5 @@
 import { Queue } from "bullmq";
-import type { JobPipelineStage } from "@ca-suite/shared";
+import { buildPipelineJobOptions, type JobPipelineStage } from "@ca-suite/shared";
 
 const connection = {
   host: process.env.REDIS_HOST ?? "localhost",
@@ -20,7 +20,8 @@ export async function enqueuePipelineStage(
   jobId?: string
 ): Promise<void> {
   const id = jobId ?? `${uploadId}-${stage}`;
-  await getPipelineQueue().add(stage, { uploadId, tenantId, stage }, { jobId: id, deduplication: { id } });
+  const opts = buildPipelineJobOptions(stage, id);
+  await getPipelineQueue().add(stage, { uploadId, tenantId, stage }, opts);
 }
 
 export async function closePipelineQueue(): Promise<void> {
