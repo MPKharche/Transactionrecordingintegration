@@ -1,7 +1,11 @@
 import { defineConfig, devices } from "@playwright/test";
 
-const webPort = process.env.E2E_WEB_PORT ?? "5173";
-const baseURL = `http://localhost:${webPort}`;
+/** Dedicated port so E2E does not collide with other Vite apps on 5173. */
+const webPort = process.env.E2E_WEB_PORT ?? "5180";
+const webHost = process.env.E2E_WEB_HOST ?? "127.0.0.1";
+const baseURL = `http://${webHost}:${webPort}`;
+/** When true, Playwright starts fresh servers even if ports are busy (GitHub CI). */
+const reuseExistingServer = process.env.PLAYWRIGHT_FORCE_NEW_SERVER !== "true";
 
 export default defineConfig({
   testDir: "tests/e2e",
@@ -19,12 +23,13 @@ export default defineConfig({
   webServer: [
     {
       command: "pnpm --filter @ca-suite/api dev",
-      url: "http://localhost:4000/api/health",
-      reuseExistingServer: !process.env.CI,
+      url: "http://127.0.0.1:4000/api/health",
+      reuseExistingServer,
       timeout: 120_000,
       cwd: ".",
       env: {
         ...process.env,
+        NODE_ENV: "development",
         DATABASE_URL:
           process.env.DATABASE_URL ??
           "postgresql://ca_user:ca_pass@localhost:5433/ca_saas",
@@ -39,9 +44,9 @@ export default defineConfig({
       },
     },
     {
-      command: `pnpm --filter @ca-suite/web dev -- --port ${webPort} --strictPort`,
+      command: `pnpm --filter @ca-suite/web dev -- --port ${webPort} --strictPort --host ${webHost}`,
       url: baseURL,
-      reuseExistingServer: !process.env.CI,
+      reuseExistingServer,
       timeout: 120_000,
       env: {
         ...process.env,

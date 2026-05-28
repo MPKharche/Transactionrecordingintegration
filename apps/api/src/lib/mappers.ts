@@ -100,6 +100,10 @@ export function mapDocument(
     b2b_category: (row.b2bCategory as GSTDocument["b2b_category"]) ?? "b2b",
     original_document_id: row.originalDocumentId ?? undefined,
     assigned_to_user_id: row.assignedToUserId ?? undefined,
+    segment_index: row.segmentIndex ?? 0,
+    page_start: row.pageStart ?? undefined,
+    page_end: row.pageEnd ?? undefined,
+    invoice_label: row.invoiceLabel ?? undefined,
   };
 }
 

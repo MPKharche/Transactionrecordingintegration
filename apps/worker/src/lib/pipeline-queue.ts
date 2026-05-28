@@ -1,5 +1,6 @@
 import { Queue } from "bullmq";
-import { buildPipelineJobOptions, type JobPipelineStage } from "@ca-suite/shared";
+import type { JobPipelineStage } from "@ca-suite/shared";
+import { buildPipelineJobOptions } from "@ca-suite/shared/server";
 
 const connection = {
   host: process.env.REDIS_HOST ?? "localhost",
@@ -13,15 +14,25 @@ export function getPipelineQueue(): Queue {
   return queue;
 }
 
+export type PipelineJobData = {
+  uploadId: string;
+  tenantId: string;
+  stage: JobPipelineStage;
+  gstDocumentId?: string;
+};
+
 export async function enqueuePipelineStage(
   uploadId: string,
   tenantId: string,
   stage: JobPipelineStage,
-  jobId?: string
+  jobId?: string,
+  gstDocumentId?: string
 ): Promise<void> {
-  const id = jobId ?? `${uploadId}-${stage}`;
+  // Unique id per enqueue — BullMQ deduplication on `${uploadId}-${stage}` blocked retries.
+  const id = jobId ?? `${uploadId}-${stage}-${Date.now()}`;
   const opts = buildPipelineJobOptions(stage, id);
-  await getPipelineQueue().add(stage, { uploadId, tenantId, stage }, opts);
+  const data: PipelineJobData = { uploadId, tenantId, stage, ...(gstDocumentId ? { gstDocumentId } : {}) };
+  await getPipelineQueue().add(stage, data, opts);
 }
 
 export async function closePipelineQueue(): Promise<void> {

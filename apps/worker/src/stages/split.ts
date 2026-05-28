@@ -1,0 +1,123 @@
+/**
+ * SPLIT stage — detect multiple invoices in one PDF and fan out extract jobs.
+ */
+import { Job } from "bullmq";
+import { randomUUID } from "crypto";
+import { db } from "@ca-suite/db/client";
+import { gstDocuments, uploads } from "@ca-suite/db";
+import { eq, asc } from "drizzle-orm";
+import { isUploadPastStage } from "@ca-suite/shared";
+import { loadUploadOrThrow } from "../lib/upload-guard.js";
+import { callDetectInvoices } from "../lib/extractor-client.js";
+import { enqueuePipelineStage } from "../lib/pipeline-queue.js";
+
+type Segment = { pageStart: number; pageEnd: number; billNumber?: string | null };
+
+export async function splitStage(
+  uploadId: string,
+  tenantId: string,
+  job: Job
+): Promise<string | null> {
+  const upload = await loadUploadOrThrow(uploadId, tenantId);
+
+  if (isUploadPastStage(upload.currentStage, "split")) {
+    return null;
+  }
+
+  const ocrOut = (job.data as { ocrPages?: { page: number; text: string }[] }).ocrPages;
+  let segments: Segment[] = [];
+
+  try {
+    const detected = await callDetectInvoices(upload.storagePath, upload.mimeType, ocrOut ?? []);
+    segments = detected.segments ?? [];
+  } catch (err) {
+    console.warn("[split] detect failed, single segment:", err);
+    segments = [{ pageStart: 1, pageEnd: 1 }];
+  }
+
+  if (segments.length === 0) {
+    segments = [{ pageStart: 1, pageEnd: 1 }];
+  }
+
+  const docs = await db
+    .select()
+    .from(gstDocuments)
+    .where(eq(gstDocuments.uploadId, uploadId))
+    .orderBy(asc(gstDocuments.segmentIndex));
+
+  const primary = docs[0];
+  if (!primary) {
+    throw new Error("No gst_document for upload");
+  }
+
+  const docIds: string[] = [];
+
+  for (let i = 0; i < segments.length; i++) {
+    const seg = segments[i];
+    const label =
+      seg.billNumber != null && seg.billNumber !== ""
+        ? `${primary.filename} · ${seg.billNumber}`
+        : segments.length > 1
+          ? `${primary.filename} · pp. ${seg.pageStart}-${seg.pageEnd}`
+          : primary.filename;
+
+    let docId: string;
+    if (i === 0) {
+      docId = primary.id;
+      await db
+        .update(gstDocuments)
+        .set({
+          pageStart: seg.pageStart,
+          pageEnd: seg.pageEnd,
+          segmentIndex: 0,
+          invoiceLabel: label,
+          originalDocumentId: primary.id,
+          updatedAt: new Date(),
+        })
+        .where(eq(gstDocuments.id, primary.id));
+    } else {
+      docId = randomUUID();
+      await db.insert(gstDocuments).values({
+        id: docId,
+        tenantId: primary.tenantId,
+        clientId: primary.clientId,
+        uploadId,
+        filename: primary.filename,
+        docType: primary.docType,
+        supplier: primary.supplier,
+        recipient: primary.recipient,
+        stage: "stored",
+        extractionMethod: "manual",
+        financialYear: primary.financialYear,
+        storagePath: primary.storagePath,
+        contentSha256: primary.contentSha256,
+        segmentIndex: i,
+        pageStart: seg.pageStart,
+        pageEnd: seg.pageEnd,
+        invoiceLabel: label,
+        originalDocumentId: primary.id,
+      });
+    }
+    docIds.push(docId);
+  }
+
+  await db
+    .update(uploads)
+    .set({ currentStage: "split", updatedAt: new Date() })
+    .where(eq(uploads.id, uploadId));
+
+  const { syncGstStageFromUpload } = await import("../lib/gst-sync.js");
+  await syncGstStageFromUpload(uploadId, "split");
+
+  for (const docId of docIds) {
+    await enqueuePipelineStage(
+      uploadId,
+      tenantId,
+      "extract",
+      `${uploadId}-extract-${docId}-${Date.now()}`,
+      docId
+    );
+  }
+
+  return null;
+}

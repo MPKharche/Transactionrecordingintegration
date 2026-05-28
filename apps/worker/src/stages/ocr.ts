@@ -5,7 +5,8 @@ import { Job } from "bullmq";
 import { db } from "@ca-suite/db/client";
 import { uploads, pipelineJobs } from "@ca-suite/db";
 import { eq } from "drizzle-orm";
-import { WORKER_DEFER_IMAGE_OCR, isUploadPastStage } from "@ca-suite/shared";
+import { isUploadPastStage } from "@ca-suite/shared";
+import { WORKER_DEFER_IMAGE_OCR } from "@ca-suite/shared/server";
 import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import { Client as MinioClient } from "minio";
 
@@ -56,14 +57,17 @@ export async function ocrStage(uploadId: string, tenantId: string, job: Job): Pr
   const upload = await loadUploadOrThrow(uploadId, tenantId);
 
   if (isUploadPastStage(upload.currentStage, "ocr")) {
-    return "extract";
+    return "split";
   }
 
   const buffer = await downloadFromMinio(upload.storagePath);
 
   let ocrText = "";
   if (upload.mimeType === "application/pdf") {
-    ocrText = await extractPdfText(buffer);
+    const parsed = await extractPdfText(buffer);
+    // Scanned PDFs: pdf-parse / stream fallback yields junk — let extractor run Tesseract on bytes.
+    const looksLikeGstDoc = /GSTIN|INVOICE|BILL\s+FROM|MAHAGENCO|[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z][0-9A-Z]/i.test(parsed);
+    ocrText = parsed.length >= 80 && looksLikeGstDoc ? parsed : "";
   } else if (upload.mimeType.startsWith("image/")) {
     if (WORKER_DEFER_IMAGE_OCR) {
       // Extractor runs Tesseract once per doc — avoids duplicate RAM in worker (~200 MB)
@@ -76,11 +80,14 @@ export async function ocrStage(uploadId: string, tenantId: string, job: Job): Pr
   // Store OCR text in the pipeline job output for the extract stage
   await db
     .update(pipelineJobs)
-    .set({ output: { ocrText: ocrText.slice(0, 8000) }, updatedAt: new Date() })
+    .set({
+      output: { ocrText: ocrText.slice(0, 8000), pages: [] },
+      updatedAt: new Date(),
+    })
     .where(eq(pipelineJobs.uploadId, uploadId));
 
   await db.update(uploads).set({ currentStage: "ocr", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
   const { syncGstStageFromUpload } = await import("../lib/gst-sync.js");
   await syncGstStageFromUpload(uploadId, "ocr");
-  return "extract";
+  return "split";
 }

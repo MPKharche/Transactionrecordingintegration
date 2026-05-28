@@ -1,4 +1,5 @@
 import { useNavigate, useParams, useLocation } from "react-router";
+import { useEffect } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { useTheme } from "../hooks/useTheme";
 import { Sidebar } from "../components/layout/Sidebar";
@@ -52,6 +53,10 @@ export function AppShell() {
   const reviewId = routeDocId ?? null;
   const selectedClientId = routeClientId ?? null;
   const pending = docs.filter((d) => d.stage === "ready_for_review").length;
+
+  useEffect(() => {
+    if (!loading && !session) navigate("/login");
+  }, [loading, session, navigate]);
 
   function openReview(id: string) {
     navigate(`/records/${id}`);

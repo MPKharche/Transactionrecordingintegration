@@ -12,12 +12,14 @@ import {
   purchaseBillHeaders,
   purchaseBillLines,
   extractions,
+  gstDocuments,
 } from "@ca-suite/db";
 import { eq, and } from "drizzle-orm";
 import type { ExtractorResponse } from "@ca-suite/zoho-schema";
 
 import { isUploadPastStage } from "@ca-suite/shared";
 import { callExtractorResilient } from "../lib/extractor-client.js";
+import type { PipelineJobData } from "../lib/pipeline-queue.js";
 import { loadUploadOrThrow } from "../lib/upload-guard.js";
 
 /** Sum numeric-looking strings for purchase bill totals when document omits them. */
@@ -33,8 +35,31 @@ function sumLineAmounts(lines: { quantity?: string | null; rate?: string | null 
 
 export async function extractStage(uploadId: string, tenantId: string, job: Job): Promise<string> {
   const upload = await loadUploadOrThrow(uploadId, tenantId);
+  const jobData = job.data as PipelineJobData;
+  const gstDocumentId = jobData.gstDocumentId;
 
-  if (isUploadPastStage(upload.currentStage, "extracted")) {
+  if (!gstDocumentId && isUploadPastStage(upload.currentStage, "extracted")) {
+    return "validate";
+  }
+
+  const [targetDoc] = gstDocumentId
+    ? await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.id, gstDocumentId))
+        .limit(1)
+    : await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.uploadId, uploadId))
+        .limit(1);
+
+  if (
+    targetDoc &&
+    (targetDoc.stage === "ready_for_review" ||
+      targetDoc.stage === "locked" ||
+      targetDoc.stage === "rejected")
+  ) {
     return "validate";
   }
 
@@ -43,13 +68,25 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
     .from(pipelineJobs)
     .where(and(eq(pipelineJobs.uploadId, uploadId), eq(pipelineJobs.stage, "ocr")))
     .limit(1);
-  const ocrText = (ocrJob[0]?.output as any)?.ocrText ?? "";
+  const ocrText = (ocrJob[0]?.output as { ocrText?: string })?.ocrText ?? "";
 
   const minioInternal = `http://${process.env.MINIO_ENDPOINT ?? "minio"}:${process.env.MINIO_PORT ?? "9000"}/${process.env.MINIO_BUCKET ?? "ca-uploads"}/${upload.storagePath}`;
 
+  const pageStart = targetDoc?.pageStart ?? undefined;
+  const pageEnd = targetDoc?.pageEnd ?? undefined;
+
   let result: ExtractorResponse;
   try {
-    result = await callExtractorResilient(upload.storagePath, ocrText, minioInternal, upload.mimeType);
+    const docTypeHint = targetDoc?.docType ?? upload.docType ?? "";
+    result = await callExtractorResilient(
+      upload.storagePath,
+      ocrText,
+      minioInternal,
+      upload.mimeType,
+      docTypeHint,
+      pageStart ?? undefined,
+      pageEnd ?? undefined
+    );
   } catch (err: any) {
     result = {
       docType: "unknown",
@@ -72,6 +109,14 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
 
   if (result.extractionMethod === "stub") {
     await db.update(uploads).set({ currentStage: "dead_letter", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
+    const { syncValidationIssuesToGst } = await import("../lib/sync-gst-document.js");
+    await syncValidationIssuesToGst(
+      uploadId,
+      result.issues ?? ["Extractor unavailable"],
+      gstDocumentId
+    );
+    const { syncGstStageFromUpload } = await import("../lib/gst-sync.js");
+    await syncGstStageFromUpload(uploadId, "dead_letter");
     throw new Error(`Extraction failed (stub): ${result.issues?.join("; ") || "no details"}`);
   }
 
@@ -267,10 +312,17 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
   }
 
   const { syncGstFromExtractor } = await import("../lib/sync-gst-document.js");
-  await syncGstFromExtractor(uploadId, tenantId, result);
+  await syncGstFromExtractor(uploadId, tenantId, result, gstDocumentId ?? targetDoc?.id);
 
-  const { syncGstStageFromUpload } = await import("../lib/gst-sync.js");
-  await syncGstStageFromUpload(uploadId, "extracted");
+  const { syncGstStageFromUpload, syncGstStageForDocument } = await import("../lib/gst-sync.js");
+  const docId = gstDocumentId ?? targetDoc?.id;
+  if (docId) await syncGstStageForDocument(docId, "extracted");
+  else await syncGstStageFromUpload(uploadId, "extracted");
+
+  await db
+    .update(uploads)
+    .set({ currentStage: "extracted", updatedAt: new Date() })
+    .where(eq(uploads.id, uploadId));
 
   return "validate";
 }

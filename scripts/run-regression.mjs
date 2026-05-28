@@ -53,8 +53,6 @@ function verifyStoryCoverage() {
 }
 
 const skipPreflight = process.argv.includes("--skip-preflight");
-// regression:ci uses --skip-preflight; force fresh Playwright servers (no stale dev env)
-if (skipPreflight && !process.env.CI) process.env.CI = "true";
 
 try {
   if (!skipPreflight) {
@@ -65,8 +63,11 @@ try {
   run("pnpm --filter @ca-suite/web build", "Production web build");
   verifyStoryCoverage();
   run("pnpm test:e2e", "Playwright user-story E2E", {
+    E2E_WEB_PORT: process.env.E2E_WEB_PORT ?? "5180",
     VITE_ALLOW_DEV_LOGIN: "true",
     AUTH_DEV_BYPASS: "true",
+    NODE_ENV: "development",
+    ...(skipPreflight ? { PLAYWRIGHT_FORCE_NEW_SERVER: "true", CI: "true" } : {}),
   });
   console.log("\n✅ Regression complete — all gates passed\n");
   console.log(`   Product objective: ${manifest.objective}\n`);

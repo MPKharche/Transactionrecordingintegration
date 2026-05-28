@@ -8,6 +8,7 @@ const pipelineToUi: Record<string, UiStage> = {
   received: "stored",
   normalized: "stored",
   ocr: "ocr",
+  split: "extracting",
   extracted: "extracting",
   validated: "extracting",
   ready_for_review: "ready_for_review",
@@ -28,18 +29,32 @@ export async function syncGstStageFromUpload(
   const docs = await db
     .select()
     .from(gstDocuments)
-    .where(eq(gstDocuments.uploadId, uploadId))
-    .limit(1);
+    .where(eq(gstDocuments.uploadId, uploadId));
 
   if (docs.length === 0) return;
 
-  const [doc] = docs;
-  if (doc.stage === "locked") return;
+  for (const doc of docs) {
+    if (doc.stage === "locked" || doc.stage === "rejected") continue;
+    await db
+      .update(gstDocuments)
+      .set({ stage: uiStage, updatedAt: new Date() })
+      .where(eq(gstDocuments.id, doc.id));
+  }
+}
 
+export async function syncGstStageForDocument(documentId: string, pipelineStage: string) {
+  const uiStage = pipelineToUi[pipelineStage];
+  if (!uiStage) return;
+  const [doc] = await db
+    .select()
+    .from(gstDocuments)
+    .where(eq(gstDocuments.id, documentId))
+    .limit(1);
+  if (!doc || doc.stage === "locked" || doc.stage === "rejected") return;
   await db
     .update(gstDocuments)
     .set({ stage: uiStage, updatedAt: new Date() })
-    .where(eq(gstDocuments.id, doc.id));
+    .where(eq(gstDocuments.id, documentId));
 }
 
 export async function getGstDocumentId(uploadId: string): Promise<string | null> {

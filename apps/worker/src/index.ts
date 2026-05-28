@@ -17,12 +17,14 @@ import {
   WORKER_LOCK_DURATION_MS,
   WORKER_STALLED_INTERVAL_MS,
   type JobPipelineStage,
-} from "@ca-suite/shared";
+} from "@ca-suite/shared/server";
 import { eq, and, lt } from "drizzle-orm";
 import { normalizeStage } from "./stages/normalize";
 import { ocrStage } from "./stages/ocr";
+import { splitStage } from "./stages/split";
 import { extractStage } from "./stages/extract";
 import { validateStage } from "./stages/validate";
+import type { PipelineJobData } from "./lib/pipeline-queue.js";
 import { createSemaphore } from "./lib/semaphore.js";
 import { enqueuePipelineStage, closePipelineQueue } from "./lib/pipeline-queue.js";
 import { shutdownOcrPool } from "./lib/ocr-pool.js";
@@ -36,7 +38,7 @@ const connection = {
 const ocrSem = createSemaphore(OCR_CONCURRENCY);
 const extractSem = createSemaphore(EXTRACT_LLM_CONCURRENCY);
 
-type JobData = { uploadId: string; tenantId: string; stage: JobPipelineStage };
+type JobData = PipelineJobData;
 
 async function runStage(
   stage: JobPipelineStage,
@@ -47,6 +49,7 @@ async function runStage(
   const run = async () => {
     if (stage === "normalize") return (await normalizeStage(uploadId, tenantId, job)) as JobPipelineStage;
     if (stage === "ocr") return (await ocrStage(uploadId, tenantId, job)) as JobPipelineStage;
+    if (stage === "split") return (await splitStage(uploadId, tenantId, job)) as JobPipelineStage | null;
     if (stage === "extract") return (await extractStage(uploadId, tenantId, job)) as JobPipelineStage;
     if (stage === "validate") return (await validateStage(uploadId, tenantId, job)) as JobPipelineStage;
     return null;
@@ -109,7 +112,13 @@ async function processJob(job: Job<JobData>) {
       .where(eq(pipelineJobs.id, jobRow.id));
 
     if (nextStage) {
-      await enqueuePipelineStage(uploadId, tenantId, nextStage);
+      await enqueuePipelineStage(
+        uploadId,
+        tenantId,
+        nextStage,
+        undefined,
+        job.data.gstDocumentId
+      );
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);

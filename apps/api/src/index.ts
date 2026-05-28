@@ -14,7 +14,7 @@ import {
   enqueuePipelineJob,
   getPipelineQueueMetrics,
 } from "./lib/pipeline-queue.js";
-import { MAX_UPLOAD_BYTES } from "@ca-suite/shared";
+import { MAX_UPLOAD_BYTES } from "@ca-suite/shared/server";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
@@ -33,6 +33,7 @@ import {
 } from "@ca-suite/db";
 import {
   canLockDocument,
+  isBlockingDuplicateStage,
   isValidGSTIN,
   isValidPAN,
   validateGstDocument,
@@ -69,6 +70,16 @@ function emptyParty() {
     email: "",
     is_registered: false,
   };
+}
+
+function multipartFieldValue(field: unknown): string {
+  if (typeof field === "string") return field.trim();
+  if (Array.isArray(field)) return multipartFieldValue(field[field.length - 1]);
+  if (field && typeof field === "object" && "value" in field) {
+    const value = (field as { value?: unknown }).value;
+    return value == null ? "" : String(value).trim();
+  }
+  return "";
 }
 
 async function audit(
@@ -584,24 +595,17 @@ export async function buildApp() {
     }
     const data = await req.file();
     if (!data) return reply.status(400).send({ error: "file required" });
-    const clientIdField = data.fields.client_id;
-    const clientId =
-      typeof clientIdField === "object" && clientIdField && "value" in clientIdField
-        ? String((clientIdField as { value: string }).value)
-        : "";
-    const docTypeField = data.fields.doc_type;
-    const docType =
-      typeof docTypeField === "object" && docTypeField && "value" in docTypeField
-        ? String((docTypeField as { value: string }).value)
-        : "purchase_invoice";
-    const fyField = data.fields.financial_year;
-    const fy =
-      typeof fyField === "object" && fyField && "value" in fyField
-        ? String((fyField as { value: string }).value)
-        : "2024-25";
-
+    const buf = await data.toBuffer();
+    if (buf.length > MAX_UPLOAD_BYTES) {
+      return reply.status(413).send({
+        error: `File too large (max ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))} MB)`,
+        maxBytes: MAX_UPLOAD_BYTES,
+      });
+    }
+    const clientId = multipartFieldValue(data.fields.client_id);
+    const docType = multipartFieldValue(data.fields.doc_type) || "purchase_invoice";
+    const fy = multipartFieldValue(data.fields.financial_year) || "2024-25";
     if (!clientId) return reply.status(400).send({ error: "client_id required" });
-
     const [client] = await db
       .select()
       .from(clients)
@@ -611,28 +615,23 @@ export async function buildApp() {
       .limit(1);
     if (!client) return reply.status(404).send({ error: "Client not found" });
 
-    const buf = await data.toBuffer();
-    if (buf.length > MAX_UPLOAD_BYTES) {
-      return reply.status(413).send({
-        error: `File too large (max ${Math.floor(MAX_UPLOAD_BYTES / (1024 * 1024))} MB)`,
-        maxBytes: MAX_UPLOAD_BYTES,
-      });
-    }
     const hash = sha256(buf);
-    const dup = await db
-      .select({ id: gstDocuments.id })
+    const dupCandidates = await db
+      .select({ id: gstDocuments.id, stage: gstDocuments.stage })
       .from(gstDocuments)
       .where(
         and(
           eq(gstDocuments.tenantId, ctx.tenantId),
-          eq(gstDocuments.contentSha256, hash)
+          eq(gstDocuments.contentSha256, hash),
+          eq(gstDocuments.segmentIndex, 0)
         )
-      )
-      .limit(1);
-    if (dup.length > 0) {
+      );
+    const blocker = dupCandidates.find((d) => isBlockingDuplicateStage(d.stage));
+    if (blocker) {
       return reply.status(409).send({
         error: "Duplicate document",
-        existingId: dup[0].id,
+        existingId: blocker.id,
+        existingStage: blocker.stage,
       });
     }
 
@@ -678,6 +677,7 @@ export async function buildApp() {
         financialYear: fy,
         storagePath: path,
         contentSha256: hash,
+        segmentIndex: 0,
       })
       .returning();
 
@@ -860,6 +860,7 @@ export async function buildApp() {
         .update(uploads)
         .set({ currentStage: "received", updatedAt: new Date() })
         .where(eq(uploads.id, row.uploadId));
+      const retryJobId = `${row.uploadId}-normalize-retry-${Date.now()}`;
       await enqueuePipelineJob(
         "normalize",
         {
@@ -868,7 +869,7 @@ export async function buildApp() {
           stage: "normalize",
           gstDocumentId: row.id,
         },
-        { jobId, deduplication: { id: jobId } }
+        retryJobId
       );
       await audit(ctx, "document.retry", "document", req.params.id);
       return loadDocument(req.params.id, ctx.tenantId);
@@ -891,7 +892,10 @@ export async function buildApp() {
         .limit(1);
       if (!row) return reply.status(404).send({ error: "Not found" });
       const { presignedGet } = await import("./lib/minio.js");
-      const url = await presignedGet(row.storagePath);
+      let url = await presignedGet(row.storagePath);
+      if (row.pageStart != null && row.pageStart > 0) {
+        url = `${url}#page=${row.pageStart}`;
+      }
       return { url };
     }
   );

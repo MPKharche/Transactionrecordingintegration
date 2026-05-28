@@ -63,6 +63,18 @@ describe.skipIf(!integrationEnabled)("Database migrations", () => {
     }
   });
 
+  it("partial unique index on active gst document sha exists", async () => {
+    const rows = await sql`
+      SELECT indexname, indexdef
+      FROM pg_indexes
+      WHERE tablename = 'gst_documents'
+        AND indexname = 'gst_documents_tenant_sha_active_uidx'
+    `;
+    expect(rows.length).toBe(1);
+    expect(rows[0].indexdef).toMatch(/rejected/i);
+    expect(rows[0].indexdef).toMatch(/segment_index/i);
+  });
+
   it("seed tenant and user are queryable", async () => {
     const [tenant] = await sql`SELECT id FROM tenants LIMIT 1`;
     expect(tenant?.id).toBeTruthy();

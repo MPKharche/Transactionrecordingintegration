@@ -13,7 +13,9 @@
     "test:api": "vitest run tests/api.test.ts",
     "test:migrate": "vitest run tests/migrations.test.ts",
     "test:web": "vitest run tests/web-smoke.test.tsx",
-    "test:functional": "vitest run tests/functional.test.ts tests/shared.test.ts",
+    "test:functional": "vitest run tests/functional.test.ts tests/shared.test.ts tests/duplicate-policy.test.ts",
+    "test:extractor": "cd services/extractor && python -m pytest tests -q",
+    "test:pipeline-split": "vitest run tests/pipeline-split.test.ts",
     "test:e2e": "playwright test",
     "test:workflows": "vitest run tests/workflows.test.ts",
     "test:regression": "node scripts/run-regression.mjs",
@@ -28,6 +30,7 @@
     "db:reset": "pnpm db:clear && pnpm db:seed",
     "queue:flush": "node scripts/flush-pipeline-queue.mjs",
     "prod:bootstrap": "node scripts/prod-bootstrap.mjs",
+    "dev:prod-sim": "powershell -NoProfile -File scripts/launch-prod-sim.ps1",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {

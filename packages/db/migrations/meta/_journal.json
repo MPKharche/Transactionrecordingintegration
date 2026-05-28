@@ -8,6 +8,13 @@
       "when": 1777578604971,
       "tag": "0000_woozy_ink",
       "breakpoints": true
+    },
+    {
+      "idx": 1,
+      "version": "7",
+      "when": 1779982800000,
+      "tag": "0001_dup_policy_and_split",
+      "breakpoints": true
     }
   ]
 }

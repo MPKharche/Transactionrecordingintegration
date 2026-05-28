@@ -134,6 +134,90 @@ describe.skipIf(!integrationEnabled)("CA Suite API (integration)", () => {
     expect(get.json().filename).toBe("test.pdf");
   });
 
+  it("accepts multipart upload when file part comes first", async () => {
+    const boundary = "----file-first";
+    const pdf = Buffer.from(`%PDF-1.4 file-first upload ${Date.now()}-${Math.random()}`);
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="file-first.pdf"',
+      "Content-Type: application/pdf",
+      "",
+      pdf.toString("binary"),
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="client_id"',
+      "",
+      clientId,
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="doc_type"',
+      "",
+      "purchase_invoice",
+      `--${boundary}--`,
+    ].join("\r\n");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/documents/upload",
+      headers: {
+        ...authHeaders(),
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(200);
+    expect(res.json().filename).toBe("file-first.pdf");
+  });
+
+  it("US-API-05: allows re-upload after reject", async () => {
+    const boundary = "----reupload";
+    const pdf = Buffer.from(`%PDF-1.4 reupload test ${Date.now()}`);
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="client_id"',
+      "",
+      clientId,
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="doc_type"',
+      "",
+      "purchase_invoice",
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="reupload.pdf"',
+      "Content-Type: application/pdf",
+      "",
+      pdf.toString("binary"),
+      `--${boundary}--`,
+    ].join("\r\n");
+    const headers = {
+      ...authHeaders(),
+      "content-type": `multipart/form-data; boundary=${boundary}`,
+    };
+
+    const first = await app.inject({
+      method: "POST",
+      url: "/api/documents/upload",
+      headers,
+      payload: body,
+    });
+    expect(first.statusCode).toBe(200);
+    const docId = first.json().id as string;
+
+    const rejected = await app.inject({
+      method: "POST",
+      url: `/api/documents/${docId}/reject`,
+      headers: authHeaders(),
+      payload: { reason: "test reject" },
+    });
+    expect(rejected.statusCode).toBe(200);
+
+    const second = await app.inject({
+      method: "POST",
+      url: "/api/documents/upload",
+      headers,
+      payload: body,
+    });
+    expect(second.statusCode).toBe(200);
+    expect(second.json().id).not.toBe(docId);
+  });
+
   it("US-API-04: rejects duplicate upload sha", async () => {
     const boundary = "----dup";
     const pdf = Buffer.from(`%PDF-1.4 duplicate test ${Date.now()}`);

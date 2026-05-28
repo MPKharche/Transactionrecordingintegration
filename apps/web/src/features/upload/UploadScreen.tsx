@@ -63,10 +63,16 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
       }
       setQueued([]);
     } catch (e) {
-      const err = e as Error & { existingId?: string };
+      const err = e as Error & { existingId?: string; existingStage?: string };
+      const dupHint =
+        err.existingStage === "locked"
+          ? " This file is already locked in Records."
+          : err.existingStage === "ready_for_review"
+            ? " This file is already in review."
+            : "";
       setUploadError(
         err.existingId
-          ? `${err.message} — open Records to find document ${err.existingId.slice(0, 8)}…`
+          ? `${err.message}${dupHint} — open Records (${err.existingId.slice(0, 8)}…)`
           : err.message || "Upload failed"
       );
     } finally {
@@ -211,7 +217,9 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
                   <td className="px-5 py-3.5">
                     <div className="flex items-center gap-2.5">
                       <FileText size={15} className="text-muted-foreground shrink-0" />
-                      <span className="text-sm text-foreground truncate max-w-[200px]">{d.filename}</span>
+                      <span className="text-sm text-foreground truncate max-w-[240px]">
+                        {d.invoice_label || d.doc_number || d.filename}
+                      </span>
                     </div>
                   </td>
                   <td className="px-5 py-3.5 text-sm text-muted-foreground">{clientById(d.client_id)?.name ?? <span className="text-red-500 italic">Not assigned</span>}</td>

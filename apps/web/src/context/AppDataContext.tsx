@@ -4,6 +4,7 @@ import {
   useContext,
   useEffect,
   useMemo,
+  useRef,
   useState,
   type ReactNode,
 } from "react";
@@ -44,6 +45,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [session, setSession] = useState<AuthHeaders | null>(getAuth());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const docsRef = useRef<GSTDocument[]>([]);
 
   const refresh = useCallback(async (silent = false) => {
     if (!silent) setLoading(true);
@@ -76,6 +78,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   useEffect(() => {
+    docsRef.current = docs;
+  }, [docs]);
+
+  useEffect(() => {
     refresh();
     const onVis = () => {
       if (document.visibilityState === "visible") refresh(true);
@@ -84,7 +90,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
 
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
-      const processing = docs.some((d) =>
+      const processing = docsRef.current.some((d) =>
         ["stored", "processing", "review"].includes(d.stage)
       );
       const ms = document.hidden ? 60_000 : processing ? 12_000 : 30_000;
@@ -99,7 +105,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       clearTimeout(timer);
       document.removeEventListener("visibilitychange", onVis);
     };
-  }, [refresh, docs]);
+  }, [refresh]);
 
   const createClient = useCallback(async (body: Partial<Client>) => {
     const created = await api.clients.create(body);

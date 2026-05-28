@@ -87,6 +87,10 @@ export interface GSTDocument {
   b2b_category?: "b2b" | "b2c" | "sez" | "export";
   original_document_id?: string;
   assigned_to_user_id?: string;
+  segment_index?: number;
+  page_start?: number;
+  page_end?: number;
+  invoice_label?: string;
 }
 
 export interface Client {

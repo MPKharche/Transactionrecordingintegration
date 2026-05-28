@@ -15,6 +15,7 @@ import { eq, and } from "drizzle-orm";
 import { isValidGSTIN, validateGstDocument } from "@ca-suite/shared";
 import { isUploadPastStage } from "@ca-suite/shared";
 import { loadUploadOrThrow } from "../lib/upload-guard.js";
+import type { PipelineJobData } from "../lib/pipeline-queue.js";
 import { syncValidationIssuesToGst } from "../lib/sync-gst-document.js";
 import { mapGstRowToDocument } from "../lib/map-gst-doc.js";
 import { saveDocumentIssues } from "../lib/persist-issues.js";
@@ -24,21 +25,36 @@ function validateDate(s: string | null | undefined): boolean {
   return /\d{4}-\d{2}-\d{2}|\d{2}-\d{2}-\d{4}|\d{2}\/\d{2}\/\d{4}/.test(s);
 }
 
-export async function validateStage(uploadId: string, tenantId: string, _job: Job): Promise<string | null> {
+export async function validateStage(uploadId: string, tenantId: string, job: Job): Promise<string | null> {
   const upload = await loadUploadOrThrow(uploadId, tenantId);
+  const gstDocumentId = (job.data as PipelineJobData).gstDocumentId;
+
+  const [gstRow] = gstDocumentId
+    ? await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.id, gstDocumentId))
+        .limit(1)
+    : await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.uploadId, uploadId))
+        .limit(1);
 
   if (
-    isUploadPastStage(upload.currentStage, "validated") ||
-    upload.currentStage === "ready_for_review"
+    gstRow &&
+    (gstRow.stage === "ready_for_review" || gstRow.stage === "locked" || gstRow.stage === "rejected")
   ) {
     return null;
   }
 
-  const [gstRow] = await db
-    .select()
-    .from(gstDocuments)
-    .where(eq(gstDocuments.uploadId, uploadId))
-    .limit(1);
+  if (
+    !gstDocumentId &&
+    (isUploadPastStage(upload.currentStage, "validated") ||
+      upload.currentStage === "ready_for_review")
+  ) {
+    return null;
+  }
 
   const pipelineIssues: string[] = [];
   const docType = gstRow?.docType ?? upload.docType;
@@ -57,7 +73,7 @@ export async function validateStage(uploadId: string, tenantId: string, _job: Jo
       else if (!validateDate(hdr.invoiceDate)) pipelineIssues.push("Invoice date format unrecognized");
       if (hdr.gstin && !isValidGSTIN(hdr.gstin)) pipelineIssues.push("GSTIN format invalid");
     }
-  } else {
+  } else if (!gstRow || (gstRow.segmentIndex ?? 0) === 0) {
     const [hdr] = await db
       .select()
       .from(purchaseBillHeaders)
@@ -92,19 +108,37 @@ export async function validateStage(uploadId: string, tenantId: string, _job: Jo
     ...pipelineIssues,
     ...gstFieldIssues.map((i) => i.message),
   ];
-  await syncValidationIssuesToGst(uploadId, pipelineIssues);
+  await syncValidationIssuesToGst(uploadId, pipelineIssues, gstRow?.id);
   if (gstRow && gstFieldIssues.length) {
     await saveDocumentIssues(gstRow.id, gstFieldIssues);
   }
 
-  await db
-    .update(uploads)
-    .set({ currentStage: "ready_for_review", updatedAt: new Date() })
-    .where(eq(uploads.id, uploadId));
+  const { syncGstStageForDocument, syncGstStageFromUpload } = await import("../lib/gst-sync.js");
+  if (gstRow) await syncGstStageForDocument(gstRow.id, "ready_for_review");
 
-  const { syncGstStageFromUpload } = await import("../lib/gst-sync.js");
-  await syncGstStageFromUpload(uploadId, "ready_for_review");
+  const siblings = await db
+    .select({ id: gstDocuments.id, stage: gstDocuments.stage })
+    .from(gstDocuments)
+    .where(eq(gstDocuments.uploadId, uploadId));
 
-  console.log(`[validate] uploadId=${uploadId} issues=${allMessages.length} → ready_for_review`);
+  const allReady = siblings.every(
+    (d) =>
+      d.stage === "ready_for_review" ||
+      d.stage === "locked" ||
+      d.stage === "rejected" ||
+      d.stage === "failed"
+  );
+
+  if (allReady) {
+    await db
+      .update(uploads)
+      .set({ currentStage: "ready_for_review", updatedAt: new Date() })
+      .where(eq(uploads.id, uploadId));
+    await syncGstStageFromUpload(uploadId, "ready_for_review");
+  }
+
+  console.log(
+    `[validate] uploadId=${uploadId} doc=${gstRow?.id ?? "?"} issues=${allMessages.length}`
+  );
   return null;
 }

@@ -59,13 +59,20 @@ function mapGstDocType(raw: string): typeof gstDocuments.$inferInsert.docType {
 export async function syncGstFromExtractor(
   uploadId: string,
   tenantId: string,
-  result: ExtractorResponse
+  result: ExtractorResponse,
+  gstDocumentId?: string
 ) {
-  const [doc] = await db
-    .select()
-    .from(gstDocuments)
-    .where(eq(gstDocuments.uploadId, uploadId))
-    .limit(1);
+  const [doc] = gstDocumentId
+    ? await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.id, gstDocumentId))
+        .limit(1)
+    : await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.uploadId, uploadId))
+        .limit(1);
   if (!doc) return;
 
   const [client] = await db
@@ -238,13 +245,20 @@ export async function syncGstFromExtractor(
 
 export async function syncValidationIssuesToGst(
   uploadId: string,
-  validationMessages: string[]
+  validationMessages: string[],
+  gstDocumentId?: string
 ) {
-  const [doc] = await db
-    .select()
-    .from(gstDocuments)
-    .where(eq(gstDocuments.uploadId, uploadId))
-    .limit(1);
+  const [doc] = gstDocumentId
+    ? await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.id, gstDocumentId))
+        .limit(1)
+    : await db
+        .select()
+        .from(gstDocuments)
+        .where(eq(gstDocuments.uploadId, uploadId))
+        .limit(1);
   if (!doc) return;
 
   await db.delete(documentIssues).where(eq(documentIssues.documentId, doc.id));

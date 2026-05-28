@@ -15,6 +15,10 @@ export default defineConfig({
         replacement: path.resolve(__dirname, "packages/db/src/index.ts"),
       },
       {
+        find: "@ca-suite/shared/server",
+        replacement: path.resolve(__dirname, "packages/shared/src/server.ts"),
+      },
+      {
         find: "@ca-suite/shared",
         replacement: path.resolve(__dirname, "packages/shared/src/index.ts"),
       },

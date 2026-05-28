@@ -182,6 +182,23 @@ export function ReviewScreen({
     partyByGstin,
   ]);
 
+  const extractionAlerts = useMemo(
+    () =>
+      (doc.issues ?? []).filter(
+        (i) =>
+          i.field === "extraction" ||
+          i.field === "validation" ||
+          /extract|ocr|stub|unavailable|openrouter/i.test(i.message)
+      ),
+    [doc.issues]
+  );
+  const extractionPending =
+    !locked &&
+    extractionAlerts.length === 0 &&
+    (doc.stage === "stored" || doc.stage === "ocr" || doc.stage === "extracting") &&
+    !docMeta.doc_number &&
+    !supplier.gstin;
+
   const errors   = liveErrors;
   const warnings = liveWarnings;
   const canLock  = errors.length === 0 && !locked;
@@ -275,6 +292,37 @@ export function ReviewScreen({
           </div>
         )}
       </div>
+
+      {(extractionAlerts.length > 0 || extractionPending) && !locked && (
+        <div
+          className="rounded-xl border px-5 py-4"
+          style={{
+            background: isDark ? "rgba(29,106,245,0.12)" : "#eff6ff",
+            borderColor: isDark ? "rgba(29,106,245,0.35)" : "#bfdbfe",
+          }}
+        >
+          <div className="flex items-start gap-2">
+            <Info size={18} className="text-primary shrink-0 mt-0.5" />
+            <div className="space-y-1">
+              <p className="text-sm font-semibold text-foreground">
+                {extractionPending
+                  ? "Reading your document…"
+                  : "Automatic extraction did not complete"}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {extractionPending
+                  ? "OCR and AI are filling fields from the PDF. If this stays empty, use Retry on Records or check that the extractor service is running."
+                  : "Fields below are empty because extraction failed — not because you must type everything by hand. Fix the pipeline, then retry."}
+              </p>
+              {extractionAlerts.map((a, i) => (
+                <p key={i} className="text-sm text-muted-foreground">
+                  {a.message}
+                </p>
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Issues */}
       {(errors.length > 0 || warnings.length > 0) && !locked && (

@@ -29,11 +29,45 @@ try:
 except ImportError:
     HAS_TESSERACT = False
 
+
+def _configure_tesseract() -> None:
+    """Point pytesseract at the Windows installer path when tesseract is not on PATH."""
+    if not HAS_TESSERACT:
+        return
+    try:
+        pytesseract.get_tesseract_version()
+        return
+    except Exception:
+        pass
+    env_cmd = os.environ.get("TESSERACT_CMD", "").strip()
+    if env_cmd and os.path.isfile(env_cmd):
+        pytesseract.pytesseract.tesseract_cmd = env_cmd
+        return
+    for candidate in (
+        r"C:\Program Files\Tesseract-OCR\tesseract.exe",
+        r"C:\Program Files (x86)\Tesseract-OCR\tesseract.exe",
+        "/usr/bin/tesseract",
+        "/usr/local/bin/tesseract",
+    ):
+        if os.path.isfile(candidate):
+            pytesseract.pytesseract.tesseract_cmd = candidate
+            log.info("Using tesseract at %s", candidate)
+            return
+
+
+_configure_tesseract()
+
 try:
     from pdf2image import convert_from_bytes
     HAS_PDF2IMAGE = True
 except ImportError:
     HAS_PDF2IMAGE = False
+
+try:
+    import fitz  # pymupdf
+    HAS_PYMUPDF = True
+except ImportError:
+    HAS_PYMUPDF = False
 
 try:
     from invoice2data import extract_data as i2d_extract
@@ -43,6 +77,7 @@ except Exception:
     HAS_INVOICE2DATA = False
 
 MIN_TEXT_LEN = 80
+EXTRACT_MAX_PAGES = int(os.environ.get("EXTRACT_MAX_PAGES", "30"))
 
 SYSTEM_PROMPT = """You are a GST document parser for Indian tax invoices and purchase bills.
 Return ONLY valid JSON (no markdown). Use null for missing fields. Amounts and quantities as strings.
@@ -55,18 +90,90 @@ Return ONLY valid JSON (no markdown). Use null for missing fields. Amounts and q
   "issues": []
 }
 
-Use Zoho Books camelCase field names (invoiceNumber, placeOfSupply, gstin, hsnSac, itemPrice, etc.).
-Dates as YYYY-MM-DD. GSTIN 15 chars when visible. State codes 2 digits for place/source/destination of supply.
+Use Zoho Books camelCase field names (invoiceNumber, billNumber, billDate, placeOfSupply, gstin, hsnSac, itemPrice, rate, quantity, taxPercentage, etc.).
+Dates as YYYY-MM-DD. GSTIN exactly 15 characters when visible.
+
+For purchase_bill / purchase invoices:
+- vendorName + gstin = BILL FROM / supplier / issuer (seller).
+- customerName = BILL TO / buyer name (optional).
+- destinationOfSupply = 2-digit state code from POS or buyer state (e.g. "27" for Maharashtra).
+- billNumber = document / invoice number; billDate = document date.
+
+For sales_invoice:
+- gstin on header = customer GSTIN (BILL TO); supplier is implicit.
+- placeOfSupply = 2-digit state code.
+
+Extract all line items with description, hsnSac, quantity, rate/itemPrice, tax %, and line totals when present.
 """.strip()
 
 
-def pdf_text_from_bytes(data: bytes) -> str:
+def _ocr_pdf_page_pymupdf(doc: Any, page_index: int) -> str:
+    if not HAS_TESSERACT:
+        return ""
+    try:
+        page = doc[page_index]
+        pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+        return pytesseract.image_to_string(
+            Image.open(io.BytesIO(pix.tobytes("png"))), lang="eng"
+        )
+    except Exception as e:
+        log.warning("page OCR failed p%s: %s", page_index + 1, e)
+        return ""
+
+
+def pdf_pages_from_bytes(
+    data: bytes,
+    page_start: int | None = None,
+    page_end: int | None = None,
+) -> list[dict[str, Any]]:
+    """Per-page text (1-based page numbers)."""
+    pages: list[dict[str, Any]] = []
+    if not HAS_PYMUPDF:
+        return pages
+    try:
+        doc = fitz.open(stream=data, filetype="pdf")
+        last = min(EXTRACT_MAX_PAGES, doc.page_count)
+        for i in range(last):
+            page_num = i + 1
+            if page_start is not None and page_num < page_start:
+                continue
+            if page_end is not None and page_num > page_end:
+                continue
+            text = (doc[i].get_text() or "").strip()
+            if len(text) < MIN_TEXT_LEN:
+                ocr = _ocr_pdf_page_pymupdf(doc, i).strip()
+                if len(ocr) > len(text):
+                    text = ocr
+            pages.append({"page": page_num, "text": text[:4000]})
+    except Exception as e:
+        log.warning("pdf_pages_from_bytes failed: %s", e)
+    return pages
+
+
+def pdf_text_from_bytes(
+    data: bytes,
+    page_start: int | None = None,
+    page_end: int | None = None,
+) -> str:
+    page_list = pdf_pages_from_bytes(data, page_start, page_end)
+    if page_list:
+        return " ".join(p["text"] for p in page_list).strip()
+    if HAS_PYMUPDF:
+        try:
+            doc = fitz.open(stream=data, filetype="pdf")
+            parts = [doc[i].get_text() for i in range(min(EXTRACT_MAX_PAGES, doc.page_count))]
+            text = " ".join(parts).strip()
+            if len(text) >= MIN_TEXT_LEN:
+                return text
+        except Exception as e:
+            log.warning("pymupdf text failed: %s", e)
+
     if PdfReader is None:
         return ""
     try:
         reader = PdfReader(io.BytesIO(data))
         parts = []
-        for page in reader.pages[:12]:
+        for page in reader.pages[:EXTRACT_MAX_PAGES]:
             parts.append(page.extract_text() or "")
         return " ".join(parts)
     except Exception as e:
@@ -85,28 +192,54 @@ def ocr_image_bytes(data: bytes) -> str:
         return ""
 
 
-def ocr_pdf_bytes(data: bytes) -> str:
-    if not HAS_PDF2IMAGE or not HAS_TESSERACT:
+def ocr_pdf_bytes_pymupdf(data: bytes) -> str:
+    if not HAS_PYMUPDF or not HAS_TESSERACT:
         return ""
     try:
-        pages = convert_from_bytes(data, dpi=200, first_page=1, last_page=3)
-        chunks = [pytesseract.image_to_string(p, lang="eng") for p in pages]
+        doc = fitz.open(stream=data, filetype="pdf")
+        chunks: list[str] = []
+        for page_num in range(min(3, doc.page_count)):
+            page = doc[page_num]
+            pix = page.get_pixmap(matrix=fitz.Matrix(2, 2))
+            chunks.append(pytesseract.image_to_string(Image.open(io.BytesIO(pix.tobytes("png"))), lang="eng"))
         return "\n".join(chunks)
     except Exception as e:
-        log.warning("PDF OCR failed: %s", e)
+        log.warning("pymupdf OCR failed: %s", e)
         return ""
 
 
-def extract_document_text(data: bytes, mime: str, storage_path: str) -> tuple[str, str]:
+def ocr_pdf_bytes(data: bytes) -> str:
+    if not HAS_TESSERACT:
+        return ""
+    best = ""
+    if HAS_PDF2IMAGE:
+        try:
+            pages = convert_from_bytes(data, dpi=200, first_page=1, last_page=3)
+            best = "\n".join(pytesseract.image_to_string(p, lang="eng") for p in pages)
+        except Exception as e:
+            log.warning("PDF OCR failed: %s", e)
+    pymupdf_ocr = ocr_pdf_bytes_pymupdf(data)
+    if len(pymupdf_ocr) > len(best):
+        return pymupdf_ocr
+    return best
+
+
+def extract_document_text(
+    data: bytes,
+    mime: str,
+    storage_path: str,
+    page_start: int | None = None,
+    page_end: int | None = None,
+) -> tuple[str, str]:
     """Best-effort text from file bytes. Returns (text, method_label)."""
     path_lower = (storage_path or "").lower()
     is_pdf = mime == "application/pdf" or path_lower.endswith(".pdf")
     is_image = mime.startswith("image/") or path_lower.endswith((".png", ".jpg", ".jpeg", ".webp"))
 
     if is_pdf:
-        text = pdf_text_from_bytes(data).strip()
+        text = pdf_text_from_bytes(data, page_start, page_end).strip()
         if len(text) >= MIN_TEXT_LEN:
-            return text[:8000], "pypdf"
+            return text[:8000], "pymupdf" if HAS_PYMUPDF else "pypdf"
         ocr = ocr_pdf_bytes(data).strip()
         if len(ocr) > len(text):
             return ocr[:8000], "tesseract_pdf"

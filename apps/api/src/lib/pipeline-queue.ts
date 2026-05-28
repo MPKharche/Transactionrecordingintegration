@@ -1,11 +1,11 @@
 import { Queue } from "bullmq";
+import type { JobPipelineStage } from "@ca-suite/shared";
 import {
   buildPipelineJobOptions,
   summarizeQueueCounts,
   PIPELINE_MAX_QUEUE_DEPTH,
-  type JobPipelineStage,
   type PipelineQueueMetrics,
-} from "@ca-suite/shared";
+} from "@ca-suite/shared/server";
 
 const connection = {
   host: process.env.REDIS_HOST ?? "localhost",

@@ -21,6 +21,7 @@ export const pipelineStageEnum = pgEnum("pipeline_stage", [
   "received",
   "normalized",
   "ocr",
+  "split",
   "extracted",
   "validated",
   "ready_for_review",

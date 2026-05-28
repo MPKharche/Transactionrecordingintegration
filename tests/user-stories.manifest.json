@@ -76,6 +76,14 @@
       "test": "us-upload.spec.ts"
     },
     {
+      "id": "US-UPLOAD-03",
+      "persona": "Article clerk",
+      "objective": "See duplicate upload blocked with context",
+      "acceptance": "Second identical file shows duplicate error on upload screen",
+      "layer": "e2e",
+      "test": "us-upload-dup.spec.ts"
+    },
+    {
       "id": "US-RECORDS-01",
       "persona": "Article clerk",
       "objective": "Find documents by client and type",
@@ -158,10 +166,26 @@
     {
       "id": "US-API-04",
       "persona": "System",
-      "objective": "Duplicate SHA rejected",
-      "acceptance": "Second identical upload returns 409",
+      "objective": "Duplicate SHA rejected while prior doc active",
+      "acceptance": "Second identical upload returns 409 when first is not rejected/failed",
       "layer": "api",
       "test": "api.test.ts"
+    },
+    {
+      "id": "US-API-05",
+      "persona": "System",
+      "objective": "Re-upload same file after reject",
+      "acceptance": "Reject then upload same bytes succeeds with new document id",
+      "layer": "api",
+      "test": "api.test.ts"
+    },
+    {
+      "id": "US-PIPELINE-01",
+      "persona": "System",
+      "objective": "Multi-invoice PDF split before extract",
+      "acceptance": "Pipeline includes split stage between ocr and extract",
+      "layer": "unit",
+      "test": "pipeline-split.test.ts"
     },
     {
       "id": "US-WF-01",

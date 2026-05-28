@@ -9,13 +9,15 @@ import {
   jobStageToDb,
   dbStageToJob,
   isJobPipelineStage,
+  isUploadPastStage,
+} from "@ca-suite/shared";
+import {
   WORKER_CONCURRENCY,
   OCR_CONCURRENCY,
   EXTRACT_LLM_CONCURRENCY,
-  isUploadPastStage,
   summarizeQueueCounts,
   PIPELINE_MAX_QUEUE_DEPTH,
-} from "@ca-suite/shared";
+} from "@ca-suite/shared/server";
 
 const baseLine = {
   id: "1",
@@ -114,6 +116,7 @@ describe("pipeline stage mapping (BullMQ ↔ Postgres)", () => {
 
   it("recognizes BullMQ stage names", () => {
     expect(isJobPipelineStage("extract")).toBe(true);
+    expect(isJobPipelineStage("split")).toBe(true);
     expect(isJobPipelineStage("normalized")).toBe(false);
   });
 

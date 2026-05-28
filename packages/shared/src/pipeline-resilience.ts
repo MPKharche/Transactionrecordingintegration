@@ -1,30 +1,6 @@
 import { readIntEnv } from "./throughput";
 import type { JobPipelineStage } from "./pipeline-stages";
 
-/** Upload row stages in pipeline order (subset used for idempotent skips). */
-export const UPLOAD_STAGE_ORDER = [
-  "received",
-  "normalized",
-  "ocr",
-  "extracted",
-  "validated",
-  "ready_for_review",
-  "approved",
-  "exported",
-  "dead_letter",
-] as const;
-
-export type UploadStage = (typeof UPLOAD_STAGE_ORDER)[number];
-
-export function uploadStageIndex(stage: string | null | undefined): number {
-  const idx = UPLOAD_STAGE_ORDER.indexOf(stage as UploadStage);
-  return idx < 0 ? 0 : idx;
-}
-
-export function isUploadPastStage(current: string | null | undefined, target: UploadStage): boolean {
-  return uploadStageIndex(current) > uploadStageIndex(target);
-}
-
 const constrained = process.env.DEPLOY_PROFILE === "constrained";
 
 /** Max BullMQ jobs (waiting + active + delayed) before API rejects new uploads. */
@@ -44,6 +20,7 @@ export const EXTRACTOR_TIMEOUT_MS = readIntEnv("EXTRACTOR_TIMEOUT_MS", constrain
 export const PIPELINE_JOB_TIMEOUT_MS: Record<JobPipelineStage, number> = {
   normalize: readIntEnv("PIPELINE_TIMEOUT_NORMALIZE_MS", 60_000),
   ocr: readIntEnv("PIPELINE_TIMEOUT_OCR_MS", constrained ? 120_000 : 90_000),
+  split: readIntEnv("PIPELINE_TIMEOUT_SPLIT_MS", 90_000),
   extract: readIntEnv("PIPELINE_TIMEOUT_EXTRACT_MS", constrained ? 180_000 : 120_000),
   validate: readIntEnv("PIPELINE_TIMEOUT_VALIDATE_MS", 60_000),
 };

@@ -68,6 +68,26 @@ class ExtractRequest(BaseModel):
     ocr_text: str = ""
     source_url: str = ""
     mime_type: str = ""
+    doc_type_hint: str = ""  # e.g. purchase_invoice | sales_invoice
+    page_start: Optional[int] = None
+    page_end: Optional[int] = None
+
+
+class DetectInvoicesRequest(BaseModel):
+    storage_path: str
+    mime_type: str = ""
+    pages: list[dict] = []
+
+
+class InvoiceSegment(BaseModel):
+    pageStart: int
+    pageEnd: int
+    billNumber: Optional[str] = None
+    confidence: str = "medium"
+
+
+class DetectInvoicesResponse(BaseModel):
+    segments: list[InvoiceSegment] = []
 
 class SalesLineItem(BaseModel):
     """Zoho sales invoice line columns (subset + extras)."""
@@ -232,27 +252,52 @@ class ExtractorResponse(BaseModel):
     purchaseBill: Optional[PurchaseBill] = None
 
 from extractor_core import (
+    MIN_TEXT_LEN,
     extract_document_text,
     llm_extract,
     merge_results,
+    pdf_pages_from_bytes,
     template_to_extractor_shape,
     try_invoice2data,
 )
+from invoice_split import detect_invoice_segments
 from minio_fetch import fetch_object
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
 async def health():
-    from extractor_core import HAS_PDF2IMAGE, HAS_TESSERACT as _TESS
+    from extractor_core import HAS_PDF2IMAGE, HAS_PYMUPDF, HAS_TESSERACT as _TESS
+    tess_ready = False
+    if _TESS:
+        try:
+            import pytesseract
+            pytesseract.get_tesseract_version()
+            tess_ready = True
+        except Exception:
+            tess_ready = False
     return {
         "status": "ok",
         "invoice2data": HAS_INVOICE2DATA,
         "tesseract": _TESS,
+        "tesseract_ready": tess_ready,
+        "pymupdf": HAS_PYMUPDF,
         "pdf_ocr": HAS_PDF2IMAGE,
         "openrouter": bool(OPENROUTER_API_KEY),
         "model": MODEL,
     }
+
+@app.post("/detect-invoices", response_model=DetectInvoicesResponse, dependencies=[Depends(require_auth)])
+async def detect_invoices(req: DetectInvoicesRequest):
+    file_bytes = fetch_object(req.storage_path)
+    pages = req.pages or []
+    if file_bytes and not pages:
+        pages = pdf_pages_from_bytes(file_bytes)
+    segments = detect_invoice_segments(pages)
+    return DetectInvoicesResponse(
+        segments=[InvoiceSegment(**s) for s in segments]
+    )
+
 
 @app.post("/extract", response_model=ExtractorResponse, dependencies=[Depends(require_auth)])
 async def extract(req: ExtractRequest):
@@ -269,8 +314,15 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
     text_method = "worker_ocr" if ocr_text else ""
 
     if file_bytes:
-        file_text, file_method = extract_document_text(file_bytes, mime, req.storage_path)
-        if len(file_text) > len(combined_text):
+        file_text, file_method = extract_document_text(
+            file_bytes,
+            mime,
+            req.storage_path,
+            req.page_start,
+            req.page_end,
+        )
+        # Prefer sidecar PDF/OCR over worker OCR (often empty or junk from pdf-parse on scans).
+        if len(file_text) >= MIN_TEXT_LEN or len(file_text) > len(combined_text):
             combined_text = file_text
             text_method = file_method
 
@@ -291,7 +343,19 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
             template_result = template_to_extractor_shape(tpl_raw)
 
     try:
-        llm_result = await llm_extract(combined_text)
+        hint = (req.doc_type_hint or "").strip().lower()
+        hint_note = ""
+        if hint in ("purchase_invoice", "purchase_bill", "purchase"):
+            hint_note = (
+                "\n\nUpload category: PURCHASE (buyer books). "
+                "Use docType purchase_bill. vendorName + gstin = BILL FROM / supplier. "
+                "customerName = BILL TO / buyer."
+            )
+        elif hint in ("sales_invoice", "sales"):
+            hint_note = (
+                "\n\nUpload category: SALES (seller books). Use docType sales_invoice."
+            )
+        llm_result = await llm_extract(combined_text + hint_note)
         if template_result and llm_result.get("extractionMethod") != "stub":
             result = merge_results(template_result, llm_result)
         elif template_result and llm_result.get("extractionMethod") == "stub":

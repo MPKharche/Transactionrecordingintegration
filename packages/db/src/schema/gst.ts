@@ -11,6 +11,7 @@ import {
   primaryKey,
   uniqueIndex,
 } from "drizzle-orm/pg-core";
+import { sql } from "drizzle-orm";
 import { tenants } from "./tenants";
 
 export const gstDocStageEnum = pgEnum("gst_doc_stage", [
@@ -121,10 +122,18 @@ export const gstDocuments = pgTable("gst_documents", {
   b2bCategory: text("b2b_category").default("b2b"),
   originalDocumentId: uuid("original_document_id"),
   assignedToUserId: uuid("assigned_to_user_id"),
+  segmentIndex: integer("segment_index").notNull().default(0),
+  pageStart: integer("page_start"),
+  pageEnd: integer("page_end"),
+  invoiceLabel: text("invoice_label"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
-  tenantShaIdx: uniqueIndex("gst_documents_tenant_sha_uidx").on(t.tenantId, t.contentSha256),
+  tenantShaActiveIdx: uniqueIndex("gst_documents_tenant_sha_active_uidx")
+    .on(t.tenantId, t.contentSha256)
+    .where(
+      sql`${t.stage} NOT IN ('rejected', 'failed') AND ${t.segmentIndex} = 0`
+    ),
 }));
 
 export const clientAssignments = pgTable(

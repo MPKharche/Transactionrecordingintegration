@@ -138,10 +138,10 @@ export const api = {
       request<{ url: string }>(`/documents/${id}/preview-url`),
     upload: async (file: File, clientId: string, docType: string, fy?: string) => {
       const fd = new FormData();
-      fd.append("file", file);
       fd.append("client_id", clientId);
       fd.append("doc_type", docType);
       fd.append("financial_year", fy ?? currentFinancialYear());
+      fd.append("file", file);
 
       const maxAttempts = 4;
       for (let attempt = 0; attempt < maxAttempts; attempt++) {
@@ -153,11 +153,20 @@ export const api = {
         if (res.ok) return res.json() as Promise<GSTDocument>;
 
         const body = await res.json().catch(() => ({}));
-        const b = body as { error?: string; existingId?: string; retryAfterSec?: number };
+        const b = body as {
+          error?: string;
+          existingId?: string;
+          existingStage?: string;
+          retryAfterSec?: number;
+        };
 
         if (b.existingId) {
-          const err = new Error(b.error ?? "Duplicate document") as Error & { existingId?: string };
+          const err = new Error(b.error ?? "Duplicate document") as Error & {
+            existingId?: string;
+            existingStage?: string;
+          };
           err.existingId = b.existingId;
+          err.existingStage = b.existingStage;
           throw err;
         }
 

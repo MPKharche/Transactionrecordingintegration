@@ -19,6 +19,8 @@ function figmaAssetResolver() {
 export default defineConfig({
   envDir: path.resolve(__dirname, '../..'),
   server: {
+    /** Playwright on Windows resolves localhost → 127.0.0.1; default Vite may bind [::1] only. */
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       "/api": {
