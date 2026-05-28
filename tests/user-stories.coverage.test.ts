@@ -5,9 +5,10 @@ import manifest from "./user-stories.manifest.json";
 
 function readTestFiles(dir: string): string[] {
   if (!fs.existsSync(dir)) return [];
-  return fs.readdirSync(dir).flatMap((name) => {
-    const full = path.join(dir, name);
-    if (name.endsWith(".ts") || name.endsWith(".tsx")) {
+  return fs.readdirSync(dir, { withFileTypes: true }).flatMap((ent) => {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) return readTestFiles(full);
+    if (ent.name.endsWith(".ts") || ent.name.endsWith(".tsx")) {
       return [fs.readFileSync(full, "utf8")];
     }
     return [];

@@ -6,6 +6,9 @@ import {
   isValidHsnSac,
   applyLineTax,
   validateGstDocument,
+  jobStageToDb,
+  dbStageToJob,
+  isJobPipelineStage,
 } from "@ca-suite/shared";
 
 const baseLine = {
@@ -64,6 +67,30 @@ const baseDoc = {
   total: 1180,
   issues: [] as { severity: string }[],
 };
+
+describe("pipeline stage mapping (BullMQ ↔ Postgres)", () => {
+  it("maps job verbs to DB enum values", () => {
+    expect(jobStageToDb("normalize")).toBe("normalized");
+    expect(jobStageToDb("ocr")).toBe("ocr");
+    expect(jobStageToDb("extract")).toBe("extracted");
+    expect(jobStageToDb("validate")).toBe("validated");
+  });
+
+  it("maps DB enum back to job names for reconcile", () => {
+    expect(dbStageToJob("normalized")).toBe("normalize");
+    expect(dbStageToJob("extracted")).toBe("extract");
+    expect(dbStageToJob("received")).toBeNull();
+  });
+
+  it("recognizes BullMQ stage names", () => {
+    expect(isJobPipelineStage("extract")).toBe(true);
+    expect(isJobPipelineStage("normalized")).toBe(false);
+  });
+
+  it("rejects unknown job stages", () => {
+    expect(() => jobStageToDb("normalize_typo")).toThrow(/Unknown pipeline/);
+  });
+});
 
 describe("US-GST-RULES-01: validators", () => {
   it("validates GSTIN format", () => {

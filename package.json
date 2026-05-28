@@ -26,9 +26,13 @@
     "db:seed": "tsx scripts/seed-demo.ts",
     "db:clear": "tsx scripts/db-clear-demo.ts",
     "db:reset": "pnpm db:clear && pnpm db:seed",
+    "queue:flush": "node scripts/flush-pipeline-queue.mjs",
+    "prod:bootstrap": "node scripts/prod-bootstrap.mjs",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {
+    "bullmq": "^5.34.8",
+    "dotenv": "^16.4.7",
     "@ca-suite/shared": "workspace:*",
     "@playwright/test": "^1.49.1",
     "@testing-library/dom": "^10.4.0",

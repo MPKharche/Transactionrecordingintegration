@@ -1,0 +1,25 @@
+name: Docker build
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "apps/**"
+      - "packages/**"
+      - "services/extractor/**"
+      - "infra/**"
+      - "pnpm-lock.yaml"
+  workflow_dispatch:
+
+jobs:
+  build-images:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Create production .env stub
+        run: |
+          cp .env.example .env
+          echo "POSTGRES_PASSWORD=ci-build-pass" >> .env
+          echo "AUTH_SECRET=ci-build-secret-at-least-32-chars" >> .env
+      - name: Build stack images
+        run: docker compose -f infra/docker-compose.yml --env-file .env build api web worker extractor

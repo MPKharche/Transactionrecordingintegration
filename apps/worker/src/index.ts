@@ -8,6 +8,7 @@ config({ path: path.resolve(__dirname, "../../../.env") });
 import { Worker, Job } from "bullmq";
 import { db } from "@ca-suite/db/client";
 import { pipelineJobs, uploads } from "@ca-suite/db";
+import { jobStageToDb, dbStageToJob, type JobPipelineStage } from "@ca-suite/shared";
 import { eq, and, lt } from "drizzle-orm";
 import { normalizeStage } from "./stages/normalize";
 import { ocrStage } from "./stages/ocr";
@@ -19,16 +20,16 @@ const connection = {
   port: parseInt(process.env.REDIS_PORT ?? "6379"),
 };
 
-type JobData = { uploadId: string; tenantId: string; stage: string };
+type JobData = { uploadId: string; tenantId: string; stage: JobPipelineStage };
 
 async function processJob(job: Job<JobData>) {
   const { uploadId, tenantId, stage } = job.data;
+  const dbStage = jobStageToDb(stage);
 
-  // Upsert pipeline_job row
   const existing = await db
     .select()
     .from(pipelineJobs)
-    .where(and(eq(pipelineJobs.uploadId, uploadId), eq(pipelineJobs.stage, stage as any)))
+    .where(and(eq(pipelineJobs.uploadId, uploadId), eq(pipelineJobs.stage, dbStage)))
     .limit(1);
 
   let jobRow;
@@ -42,19 +43,23 @@ async function processJob(job: Job<JobData>) {
     [jobRow] = await db
       .insert(pipelineJobs)
       .values({
-        uploadId, tenantId, stage: stage as any,
-        status: "running", startedAt: new Date(), bullmqJobId: job.id,
+        uploadId,
+        tenantId,
+        stage: dbStage,
+        status: "running",
+        startedAt: new Date(),
+        bullmqJobId: job.id,
       })
       .returning();
   }
 
   try {
-    let nextStage: string | null = null;
+    let nextStage: JobPipelineStage | null = null;
 
-    if (stage === "normalize") nextStage = await normalizeStage(uploadId, tenantId, job);
-    else if (stage === "ocr") nextStage = await ocrStage(uploadId, tenantId, job);
-    else if (stage === "extract") nextStage = await extractStage(uploadId, tenantId, job);
-    else if (stage === "validate") nextStage = await validateStage(uploadId, tenantId, job);
+    if (stage === "normalize") nextStage = (await normalizeStage(uploadId, tenantId, job)) as JobPipelineStage;
+    else if (stage === "ocr") nextStage = (await ocrStage(uploadId, tenantId, job)) as JobPipelineStage;
+    else if (stage === "extract") nextStage = (await extractStage(uploadId, tenantId, job)) as JobPipelineStage;
+    else if (stage === "validate") nextStage = (await validateStage(uploadId, tenantId, job)) as JobPipelineStage;
 
     await db.update(pipelineJobs).set({ status: "success", finishedAt: new Date(), updatedAt: new Date() }).where(eq(pipelineJobs.id, jobRow.id));
 
@@ -105,9 +110,13 @@ async function reconcile() {
     console.log(`[reconcile] Re-enqueuing ${stuckJobs.length} stuck jobs`);
     const queue = new (await import("bullmq")).Queue("pipeline", { connection });
     for (const j of stuckJobs) {
-      await queue.add(j.stage!, { uploadId: j.uploadId, tenantId: j.tenantId, stage: j.stage }, {
-        jobId: `${j.uploadId}-${j.stage}-reconcile-${Date.now()}`,
-      });
+      const jobStage = dbStageToJob(j.stage);
+      if (!jobStage) continue;
+      await queue.add(
+        jobStage,
+        { uploadId: j.uploadId, tenantId: j.tenantId, stage: jobStage },
+        { jobId: `${j.uploadId}-${jobStage}-reconcile-${Date.now()}` }
+      );
     }
   }
 }

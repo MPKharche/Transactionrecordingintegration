@@ -15,24 +15,30 @@ const manifest = JSON.parse(
   fs.readFileSync(path.join(root, "tests/user-stories.manifest.json"), "utf8")
 );
 
-function run(cmd, label) {
+function run(cmd, label, extraEnv = {}) {
   console.log(`\n▶ ${label}\n   ${cmd}\n`);
-  execSync(cmd, { cwd: root, stdio: "inherit", env: { ...process.env, FORCE_COLOR: "1" } });
+  execSync(cmd, {
+    cwd: root,
+    stdio: "inherit",
+    env: { ...process.env, FORCE_COLOR: "1", ...extraEnv },
+  });
   console.log(`✓ ${label}`);
 }
 
-function verifyStoryCoverage() {
-  const e2eDir = path.join(root, "tests/e2e");
-  const unitDir = path.join(root, "tests");
-  const blobs = [];
-  const featuresDir = path.join(root, "apps/web/src/features");
-  for (const dir of [e2eDir, unitDir, featuresDir]) {
-    for (const f of fs.readdirSync(dir, { withFileTypes: true })) {
-      if (f.isFile() && /\.(ts|tsx)$/.test(f.name)) {
-        blobs.push(fs.readFileSync(path.join(dir, f.name), "utf8"));
-      }
-    }
+function collectSources(dir, out = []) {
+  if (!fs.existsSync(dir)) return out;
+  for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
+    const full = path.join(dir, ent.name);
+    if (ent.isDirectory()) collectSources(full, out);
+    else if (/\.(ts|tsx)$/.test(ent.name)) out.push(fs.readFileSync(full, "utf8"));
   }
+  return out;
+}
+
+function verifyStoryCoverage() {
+  const blobs = collectSources(path.join(root, "tests/e2e"))
+    .concat(collectSources(path.join(root, "tests")))
+    .concat(collectSources(path.join(root, "apps/web/src/features")));
   const missing = [];
   for (const story of manifest.stories) {
     const found = blobs.some((b) => b.includes(story.id));
@@ -47,6 +53,8 @@ function verifyStoryCoverage() {
 }
 
 const skipPreflight = process.argv.includes("--skip-preflight");
+// regression:ci uses --skip-preflight; force fresh Playwright servers (no stale dev env)
+if (skipPreflight && !process.env.CI) process.env.CI = "true";
 
 try {
   if (!skipPreflight) {
@@ -56,7 +64,10 @@ try {
   run("pnpm test", "Unit + API + workflow tests");
   run("pnpm --filter @ca-suite/web build", "Production web build");
   verifyStoryCoverage();
-  run("pnpm test:e2e", "Playwright user-story E2E");
+  run("pnpm test:e2e", "Playwright user-story E2E", {
+    VITE_ALLOW_DEV_LOGIN: "true",
+    AUTH_DEV_BYPASS: "true",
+  });
   console.log("\n✅ Regression complete — all gates passed\n");
   console.log(`   Product objective: ${manifest.objective}\n`);
 } catch (e) {

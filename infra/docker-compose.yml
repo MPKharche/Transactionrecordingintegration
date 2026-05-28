@@ -1,18 +1,15 @@
 version: "3.9"
 
-# ─── Networks ────────────────────────────────────────────────────────────────
 networks:
   ca-internal:
     driver: bridge
 
-# ─── Volumes ─────────────────────────────────────────────────────────────────
 volumes:
   postgres-data:
   redis-data:
   minio-data:
 
 services:
-  # ─── Postgres ──────────────────────────────────────────────────────────────
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
@@ -31,7 +28,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── Redis ─────────────────────────────────────────────────────────────────
   redis:
     image: redis:7-alpine
     restart: unless-stopped
@@ -47,7 +43,6 @@ services:
       timeout: 5s
       retries: 5
 
-  # ─── MinIO ─────────────────────────────────────────────────────────────────
   minio:
     image: minio/minio:latest
     restart: unless-stopped
@@ -58,8 +53,8 @@ services:
     volumes:
       - minio-data:/data
     ports:
-      - "9000:9000"   # MinIO S3 API
-      - "9001:9001"   # MinIO console (dev only)
+      - "9000:9000"
+      - "9001:9001"
     networks: [ca-internal]
     healthcheck:
       test: ["CMD", "curl", "-f", "http://localhost:9000/minio/health/live"]
@@ -67,7 +62,6 @@ services:
       timeout: 10s
       retries: 3
 
-  # ─── Extractor ─────────────────────────────────────────────────────────────
   extractor:
     build:
       context: ../services/extractor
@@ -75,8 +69,11 @@ services:
     restart: unless-stopped
     mem_limit: 768m
     cpus: "0.75"
+    env_file:
+      - ../.env
     environment:
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v3.2}
       EXTRACTOR_SHARED_SECRET: ${EXTRACTOR_SHARED_SECRET:-}
       MINIO_ENDPOINT: minio
       MINIO_PORT: "9000"
@@ -85,8 +82,6 @@ services:
       MINIO_BUCKET: ${MINIO_BUCKET:-ca-uploads}
     networks: [ca-internal]
     depends_on:
-      postgres:
-        condition: service_healthy
       minio:
         condition: service_healthy
     healthcheck:
@@ -95,16 +90,16 @@ services:
       timeout: 10s
       retries: 3
 
-  # ─── REST API (Fastify) ────────────────────────────────────────────────────
   api:
     build:
       context: ..
       dockerfile: apps/api/Dockerfile
     image: ca-suite-api:latest
     restart: unless-stopped
-    ports:
-      - "4000:4000"
+    env_file:
+      - ../.env
     environment:
+      NODE_ENV: production
       DATABASE_URL: postgresql://ca_user:${POSTGRES_PASSWORD:-ca_pass}@postgres:5432/ca_saas
       REDIS_HOST: redis
       REDIS_PORT: "6379"
@@ -115,7 +110,15 @@ services:
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-ca-uploads}
       API_PORT: "4000"
-      AUTH_DEV_BYPASS: "true"
+      AUTH_DEV_BYPASS: ${AUTH_DEV_BYPASS:-false}
+      AUTH_SECRET: ${AUTH_SECRET:-change-me-at-least-32-characters-long}
+      API_PUBLIC_URL: ${API_PUBLIC_URL:-http://localhost}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost}
+      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
+      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
+      GOOGLE_ALLOW_AUTO_JOIN: ${GOOGLE_ALLOW_AUTO_JOIN:-false}
+      EXTRACTOR_URL: http://extractor:8000
+      EXTRACTOR_SHARED_SECRET: ${EXTRACTOR_SHARED_SECRET:-}
     networks: [ca-internal]
     depends_on:
       postgres:
@@ -124,47 +127,28 @@ services:
         condition: service_healthy
       minio:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1:4000/api/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
 
-  # ─── Web (Next.js) ─────────────────────────────────────────────────────────
   web:
     build:
       context: ..
       dockerfile: apps/web/Dockerfile
+      args:
+        VITE_ALLOW_DEV_LOGIN: ${VITE_ALLOW_DEV_LOGIN:-false}
+        VITE_API_URL: /api
     image: ca-saas-web:latest
     restart: unless-stopped
-    environment:
-      DATABASE_URL: postgresql://ca_user:${POSTGRES_PASSWORD:-ca_pass}@postgres:5432/ca_saas
-      REDIS_HOST: redis
-      REDIS_PORT: "6379"
-      MINIO_ENDPOINT: minio
-      MINIO_PORT: "9000"
-      MINIO_USE_SSL: "false"
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-ca-uploads}
-      EXTRACTOR_URL: http://extractor:8000
-      EXTRACTOR_SHARED_SECRET: ${EXTRACTOR_SHARED_SECRET:-}
-      AUTH_SECRET: ${AUTH_SECRET:-dev-secret-change-in-production-32chars}
-      AUTH_URL: ${AUTH_URL:-http://localhost:3000}
-      GOOGLE_CLIENT_ID: ${GOOGLE_CLIENT_ID:-}
-      GOOGLE_CLIENT_SECRET: ${GOOGLE_CLIENT_SECRET:-}
-      TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      TELEGRAM_WEBHOOK_SECRET: ${TELEGRAM_WEBHOOK_SECRET:-}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
-      OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
-      NODE_ENV: production
     networks: [ca-internal]
-    depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      minio:
-        condition: service_healthy
-      extractor:
-        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
 
-  # ─── Worker (BullMQ) ───────────────────────────────────────────────────────
   worker:
     build:
       context: ..
@@ -172,7 +156,10 @@ services:
     image: ca-saas-worker:latest
     restart: unless-stopped
     mem_limit: 1g
+    env_file:
+      - ../.env
     environment:
+      NODE_ENV: production
       DATABASE_URL: postgresql://ca_user:${POSTGRES_PASSWORD:-ca_pass}@postgres:5432/ca_saas
       REDIS_HOST: redis
       REDIS_PORT: "6379"
@@ -185,6 +172,7 @@ services:
       EXTRACTOR_URL: http://extractor:8000
       EXTRACTOR_SHARED_SECRET: ${EXTRACTOR_SHARED_SECRET:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
+      OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v3.2}
     networks: [ca-internal]
     depends_on:
       postgres:
@@ -196,26 +184,21 @@ services:
       extractor:
         condition: service_healthy
 
-  # ─── Bot (Telegraf long-polling — dev) or use webhook in web for prod ──────
   bot:
     build:
       context: ..
       dockerfile: apps/bot/Dockerfile
     image: ca-saas-bot:latest
     restart: unless-stopped
-    profiles: ["bot"]  # opt-in: docker compose --profile bot up
+    profiles: ["bot"]
+    env_file:
+      - ../.env
     environment:
       DATABASE_URL: postgresql://ca_user:${POSTGRES_PASSWORD:-ca_pass}@postgres:5432/ca_saas
       REDIS_HOST: redis
       REDIS_PORT: "6379"
-      MINIO_ENDPOINT: minio
-      MINIO_PORT: "9000"
-      MINIO_USE_SSL: "false"
-      MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
-      MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
-      MINIO_BUCKET: ${MINIO_BUCKET:-ca-uploads}
       TELEGRAM_BOT_TOKEN: ${TELEGRAM_BOT_TOKEN:-}
-      NEXT_PUBLIC_APP_URL: ${NEXT_PUBLIC_APP_URL:-http://localhost:3000}
+      WEB_ORIGIN: ${WEB_ORIGIN:-http://localhost}
     networks: [ca-internal]
     depends_on:
       postgres:
@@ -223,7 +206,6 @@ services:
       redis:
         condition: service_healthy
 
-  # ─── nginx ─────────────────────────────────────────────────────────────────
   nginx:
     image: nginx:alpine
     restart: unless-stopped
@@ -234,4 +216,8 @@ services:
       - ./nginx/default.conf:/etc/nginx/conf.d/default.conf:ro
       - ./nginx/certs:/etc/nginx/certs:ro
     networks: [ca-internal]
-    depends_on: [web]
+    depends_on:
+      api:
+        condition: service_healthy
+      web:
+        condition: service_healthy
