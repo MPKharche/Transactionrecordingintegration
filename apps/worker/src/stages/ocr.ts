@@ -40,13 +40,10 @@ async function extractPdfText(buffer: Buffer): Promise<string> {
   return raw.replace(/[^\x20-\x7E\n]/g, " ").replace(/\s+/g, " ").slice(0, 8000);
 }
 
-async function ocrImage(buffer: Buffer, mimeType: string): Promise<string> {
+async function ocrImage(buffer: Buffer, _mimeType: string): Promise<string> {
   try {
-    const { createWorker } = await import("tesseract.js");
-    const worker = await createWorker("eng");
-    const { data } = await worker.recognize(buffer);
-    await worker.terminate();
-    return data.text.slice(0, 8000);
+    const { recognizeImage } = await import("../lib/ocr-pool.js");
+    return recognizeImage(buffer);
   } catch (err) {
     console.warn("[ocr] Tesseract failed:", err);
     throw new Error("OCR failed — could not read image text");

@@ -9,6 +9,9 @@ import {
   jobStageToDb,
   dbStageToJob,
   isJobPipelineStage,
+  WORKER_CONCURRENCY,
+  OCR_CONCURRENCY,
+  EXTRACT_LLM_CONCURRENCY,
 } from "@ca-suite/shared";
 
 const baseLine = {
@@ -67,6 +70,14 @@ const baseDoc = {
   total: 1180,
   issues: [] as { severity: string }[],
 };
+
+describe("throughput defaults", () => {
+  it("exposes sane production defaults", () => {
+    expect(WORKER_CONCURRENCY).toBeGreaterThanOrEqual(8);
+    expect(OCR_CONCURRENCY).toBeLessThanOrEqual(WORKER_CONCURRENCY);
+    expect(EXTRACT_LLM_CONCURRENCY).toBeLessThanOrEqual(WORKER_CONCURRENCY);
+  });
+});
 
 describe("pipeline stage mapping (BullMQ ↔ Postgres)", () => {
   it("maps job verbs to DB enum values", () => {

@@ -51,7 +51,7 @@ docker compose --env-file ../.env up -d postgres redis minio
 # wait ~15s for health
 cd ..
 docker compose -f infra/docker-compose.yml --env-file .env run --rm api pnpm db:push
-node scripts/prod-bootstrap.mjs
+pnpm prod:bootstrap
 cd infra
 docker compose --env-file ../.env up -d extractor api worker web nginx
 ```
@@ -72,7 +72,11 @@ docker compose -f infra/docker-compose.yml --env-file .env ps
 
 Extractor health should show `"openrouter": true`.
 
-## 5. Updates (pull latest `main`)
+## 5. Throughput tuning
+
+Defaults support ~100 concurrent users and 10–20 parallel uploads on one VPS. See [`docs/SCALE.md`](SCALE.md) for env vars (`WORKER_CONCURRENCY`, `OCR_CONCURRENCY`, `EXTRACT_LLM_CONCURRENCY`, etc.).
+
+## 6. Updates (pull latest `main`)
 
 ```bash
 git pull origin main
@@ -80,7 +84,8 @@ cd infra
 docker compose --env-file ../.env build
 docker compose --env-file ../.env up -d
 cd ..
-node scripts/prod-bootstrap.mjs
+pnpm prod:bootstrap
+# or: docker compose -f infra/docker-compose.yml --env-file .env run --rm worker node scripts/flush-pipeline-queue.mjs
 ```
 
 ## Secrets

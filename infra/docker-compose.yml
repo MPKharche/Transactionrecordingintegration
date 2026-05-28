@@ -13,6 +13,14 @@ services:
   postgres:
     image: postgres:16-alpine
     restart: unless-stopped
+    command:
+      - postgres
+      - -c
+      - max_connections=120
+      - -c
+      - shared_buffers=128MB
+      - -c
+      - work_mem=4MB
     environment:
       POSTGRES_DB: ca_saas
       POSTGRES_USER: ca_user
@@ -31,7 +39,7 @@ services:
   redis:
     image: redis:7-alpine
     restart: unless-stopped
-    command: redis-server --save 60 1 --loglevel warning
+    command: redis-server --save 60 1 --loglevel warning --maxmemory 256mb --maxmemory-policy allkeys-lru
     volumes:
       - redis-data:/data
     ports:
@@ -67,8 +75,8 @@ services:
       context: ../services/extractor
     image: ca-saas-extractor:latest
     restart: unless-stopped
-    mem_limit: 768m
-    cpus: "0.75"
+    mem_limit: 1g
+    cpus: "1.5"
     env_file:
       - ../.env
     environment:
@@ -80,6 +88,8 @@ services:
       MINIO_ACCESS_KEY: ${MINIO_ACCESS_KEY:-minioadmin}
       MINIO_SECRET_KEY: ${MINIO_SECRET_KEY:-minioadmin}
       MINIO_BUCKET: ${MINIO_BUCKET:-ca-uploads}
+      EXTRACTOR_WORKERS: ${EXTRACTOR_WORKERS:-2}
+      EXTRACT_MAX_CONCURRENT: ${EXTRACT_MAX_CONCURRENT:-4}
     networks: [ca-internal]
     depends_on:
       minio:
@@ -119,6 +129,7 @@ services:
       GOOGLE_ALLOW_AUTO_JOIN: ${GOOGLE_ALLOW_AUTO_JOIN:-false}
       EXTRACTOR_URL: http://extractor:8000
       EXTRACTOR_SHARED_SECRET: ${EXTRACTOR_SHARED_SECRET:-}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-20}
     networks: [ca-internal]
     depends_on:
       postgres:
@@ -155,7 +166,8 @@ services:
       dockerfile: apps/worker/Dockerfile
     image: ca-saas-worker:latest
     restart: unless-stopped
-    mem_limit: 1g
+    mem_limit: 1536m
+    cpus: "2"
     env_file:
       - ../.env
     environment:
@@ -173,6 +185,10 @@ services:
       EXTRACTOR_SHARED_SECRET: ${EXTRACTOR_SHARED_SECRET:-}
       OPENROUTER_API_KEY: ${OPENROUTER_API_KEY:-}
       OPENROUTER_MODEL: ${OPENROUTER_MODEL:-deepseek/deepseek-v3.2}
+      WORKER_CONCURRENCY: ${WORKER_CONCURRENCY:-12}
+      OCR_CONCURRENCY: ${OCR_CONCURRENCY:-6}
+      EXTRACT_LLM_CONCURRENCY: ${EXTRACT_LLM_CONCURRENCY:-4}
+      DATABASE_POOL_MAX: ${DATABASE_POOL_MAX:-20}
     networks: [ca-internal]
     depends_on:
       postgres:

@@ -10,6 +10,11 @@ import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
 import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
 import { useAppData } from "../../context/AppDataContext";
 import { currentFinancialYear } from "../../lib/api";
+
+const UPLOAD_BATCH = Math.min(
+  10,
+  Math.max(1, parseInt(import.meta.env.VITE_UPLOAD_CONCURRENCY ?? "5", 10) || 5)
+);
 import {
   Plus, Search, Download, Upload, ChevronDown, FileText, X,
   FileWarning, CheckCircle, Eye, RefreshCw,
@@ -49,7 +54,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
     setUploadError("");
     setUploading(true);
     try {
-      const concurrency = 3;
+      const concurrency = UPLOAD_BATCH;
       for (let i = 0; i < queued.length; i += concurrency) {
         const batch = queued.slice(i, i + concurrency);
         await Promise.all(

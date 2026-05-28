@@ -18,8 +18,8 @@ sleep 15
 echo "==> Database schema"
 docker compose -f infra/docker-compose.yml --env-file .env run --rm api pnpm db:push
 
-echo "==> Bootstrap (flush stale queue)"
-node scripts/prod-bootstrap.mjs
+echo "==> Bootstrap (flush stale BullMQ queue)"
+docker compose -f infra/docker-compose.yml --env-file .env run --rm worker node scripts/flush-pipeline-queue.mjs
 
 echo "==> Starting application services"
 docker compose -f infra/docker-compose.yml --env-file .env up -d extractor api worker web nginx

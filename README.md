@@ -65,6 +65,7 @@ See [`docs/SUCCESS_CRITERIA.md`](docs/SUCCESS_CRITERIA.md) for phase gates.
 - [`docs/DEVELOPMENT_PLAN.md`](docs/DEVELOPMENT_PLAN.md) — Phases 0–2 scope  
 - [`docs/SUCCESS_CRITERIA.md`](docs/SUCCESS_CRITERIA.md) — Verification checklist  
 - [`docs/DEPLOY.md`](docs/DEPLOY.md) — Production Docker deploy (GitHub → VPS)  
+- [`docs/SCALE.md`](docs/SCALE.md) — Concurrency & footprint tuning  
 - [`docs/OPS.md`](docs/OPS.md) — VPS backup & deploy  
 - [`BACKEND_NOTES.md`](BACKEND_NOTES.md) — Storage paths & SQL  
 

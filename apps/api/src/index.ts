@@ -9,7 +9,7 @@ import Fastify from "fastify";
 import cookie from "@fastify/cookie";
 import cors from "@fastify/cors";
 import multipart from "@fastify/multipart";
-import { Queue } from "bullmq";
+import { getPipelineQueue } from "./lib/pipeline-queue.js";
 import { eq, and, desc, inArray } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
@@ -137,7 +137,12 @@ async function saveDocumentIssues(
 }
 
 export async function buildApp() {
-  const app = Fastify({ logger: true });
+  const app = Fastify({
+    logger: true,
+    bodyLimit: 25 * 1024 * 1024,
+    requestTimeout: 120_000,
+    connectionTimeout: 10_000,
+  });
 
   await app.register(cors, {
     origin: process.env.WEB_ORIGIN ?? true,
@@ -636,9 +641,8 @@ export async function buildApp() {
       })
       .returning();
 
-    const queue = new Queue("pipeline", { connection });
     const jobId = `${uploadRow.id}-normalize`;
-    await queue.add(
+    await getPipelineQueue().add(
       "normalize",
       { uploadId: uploadRow.id, tenantId: ctx.tenantId, stage: "normalize", gstDocumentId: docId },
       { jobId, deduplication: { id: jobId } }
@@ -817,9 +821,8 @@ export async function buildApp() {
         .update(uploads)
         .set({ currentStage: "received", updatedAt: new Date() })
         .where(eq(uploads.id, row.uploadId));
-      const queue = new Queue("pipeline", { connection });
       const jobId = `${row.uploadId}-normalize`;
-      await queue.add(
+      await getPipelineQueue().add(
         "normalize",
         {
           uploadId: row.uploadId,

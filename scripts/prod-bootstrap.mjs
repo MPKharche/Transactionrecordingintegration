@@ -1,6 +1,8 @@
 #!/usr/bin/env node
 /**
- * Production bootstrap: schema push, optional demo seed, flush stale queue.
+ * Production bootstrap: schema push, optional demo seed, flush stale BullMQ queue.
+ * Run after every deploy (see docs/DEPLOY.md). On Docker-only servers use deploy-prod.sh
+ * or: docker compose -f infra/docker-compose.yml --env-file .env run --rm worker node scripts/flush-pipeline-queue.mjs
  */
 import { execSync } from "child_process";
 import path from "path";

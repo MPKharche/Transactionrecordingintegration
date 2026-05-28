@@ -12,6 +12,7 @@ import logging
 from pathlib import Path
 from typing import Optional
 
+import asyncio
 import httpx
 from fastapi import FastAPI, HTTPException, Header, Depends
 from pydantic import BaseModel
@@ -41,6 +42,9 @@ logging.basicConfig(level=logging.INFO)
 log = logging.getLogger(__name__)
 
 app = FastAPI(title="CA Suite Extractor", version="2.0.0")
+
+_EXTRACT_SLOTS = int(os.environ.get("EXTRACT_MAX_CONCURRENT", "4"))
+_extract_sem = asyncio.Semaphore(max(1, min(_EXTRACT_SLOTS, 16)))
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 EXTRACTOR_SHARED_SECRET = os.environ.get("EXTRACTOR_SHARED_SECRET", "")
@@ -252,6 +256,11 @@ async def health():
 
 @app.post("/extract", response_model=ExtractorResponse, dependencies=[Depends(require_auth)])
 async def extract(req: ExtractRequest):
+    async with _extract_sem:
+        return await _extract_impl(req)
+
+
+async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
     ocr_text = (req.ocr_text or "").strip()
     file_bytes = fetch_object(req.storage_path)
     mime = req.mime_type or ""
