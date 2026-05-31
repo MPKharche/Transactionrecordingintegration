@@ -6,6 +6,8 @@ GST document intelligence for CA practices: capture invoices, AI-assisted extrac
 
 **UI deploy:** push `apps/web` changes to `main` → [Vercel](https://ca-suite-web.vercel.app) auto-builds from GitHub (`docs/VERCEL-FRONTEND.md`). API/worker changes need a VPS deploy after pull.
 
+**Roadmap:** [docs/EVOLUTION-PLAN.md](docs/EVOLUTION-PLAN.md) — user management, observability, LLM cost, and differentiation after private testing.
+
 ## Monorepo layout
 
 | Package | Role |

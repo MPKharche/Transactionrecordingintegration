@@ -16,3 +16,8 @@ Never leave UI-only fixes only on the VPS; Vercel builds from GitHub, not from `
 - Live clone: `/root/ca-saas`
 - API: https://practice.planetfinance.cloud/api/
 - UI: https://ca-suite-web.vercel.app
+
+## Product roadmap
+
+- **Phase 3+ evolution (users, ops, LLM cost, differentiation):** `docs/EVOLUTION-PLAN.md`
+- **Phases 0–2 (shipped core):** `docs/DEVELOPMENT_PLAN.md`
