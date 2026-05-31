@@ -995,18 +995,10 @@ export async function buildApp() {
         .limit(1);
       if (!doc) return reply.status(404).send({ error: "Not found" });
 
-      const versions = await db
-        .select({
-          id: documentVersions.id,
-          versionNo: documentVersions.versionNo,
-          changeSummary: documentVersions.changeSummary,
-          changedBy: documentVersions.changedBy,
-          changedAt: documentVersions.changedAt,
-        })
-        .from(documentVersions)
-        .where(eq(documentVersions.documentId, req.params.id))
-        .orderBy(desc(documentVersions.versionNo));
-      return versions;
+      const current = await loadDocument(req.params.id, ctx.tenantId);
+      if (!current) return reply.status(404).send({ error: "Not found" });
+      const { buildVersionList } = await import("./lib/version-history.js");
+      return buildVersionList(req.params.id, ctx.tenantId, current);
     }
   );
 
@@ -1027,7 +1019,19 @@ export async function buildApp() {
         )
         .limit(1);
       if (!row) return reply.status(404).send({ error: "Version not found" });
-      return row.snapshot;
+      const snap = row.snapshot as unknown as GSTDocument;
+      return {
+        id: row.id,
+        versionNo: row.versionNo,
+        changeSummary: row.changeSummary,
+        changedBy: row.changedBy,
+        changedAt: row.changedAt.toISOString(),
+        modificationChannel: "web",
+        captureSource: snap.capture_source,
+        capturedAt: snap.captured_at,
+        uploadedBy: snap.uploaded_by,
+        snapshot: snap,
+      };
     }
   );
 
