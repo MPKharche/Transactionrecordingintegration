@@ -54,6 +54,7 @@ export function DocumentWorklistTable({
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [confirm, setConfirm] = useState<DeleteConfirm | null>(null);
   const [deleting, setDeleting] = useState(false);
+  const [deleteError, setDeleteError] = useState("");
   const selectionEnabled = Boolean(onDelete);
   const clientById = (id: string) => clientByIdFrom(clients, id);
 
@@ -92,11 +93,17 @@ export function DocumentWorklistTable({
   async function runDelete(ids: string[]) {
     if (!onDelete || ids.length === 0) return;
     setDeleting(true);
+    setDeleteError("");
     try {
       if (ids.length === 1) {
         await onDelete(ids[0]!);
       } else if (onBulkDelete) {
-        await onBulkDelete(ids);
+        const res = await onBulkDelete(ids);
+        if (res.errors.length > 0) {
+          throw new Error(
+            res.errors.map((e) => `${e.id.slice(0, 8)}…: ${e.error}`).join("; ")
+          );
+        }
       } else {
         for (const id of ids) await onDelete(id);
       }
@@ -110,9 +117,11 @@ export function DocumentWorklistTable({
         for (const id of ids) next.delete(id);
         return next;
       });
+      setConfirm(null);
+    } catch (e) {
+      setDeleteError(e instanceof Error ? e.message : "Delete failed");
     } finally {
       setDeleting(false);
-      setConfirm(null);
     }
   }
 
@@ -166,9 +175,13 @@ export function DocumentWorklistTable({
                 <button
                   type="button"
                   disabled={deleting}
-                  onClick={() =>
-                    setConfirm({ kind: "bulk", ids: [...selected].filter((id) => deletableIds.includes(id)) })
-                  }
+                  onClick={() => {
+                    setDeleteError("");
+                    setConfirm({
+                      kind: "bulk",
+                      ids: [...selected].filter((id) => deletableIds.includes(id)),
+                    });
+                  }}
                   className="inline-flex items-center gap-1 px-2.5 py-1.5 bg-red-500/10 text-red-600 dark:text-red-400 border border-red-500/30 rounded-lg hover:bg-red-500/20 transition-colors font-medium disabled:opacity-50"
                 >
                   <Trash2 size={12} />
@@ -179,7 +192,10 @@ export function DocumentWorklistTable({
               <button
                 type="button"
                 disabled={deleting || deletableIds.length === 0}
-                onClick={() => setConfirm({ kind: "bulk", ids: deletableIds })}
+                onClick={() => {
+                  setDeleteError("");
+                  setConfirm({ kind: "bulk", ids: deletableIds });
+                }}
                 className="inline-flex items-center gap-1 px-2.5 py-1.5 border border-border rounded-lg text-muted-foreground hover:text-red-600 dark:hover:text-red-400 hover:border-red-500/40 transition-colors disabled:opacity-50"
               >
                 <Trash2 size={12} />
@@ -339,7 +355,10 @@ export function DocumentWorklistTable({
                             type="button"
                             title="Remove document"
                             disabled={deleting}
-                            onClick={() => setConfirm({ kind: "single", id: d.id })}
+                            onClick={() => {
+                              setDeleteError("");
+                              setConfirm({ kind: "single", id: d.id });
+                            }}
                             className="text-muted-foreground hover:text-red-600 dark:hover:text-red-400 transition-colors disabled:opacity-50"
                           >
                             <Trash2 size={12} />
@@ -377,7 +396,7 @@ export function DocumentWorklistTable({
       {confirm && (
         <div
           className="fixed inset-0 z-50 flex items-center justify-center bg-black/40"
-          onClick={() => !deleting && setConfirm(null)}
+          onClick={() => !deleting && (setConfirm(null), setDeleteError(""))}
         >
           <div
             className="bg-card border border-border rounded-xl shadow-2xl p-5 max-w-sm w-full mx-4"
@@ -391,11 +410,19 @@ export function DocumentWorklistTable({
                 ? "This removes the document from the upload worklist before it is locked into Records. Extraction data and files are deleted."
                 : "Selected documents will be removed from the worklist. Locked records are skipped automatically."}
             </p>
+            {deleteError ? (
+              <p className="text-sm text-red-600 dark:text-red-400 mb-3" role="alert">
+                {deleteError}
+              </p>
+            ) : null}
             <div className="flex gap-2 justify-end">
               <button
                 type="button"
                 disabled={deleting}
-                onClick={() => setConfirm(null)}
+                onClick={() => {
+                  setConfirm(null);
+                  setDeleteError("");
+                }}
                 className="px-3 py-1.5 text-sm border border-border rounded-lg text-muted-foreground hover:text-foreground disabled:opacity-50"
               >
                 Cancel

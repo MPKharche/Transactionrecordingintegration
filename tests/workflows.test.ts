@@ -1,11 +1,14 @@
 import { describe, it, expect, beforeAll } from "vitest";
 import { createConnection } from "net";
 
-const dbUrl = process.env.DATABASE_URL ?? "postgresql://ca_user:ca_pass@localhost:5433/ca_saas";
+const dbUrl =
+  process.env.DATABASE_URL ??
+  "postgresql://ca_user:ca_pass@localhost:5434/ca_saas";
 
 function dbReachable(): Promise<boolean> {
   return new Promise((resolve) => {
-    const s = createConnection({ host: "127.0.0.1", port: 5433, timeout: 2000 }, () => {
+    const port = Number(process.env.PG_PORT ?? "5434");
+    const s = createConnection({ host: "127.0.0.1", port, timeout: 2000 }, () => {
       s.end();
       resolve(true);
     });
@@ -99,6 +102,56 @@ describe.skipIf(!integrationEnabled)("Production workflows (API)", () => {
       "purchase_invoice",
       `--${boundary}`,
       'Content-Disposition: form-data; name="file"; filename="workflow.pdf"',
+      "Content-Type: application/pdf",
+      "",
+      pdf.toString("binary"),
+      `--${boundary}--`,
+    ].join("\r\n");
+
+    const res = await app.inject({
+      method: "POST",
+      url: "/api/documents/upload",
+      headers: {
+        ...authHeaders(),
+        "content-type": `multipart/form-data; boundary=${boundary}`,
+      },
+      payload: body,
+    });
+    expect(res.statusCode).toBe(200);
+    documentId = res.json().id;
+  });
+
+  it("deletes in-progress document before lock", async () => {
+    const del = await app.inject({
+      method: "DELETE",
+      url: `/api/documents/${documentId}`,
+      headers: authHeaders(),
+    });
+    expect(del.statusCode).toBe(200);
+    expect(del.json().ok).toBe(true);
+
+    const get = await app.inject({
+      method: "GET",
+      url: `/api/documents/${documentId}`,
+      headers: authHeaders(),
+    });
+    expect(get.statusCode).toBe(404);
+  });
+
+  it("uploads again for lock workflow", async () => {
+    const boundary = "----workflow-lock";
+    const pdf = Buffer.from(`%PDF-1.4 workflow-lock ${Date.now()}`);
+    const body = [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="client_id"',
+      "",
+      clientId,
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="doc_type"',
+      "",
+      "purchase_invoice",
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="file"; filename="workflow-lock.pdf"',
       "Content-Type: application/pdf",
       "",
       pdf.toString("binary"),
