@@ -28,6 +28,7 @@ export type Screen =
 
 export function Sidebar({
   screen,
+  reviewParent,
   onNav,
   pendingCount,
   mode,
@@ -37,6 +38,8 @@ export function Sidebar({
   userRole,
 }: {
   screen: Screen;
+  /** When on review, which nav item to highlight (upload vs records). */
+  reviewParent?: "upload" | "records";
   onNav: (s: Screen) => void;
   pendingCount: number;
   mode: ThemeMode;
@@ -122,7 +125,8 @@ export function Sidebar({
         {NAV.map(({ id, label, icon: Icon }, i) => {
           const active =
             screen === id ||
-            (screen === "review" && id === "records") ||
+            (screen === "review" && reviewParent === id) ||
+            (screen === "review" && !reviewParent && id === "records") ||
             (screen === "client_detail" && id === "clients");
           return (
             <button

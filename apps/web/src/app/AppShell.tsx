@@ -37,12 +37,15 @@ export function AppShell() {
   const location = useLocation();
   const { clientId: routeClientId, docId: routeDocId } = useParams();
 
-  const screen = location.pathname.startsWith("/upload")
+  const reviewFromUpload = /^\/upload\/[^/]+$/.test(location.pathname);
+  const reviewFromRecords = /^\/records\/[^/]+$/.test(location.pathname);
+
+  const screen = reviewFromUpload || reviewFromRecords
+    ? "review"
+    : location.pathname.startsWith("/upload")
     ? "upload"
     : location.pathname.startsWith("/records")
-      ? routeDocId
-        ? "review"
-        : "records"
+      ? "records"
       : location.pathname.startsWith("/registers")
         ? "registers"
         : location.pathname.startsWith("/audit")
@@ -62,8 +65,8 @@ export function AppShell() {
     if (!loading && !session) navigate("/login");
   }, [loading, session, navigate]);
 
-  function openReview(id: string) {
-    navigate(`/records/${id}`);
+  function openReview(id: string, from: "upload" | "records" = "records") {
+    navigate(from === "upload" ? `/upload/${id}` : `/records/${id}`);
   }
   function openClient(id: string) {
     navigate(`/clients/${id}`);
@@ -116,7 +119,7 @@ export function AppShell() {
             docs={docs}
             clients={clients}
             isDark={isDark}
-            onReview={openReview}
+            onReview={(id) => openReview(id, "upload")}
             onDelete={deleteDocument}
             onBulkDelete={bulkDeleteDocuments}
           />
@@ -126,7 +129,7 @@ export function AppShell() {
             docs={docs}
             clients={clients}
             isDark={isDark}
-            onReview={openReview}
+            onReview={(id) => openReview(id, "records")}
             onDelete={deleteDocument}
           />
         )}
@@ -136,7 +139,8 @@ export function AppShell() {
               docId={reviewId}
               docs={docs}
               isDark={isDark}
-              onBack={() => navigate("/records")}
+              backLabel={reviewFromUpload ? "Upload" : "Records"}
+              onBack={() => navigate(reviewFromUpload ? "/upload" : "/records")}
               partyByGstin={partyByGstin}
               onPatch={patchDocument}
               onLock={lockDocument}
@@ -149,10 +153,10 @@ export function AppShell() {
               action={
                 <button
                   type="button"
-                  onClick={() => navigate("/records")}
+                  onClick={() => navigate(reviewFromUpload ? "/upload" : "/records")}
                   className="px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-lg"
                 >
-                  Back to Records
+                  {reviewFromUpload ? "Back to Upload" : "Back to Records"}
                 </button>
               }
             />
@@ -196,6 +200,7 @@ export function AppShell() {
       <div className="flex h-screen bg-background text-foreground overflow-hidden">
         <Sidebar
           screen={screen}
+          reviewParent={reviewFromUpload ? "upload" : reviewFromRecords ? "records" : undefined}
           onNav={navTo}
           pendingCount={pending}
           mode={mode}

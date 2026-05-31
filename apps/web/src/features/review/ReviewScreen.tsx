@@ -34,6 +34,7 @@ export function ReviewScreen({
   docs,
   isDark,
   onBack,
+  backLabel = "Records",
   partyByGstin,
   onPatch,
   onLock,
@@ -43,6 +44,7 @@ export function ReviewScreen({
   docs: GSTDocument[];
   isDark: boolean;
   onBack: () => void;
+  backLabel?: string;
   partyByGstin: Record<string, Party>;
   onPatch: (id: string, patch: Partial<GSTDocument>) => Promise<void>;
   onLock: (id: string) => Promise<void>;
@@ -486,7 +488,7 @@ export function ReviewScreen({
         <p className="text-base font-semibold text-foreground">Document rejected</p>
         {rejectReason && <p className="text-sm text-muted-foreground mt-1">Reason: {rejectReason}</p>}
       </div>
-      <button type="button" onClick={onBack} className="text-muted-foreground hover:text-foreground font-medium">← Back to Records</button>
+      <button type="button" onClick={onBack} className="text-muted-foreground hover:text-foreground font-medium">← Back to {backLabel}</button>
     </div>
   );
 
@@ -1047,7 +1049,7 @@ export function ReviewScreen({
   return (
     <div className="flex flex-col h-full min-h-0 bg-background">
       <div className="shrink-0 flex items-center gap-2 flex-wrap text-sm border-b border-border px-4 py-2 bg-card/80 backdrop-blur-sm">
-        <button type="button" onClick={onBack} className="text-muted-foreground hover:text-foreground font-medium">Records</button>
+        <button type="button" onClick={onBack} className="text-muted-foreground hover:text-foreground font-medium">{backLabel}</button>
         <ChevronRight size={14} className="text-muted-foreground" />
         <span className="text-foreground truncate max-w-[200px] sm:max-w-md">{doc.filename}</span>
         <div className="ml-auto flex items-center gap-2 flex-wrap">
