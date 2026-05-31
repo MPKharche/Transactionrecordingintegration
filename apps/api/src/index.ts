@@ -263,10 +263,14 @@ export async function buildApp() {
     };
   });
 
-  app.get("/api/auth/config", async () => ({
-    googleEnabled: googleOAuthConfigured(),
-    devLoginEnabled: devAuthAllowed(),
-  }));
+  app.get("/api/auth/config", async () => {
+    const { isAccessRestricted } = await import("./lib/access-control.js");
+    return {
+      googleEnabled: googleOAuthConfigured(),
+      devLoginEnabled: devAuthAllowed(),
+      accessRestricted: isAccessRestricted(),
+    };
+  });
 
   app.get("/api/auth/session", async (req, reply) => {
     try {
@@ -316,9 +320,12 @@ export async function buildApp() {
         return reply.redirect(process.env.WEB_ORIGIN ?? "http://localhost:5173");
       } catch (err) {
         req.log.error({ err }, "Google OAuth callback failed");
-        const msg = err instanceof Error && err.message.includes("membership")
-          ? "no_membership"
-          : "oauth_failed";
+        const { isAccessDeniedError } = await import("./lib/access-control.js");
+        const msg = isAccessDeniedError(err)
+          ? "access_denied"
+          : err instanceof Error && err.message.includes("membership")
+            ? "no_membership"
+            : "oauth_failed";
         return reply.redirect(`${loginBase}?error=${msg}`);
       }
     }
@@ -333,7 +340,17 @@ export async function buildApp() {
     if (!devAuthAllowed()) {
       return reply.status(404).send({ error: "Not available" });
     }
-    const email = req.body?.email ?? "admin@ca-suite.local";
+    const email = (req.body?.email ?? "admin@ca-suite.local").trim().toLowerCase();
+    const { assertEmailAllowed } = await import("./lib/access-control.js");
+    try {
+      assertEmailAllowed(email);
+    } catch (e) {
+      const { isAccessDeniedError } = await import("./lib/access-control.js");
+      if (isAccessDeniedError(e)) {
+        return reply.status(403).send({ error: e.message });
+      }
+      throw e;
+    }
     let [user] = await db.select().from(users).where(eq(users.email, email)).limit(1);
     if (!user) {
       [user] = await db

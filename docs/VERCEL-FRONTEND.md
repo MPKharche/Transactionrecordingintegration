@@ -69,6 +69,16 @@ Production env on Vercel:
 | `VITE_API_URL` | `/api` |
 | `VITE_ALLOW_DEV_LOGIN` | `false` |
 
+## Access control (private testing)
+
+On the VPS API `.env`, set a comma-separated allowlist. Only these Google accounts can sign in; everyone else sees an error at login and cannot use authenticated APIs:
+
+```env
+AUTH_ALLOWED_EMAILS=mayurk.2707@gmail.com
+```
+
+Remove or leave empty to allow all invited users again (when `GOOGLE_ALLOW_AUTO_JOIN` / memberships are configured).
+
 ## VPS deploy
 
 ```bash

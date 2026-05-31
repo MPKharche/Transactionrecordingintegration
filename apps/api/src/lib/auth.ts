@@ -3,6 +3,7 @@ import { eq, and, gt } from "drizzle-orm";
 import { db } from "@ca-suite/db/client";
 import { authSessions, memberships, users } from "@ca-suite/db";
 import type { FastifyReply, FastifyRequest } from "fastify";
+import { assertEmailAllowed } from "./access-control.js";
 
 export type AuthContext = {
   tenantId: string;
@@ -78,6 +79,12 @@ export async function resolveAuth(
     .where(eq(users.id, session.userId))
     .limit(1);
   if (!user) return null;
+
+  try {
+    assertEmailAllowed(user.email);
+  } catch {
+    return null;
+  }
 
   const [membership] = await db
     .select()
@@ -200,6 +207,8 @@ export async function upsertUserFromGoogle(profile: {
   name: string;
   picture?: string;
 }) {
+  assertEmailAllowed(profile.email);
+
   let [user] = await db
     .select()
     .from(users)

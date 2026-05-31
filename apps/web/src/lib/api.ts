@@ -304,7 +304,9 @@ export const api = {
       }>(`/gstin/lookup/${encodeURIComponent(gstin)}`),
   },
   authConfig: () =>
-    request<{ googleEnabled: boolean; devLoginEnabled: boolean }>("/auth/config"),
+    request<{ googleEnabled: boolean; devLoginEnabled: boolean; accessRestricted?: boolean }>(
+      "/auth/config"
+    ),
 };
 
 export { currentIndianFinancialYear as currentFinancialYear, listIndianFinancialYears } from "@ca-suite/shared";
