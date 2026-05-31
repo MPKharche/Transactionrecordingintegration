@@ -131,6 +131,24 @@ export interface GSTDocument {
   field_confidence?: DocumentCompleteness;
 }
 
+/** GST portal snapshot stored on client master (from lookup at create/edit). */
+export interface ClientGstProfile {
+  trade_name?: string;
+  registration_status?: string;
+  constitution_of_business?: string;
+  registration_date?: string;
+  pincode?: string;
+  city?: string;
+  /** Nature of business activities from GST portal (e.g. Retail, Manufacturing). */
+  nature_of_business?: string[];
+  /** Registered HSN codes for goods. */
+  hsn_codes?: string[];
+  /** Registered SAC codes for services. */
+  sac_codes?: string[];
+  lookup_source?: string;
+  looked_up_at?: string;
+}
+
 export interface Client {
   id: string;
   name: string;
@@ -142,6 +160,7 @@ export interface Client {
   address: string;
   mobile: string;
   email: string;
+  gst_profile?: ClientGstProfile;
   assigned_user_ids?: string[];
 }
 

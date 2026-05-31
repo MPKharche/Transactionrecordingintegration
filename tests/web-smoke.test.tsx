@@ -10,37 +10,50 @@ import { ClientsScreen } from "../apps/web/src/features/clients/ClientsScreen";
 import { LoginPage } from "../apps/web/src/features/auth/LoginPage";
 import { AppDataProvider } from "../apps/web/src/context/AppDataContext";
 
-vi.mock("../apps/web/src/lib/api", () => ({
-  api: {
-    session: () => Promise.reject(new Error("offline in test")),
-    clients: {
-      list: () => Promise.resolve([]),
-      create: vi.fn(),
-      patch: vi.fn(),
+vi.mock("../apps/web/src/lib/api", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("../apps/web/src/lib/api")>();
+  return {
+    ...actual,
+    api: {
+      ...actual.api,
+      session: () => Promise.reject(new Error("offline in test")),
+      clients: {
+        list: () => Promise.resolve([]),
+        create: vi.fn(),
+        patch: vi.fn(),
+      },
+      documents: {
+        list: () => Promise.resolve([]),
+        patch: vi.fn(),
+        lock: vi.fn(),
+        bulkLock: vi.fn(),
+        retry: vi.fn(),
+        reject: vi.fn(),
+        upload: vi.fn(),
+        previewUrl: vi.fn(),
+      },
+      parties: { list: () => Promise.resolve({}) },
+      logout: vi.fn(),
+      registers: { list: vi.fn() },
+      export: { zoho: vi.fn() },
+      auditLog: { list: () => Promise.resolve([]) },
+      compliance: { calendar: () => Promise.resolve({ month: "", reminders: [] }) },
+      authConfig: () => Promise.resolve({ googleEnabled: true, devLoginEnabled: false }),
+      gstin: { lookup: vi.fn() },
+      versions: {
+        list: vi.fn(),
+        load: vi.fn(),
+        save: vi.fn(),
+        restore: vi.fn(),
+      },
     },
-    documents: {
-      list: () => Promise.resolve([]),
-      patch: vi.fn(),
-      lock: vi.fn(),
-      bulkLock: vi.fn(),
-      retry: vi.fn(),
-      reject: vi.fn(),
-      upload: vi.fn(),
-      previewUrl: vi.fn(),
-    },
-    parties: { list: () => Promise.resolve({}) },
-    logout: vi.fn(),
-    registers: { list: vi.fn() },
-    export: { zoho: vi.fn() },
-    auditLog: { list: () => Promise.resolve([]) },
-    compliance: { calendar: () => Promise.resolve({ month: "", reminders: [] }) },
-  },
-  trySession: () => Promise.resolve(null),
-  getAuth: () => null,
-  setAuth: vi.fn(),
-  devLogin: vi.fn(),
-  currentFinancialYear: () => "2024-25",
-}));
+    trySession: () => Promise.resolve(null),
+    getAuth: () => null,
+    setAuth: vi.fn(),
+    devLogin: vi.fn(),
+    currentFinancialYear: () => "2024-25",
+  };
+});
 
 const docs = FIXTURE_DOCS;
 const clients = FIXTURE_CLIENTS;
@@ -81,7 +94,7 @@ describe("US-UI-01: Web smoke — screens render without ReferenceError", () => 
       )
     );
     expect(screen.getByRole("heading", { name: "Records" })).toBeTruthy();
-    expect(screen.getByText("Sales Invoices")).toBeTruthy();
+    expect(screen.getByPlaceholderText(/Search doc no/i)).toBeTruthy();
   });
 
   it("ClientsScreen lists fixture client", () => {

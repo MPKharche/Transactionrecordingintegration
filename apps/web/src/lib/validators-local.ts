@@ -1,5 +1,9 @@
 export const isValidGSTIN  = (g: string) => /^[0-9]{2}[A-Z]{5}[0-9]{4}[A-Z]{1}[1-9A-Z]{1}Z[0-9A-Z]{1}$/.test(g.toUpperCase());
 export const isValidPAN    = (p: string) => /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(p.toUpperCase());
+export const panFromGstin  = (g: string) => {
+  const x = g.replace(/\s/g, "").toUpperCase();
+  return x.length >= 12 ? x.slice(2, 12) : "";
+};
 export const GST_SLABS = [0, 0.1, 0.25, 1, 1.5, 2, 3, 5, 6, 7.5, 12, 18, 28];
 
 export const INDIAN_STATES: { code: string; name: string }[] = [

@@ -276,9 +276,14 @@ export const api = {
         pincode: string;
         pan: string;
         constitutionOfBusiness: string;
+        natureOfBusiness: string[];
+        hsnCodes: string[];
+        sacCodes: string[];
         source: "cache" | "master" | "portal" | "api";
       }>(`/gstin/lookup/${encodeURIComponent(gstin)}`),
   },
+  authConfig: () =>
+    request<{ googleEnabled: boolean; devLoginEnabled: boolean }>("/auth/config"),
 };
 
 export { currentIndianFinancialYear as currentFinancialYear, listIndianFinancialYears } from "@ca-suite/shared";

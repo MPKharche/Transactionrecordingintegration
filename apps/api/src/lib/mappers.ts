@@ -1,4 +1,4 @@
-import type { Client, GSTDocument, LineItem, Party, CaptureSource } from "@ca-suite/shared";
+import type { Client, ClientGstProfile, GSTDocument, LineItem, Party, CaptureSource } from "@ca-suite/shared";
 import {
   clients,
   documentIssues,
@@ -32,6 +32,7 @@ function partyFromJson(p: Record<string, unknown>): Party {
 }
 
 export function mapClient(row: ClientRow): Client {
+  const profile = row.gstProfile as ClientGstProfile | null | undefined;
   return {
     id: row.id,
     name: row.name,
@@ -43,6 +44,7 @@ export function mapClient(row: ClientRow): Client {
     address: row.address ?? "",
     mobile: row.mobile ?? "",
     email: row.email ?? "",
+    gst_profile: profile ?? undefined,
   };
 }
 

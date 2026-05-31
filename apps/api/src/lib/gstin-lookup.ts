@@ -24,6 +24,12 @@ export interface GstinInfo {
   pincode: string;
   pan: string;
   constitutionOfBusiness: string;
+  /** Nature of business activities (nba) from GST portal. */
+  natureOfBusiness: string[];
+  /** Registered HSN codes for goods. */
+  hsnCodes: string[];
+  /** Registered SAC codes for services. */
+  sacCodes: string[];
   source: "cache" | "master" | "portal" | "api";
 }
 
@@ -74,6 +80,78 @@ function panFromGstin(gstin: string): string {
   return gstin.length >= 12 ? gstin.slice(2, 12) : "";
 }
 
+function uniqueStrings(values: string[]): string[] {
+  return [...new Set(values.map((v) => v.trim()).filter(Boolean))];
+}
+
+function parseNatureOfBusiness(body: Record<string, unknown>): string[] {
+  const nba = body["nba"];
+  if (Array.isArray(nba)) return uniqueStrings(nba.map(String));
+  if (typeof nba === "string" && nba.trim()) return [nba.trim()];
+  return [];
+}
+
+/** Parse HSN/SAC from GST portal goodsservice API (multiple response shapes). */
+function parseGoodsServiceBody(body: Record<string, unknown>): { hsnCodes: string[]; sacCodes: string[] } {
+  const hsn: string[] = [];
+  const sac: string[] = [];
+
+  const goodsLists = [
+    body["goods"],
+    body["bzgddtls"],
+    body["bzgddtl"],
+    (body["data"] as Record<string, unknown> | undefined)?.["goods"],
+    (body["data"] as Record<string, unknown> | undefined)?.["bzgddtls"],
+  ];
+  for (const list of goodsLists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const code = String(row["hsncd"] ?? row["hsnCd"] ?? row["hsn_code"] ?? row["hsnCode"] ?? "").trim();
+      if (code) hsn.push(code);
+    }
+  }
+
+  const serviceLists = [
+    body["services"],
+    body["bzsddtls"],
+    body["bzsddtl"],
+    (body["data"] as Record<string, unknown> | undefined)?.["services"],
+    (body["data"] as Record<string, unknown> | undefined)?.["bzsddtls"],
+  ];
+  for (const list of serviceLists) {
+    if (!Array.isArray(list)) continue;
+    for (const item of list) {
+      if (!item || typeof item !== "object") continue;
+      const row = item as Record<string, unknown>;
+      const code = String(row["saccd"] ?? row["sacCd"] ?? row["sac_code"] ?? row["sacCode"] ?? "").trim();
+      if (code) sac.push(code);
+    }
+  }
+
+  return { hsnCodes: uniqueStrings(hsn), sacCodes: uniqueStrings(sac) };
+}
+
+async function fetchGoodsServiceFromPortal(gstin: string): Promise<{ hsnCodes: string[]; sacCodes: string[] }> {
+  const url = `https://services.gst.gov.in/services/api/search/goodservice?gstin=${gstin}`;
+  try {
+    const res = await fetch(url, {
+      headers: {
+        Accept: "application/json",
+        "User-Agent": "Mozilla/5.0 (compatible; CA-Suite/1.0; +https://github.com/ca-suite)",
+      },
+      signal: AbortSignal.timeout(8000),
+    });
+    if (!res.ok) return { hsnCodes: [], sacCodes: [] };
+    const text = await res.text();
+    if (!text.trim().startsWith("{")) return { hsnCodes: [], sacCodes: [] };
+    return parseGoodsServiceBody(JSON.parse(text) as Record<string, unknown>);
+  } catch {
+    return { hsnCodes: [], sacCodes: [] };
+  }
+}
+
 // ─── Format address parts from GST portal addr object ──────────────────────
 function formatAddr(addr: Record<string, string | undefined>): { address: string; city: string; pincode: string } {
   const parts = [
@@ -87,7 +165,11 @@ function formatAddr(addr: Record<string, string | undefined>): { address: string
 }
 
 // ─── Parse GST portal API response ─────────────────────────────────────────
-function parsePortalResponse(gstin: string, body: Record<string, unknown>): GstinInfo {
+function parsePortalResponse(
+  gstin: string,
+  body: Record<string, unknown>,
+  goodsService?: { hsnCodes: string[]; sacCodes: string[] }
+): GstinInfo {
   const stateCode = stateCodeFromGstin(gstin);
   const pradr = (body["pradr"] as Record<string, unknown> | undefined)?.["addr"] as Record<string, string | undefined> | undefined ?? {};
   const { address, city, pincode } = formatAddr(pradr);
@@ -106,6 +188,9 @@ function parsePortalResponse(gstin: string, body: Record<string, unknown>): Gsti
     pincode,
     pan: panFromGstin(gstin),
     constitutionOfBusiness: String(body["ctb"] ?? ""),
+    natureOfBusiness: parseNatureOfBusiness(body),
+    hsnCodes: goodsService?.hsnCodes ?? [],
+    sacCodes: goodsService?.sacCodes ?? [],
     source: "portal",
   };
 }
@@ -126,7 +211,8 @@ async function fetchFromPortal(gstin: string): Promise<GstinInfo | null> {
     if (!text.trim().startsWith("{")) return null;      // could be HTML/captcha page
     const body = JSON.parse(text) as Record<string, unknown>;
     if (!body["lgnm"]) return null;                     // no legal name → failed
-    return parsePortalResponse(gstin, body);
+    const goodsService = await fetchGoodsServiceFromPortal(gstin);
+    return parsePortalResponse(gstin, body, goodsService);
   } catch {
     return null;
   }
@@ -173,6 +259,9 @@ async function fetchFromCommercialApi(gstin: string): Promise<GstinInfo | null> 
       pincode,
       pan: panFromGstin(gstin),
       constitutionOfBusiness: String(data["ctb"] ?? data["constitution"] ?? ""),
+      natureOfBusiness: parseNatureOfBusiness(data),
+      hsnCodes: parseGoodsServiceBody(data).hsnCodes,
+      sacCodes: parseGoodsServiceBody(data).sacCodes,
       source: "api",
     };
   } catch {
@@ -212,6 +301,9 @@ export async function lookupGstin(
       pincode: "",
       pan: panFromGstin(g),
       constitutionOfBusiness: "",
+      natureOfBusiness: [],
+      hsnCodes: [],
+      sacCodes: [],
       source: "master",
     };
     cacheSet(g, fromMaster);

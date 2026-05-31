@@ -114,6 +114,27 @@ export function verifyOAuthState(req: FastifyRequest, reply: FastifyReply): bool
   return Boolean(expected && got && expected === got);
 }
 
+export function googleRedirectUri(req?: FastifyRequest): string {
+  if (process.env.GOOGLE_REDIRECT_URI) {
+    return process.env.GOOGLE_REDIRECT_URI.replace(/\/$/, "");
+  }
+  const forwardedHost = req?.headers["x-forwarded-host"];
+  const forwardedProto = String(req?.headers["x-forwarded-proto"] ?? "https");
+  if (forwardedHost) {
+    const host = Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost;
+    return `${forwardedProto}://${host}/api/auth/google/callback`;
+  }
+  if (process.env.WEB_ORIGIN) {
+    return `${process.env.WEB_ORIGIN.replace(/\/$/, "")}/api/auth/google/callback`;
+  }
+  const apiBase = process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`;
+  return `${apiBase.replace(/\/$/, "")}/api/auth/google/callback`;
+}
+
+export function googleOAuthConfigured(): boolean {
+  return Boolean(process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET);
+}
+
 export function googleAuthUrl(redirectUri: string, state: string) {
   const clientId = process.env.GOOGLE_CLIENT_ID;
   if (!clientId) throw new Error("GOOGLE_CLIENT_ID not configured");

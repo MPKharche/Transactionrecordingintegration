@@ -56,12 +56,14 @@ import { lockedDocsToZohoPurchaseCsv, lockedDocsToZohoSalesCsv } from "./lib/zoh
 import { putObject, sha256, storagePath } from "./lib/minio.js";
 import { deleteGstDocument } from "./lib/delete-document.js";
 import { lookupGstin } from "./lib/gstin-lookup.js";
-import type { GSTDocument, CaptureSource } from "@ca-suite/shared";
+import type { GSTDocument, CaptureSource, Client } from "@ca-suite/shared";
 import {
   resolveAuth,
   createSession,
   destroySession,
   googleAuthUrl,
+  googleRedirectUri,
+  googleOAuthConfigured,
   exchangeGoogleCode,
   upsertUserFromGoogle,
   devAuthAllowed,
@@ -220,6 +222,7 @@ export async function buildApp() {
     const open =
       req.url.startsWith("/api/health") ||
       req.url.startsWith("/api/auth/google") ||
+      req.url.startsWith("/api/auth/config") ||
       req.url.startsWith("/api/auth/dev-login") ||
       req.url.startsWith("/api/auth/session") ||
       req.url.startsWith("/api/auth/logout");
@@ -259,6 +262,11 @@ export async function buildApp() {
     };
   });
 
+  app.get("/api/auth/config", async () => ({
+    googleEnabled: googleOAuthConfigured(),
+    devLoginEnabled: devAuthAllowed(),
+  }));
+
   app.get("/api/auth/session", async (req, reply) => {
     try {
       const ctx = await resolveAuth(req);
@@ -277,8 +285,10 @@ export async function buildApp() {
   });
 
   app.get("/api/auth/google", async (req, reply) => {
-    const apiBase = process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`;
-    const redirectUri = `${apiBase}/api/auth/google/callback`;
+    if (!googleOAuthConfigured()) {
+      return reply.status(503).send({ error: "Google sign-in is not configured on the server" });
+    }
+    const redirectUri = googleRedirectUri(req);
     const state = createOAuthState(reply);
     return reply.redirect(googleAuthUrl(redirectUri, state));
   });
@@ -286,29 +296,29 @@ export async function buildApp() {
   app.get<{ Querystring: { code?: string; error?: string; state?: string } }>(
     "/api/auth/google/callback",
     async (req, reply) => {
+      const loginBase = `${process.env.WEB_ORIGIN ?? "http://localhost:5173"}/login`;
       if (req.query.error) {
-        return reply.redirect(`${process.env.WEB_ORIGIN ?? "http://localhost:5173"}/login?error=oauth`);
+        return reply.redirect(`${loginBase}?error=oauth`);
       }
       if (!verifyOAuthState(req, reply)) {
-        return reply.redirect(
-          `${process.env.WEB_ORIGIN ?? "http://localhost:5173"}/login?error=oauth_state`
-        );
+        return reply.redirect(`${loginBase}?error=oauth_state`);
       }
       const code = req.query.code;
       if (!code) {
         return reply.status(400).send({ error: "Missing code" });
       }
-      const apiBase = process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`;
-      const redirectUri = `${apiBase}/api/auth/google/callback`;
+      const redirectUri = googleRedirectUri(req);
       try {
         const profile = await exchangeGoogleCode(code, redirectUri);
         const user = await upsertUserFromGoogle(profile);
         await createSession(user.id, reply);
         return reply.redirect(process.env.WEB_ORIGIN ?? "http://localhost:5173");
-      } catch {
-        return reply.redirect(
-          `${process.env.WEB_ORIGIN ?? "http://localhost:5173"}/login?error=oauth_failed`
-        );
+      } catch (err) {
+        req.log.error({ err }, "Google OAuth callback failed");
+        const msg = err instanceof Error && err.message.includes("membership")
+          ? "no_membership"
+          : "oauth_failed";
+        return reply.redirect(`${loginBase}?error=${msg}`);
       }
     }
   );
@@ -407,6 +417,7 @@ export async function buildApp() {
       return reply.status(400).send({ error: "Invalid PAN format" });
     }
     const gstin = b.gstin.toUpperCase();
+    const pan = (b.pan?.trim() || gstin.slice(2, 12)).toUpperCase();
     const [dup] = await db
       .select()
       .from(clients)
@@ -425,13 +436,14 @@ export async function buildApp() {
         tenantId,
         name: b.name,
         gstin,
-        pan: b.pan,
+        pan,
         active: b.active ?? true,
         state: b.state,
         stateCode: b.state_code,
         address: b.address,
         mobile: b.mobile,
         email: b.email,
+        gstProfile: b.gst_profile ?? null,
       })
       .returning();
     await audit(
@@ -467,13 +479,14 @@ export async function buildApp() {
         .set({
           name: b.name ?? existing.name,
           gstin: b.gstin ? b.gstin.toUpperCase() : existing.gstin,
-          pan: b.pan ?? existing.pan,
+          pan: b.pan?.trim() || (b.gstin ? b.gstin.toUpperCase().slice(2, 12) : existing.pan),
           active: b.active ?? existing.active,
           state: b.state ?? existing.state,
           stateCode: b.state_code ?? existing.stateCode,
           address: b.address ?? existing.address,
           mobile: b.mobile ?? existing.mobile,
           email: b.email ?? existing.email,
+          gstProfile: b.gst_profile ?? existing.gstProfile,
           updatedAt: new Date(),
         })
         .where(eq(clients.id, req.params.id))
@@ -1569,18 +1582,6 @@ export async function buildApp() {
 
   return app;
 }
-
-type Client = {
-  name: string;
-  gstin: string;
-  pan?: string;
-  active?: boolean;
-  state?: string;
-  state_code?: string;
-  address?: string;
-  mobile?: string;
-  email?: string;
-};
 
 const port = parseInt(process.env.API_PORT ?? "4000", 10);
 

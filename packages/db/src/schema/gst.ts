@@ -57,6 +57,8 @@ export const clients = pgTable("clients", {
   address: text("address"),
   mobile: text("mobile"),
   email: text("email"),
+  /** GST portal snapshot: nature of business, HSN/SAC codes, trade name, etc. */
+  gstProfile: jsonb("gst_profile"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
