@@ -15,7 +15,7 @@ import {
   getPipelineQueueMetrics,
 } from "./lib/pipeline-queue.js";
 import { MAX_UPLOAD_BYTES } from "@ca-suite/shared/server";
-import { eq, and, desc, inArray } from "drizzle-orm";
+import { eq, and, desc, inArray, max, sql } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
 import {
@@ -24,6 +24,7 @@ import {
   clients,
   documentIssues,
   documentLines,
+  documentVersions,
   gstDocuments,
   partyMaster,
   uploads,
@@ -38,6 +39,8 @@ import {
   isValidPAN,
   validateGstDocument,
   computeDocumentCompleteness,
+  currentIndianFinancialYear,
+  financialYearFromIsoDate,
   type GstRegisterRow,
 } from "@ca-suite/shared";
 import { mapClient, mapDocument, lineToDb } from "./lib/mappers.js";
@@ -51,7 +54,9 @@ import {
 } from "./lib/sync-masters.js";
 import { lockedDocsToZohoPurchaseCsv, lockedDocsToZohoSalesCsv } from "./lib/zoho-export.js";
 import { putObject, sha256, storagePath } from "./lib/minio.js";
-import type { GSTDocument } from "@ca-suite/shared";
+import { deleteGstDocument } from "./lib/delete-document.js";
+import { lookupGstin } from "./lib/gstin-lookup.js";
+import type { GSTDocument, CaptureSource } from "@ca-suite/shared";
 import {
   resolveAuth,
   createSession,
@@ -126,7 +131,47 @@ async function loadDocument(id: string, tenantId: string) {
     .select()
     .from(documentIssues)
     .where(eq(documentIssues.documentId, id));
-  return mapDocument(row, lines, issues);
+  const captureByUpload = row.uploadId
+    ? await captureMetaByUploadIds([row.uploadId])
+    : new Map();
+  const capture = row.uploadId ? captureByUpload.get(row.uploadId) : undefined;
+  return mapDocument(row, lines, issues, capture);
+}
+
+async function captureMetaByUploadIds(uploadIds: string[]) {
+  const ids = [...new Set(uploadIds.filter(Boolean))];
+  const out = new Map<
+    string,
+    { uploaded_by?: string; captured_at?: string; capture_source: CaptureSource }
+  >();
+  if (ids.length === 0) return out;
+
+  const uploadRows = await db
+    .select()
+    .from(uploads)
+    .where(inArray(uploads.id, ids));
+  const userIds = [
+    ...new Set(uploadRows.map((u) => u.uploadedById).filter(Boolean)),
+  ] as string[];
+  const userRows =
+    userIds.length > 0
+      ? await db
+          .select({ id: users.id, name: users.name, email: users.email })
+          .from(users)
+          .where(inArray(users.id, userIds))
+      : [];
+  const userById = new Map(
+    userRows.map((u) => [u.id, u.name?.trim() || u.email || "Unknown"])
+  );
+
+  for (const u of uploadRows) {
+    out.set(u.id, {
+      uploaded_by: u.uploadedById ? userById.get(u.uploadedById) : undefined,
+      captured_at: u.createdAt.toISOString(),
+      capture_source: (u.source ?? "web") as CaptureSource,
+    });
+  }
+  return out;
 }
 
 async function saveDocumentLines(documentId: string, lines: GSTDocument["lines"]) {
@@ -289,7 +334,7 @@ export async function buildApp() {
     if (!tenant) {
       [tenant] = await db
         .insert(tenants)
-        .values({ name: "Demo Practice", slug: "demo-practice" })
+        .values({ name: "CA Practice", slug: "ca-practice" })
         .returning();
     }
     const existing = await db
@@ -472,6 +517,39 @@ export async function buildApp() {
     return { ...p, gstin: p.gstin.toUpperCase() };
   });
 
+  // ─── GSTIN portal lookup ──────────────────────────────────────────────────
+  app.get<{ Params: { gstin: string } }>(
+    "/api/gstin/lookup/:gstin",
+    async (req, reply) => {
+      const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
+      const gstin = req.params.gstin.toUpperCase().trim();
+
+      if (!isValidGSTIN(gstin)) {
+        return reply.status(400).send({ error: "Invalid GSTIN format" });
+      }
+
+      // Check if already in party master for this tenant
+      const existing = await db
+        .select()
+        .from(partyMaster)
+        .where(and(eq(partyMaster.tenantId, tenantId), eq(partyMaster.gstin, gstin)))
+        .limit(1);
+      const known = existing[0] ?? null;
+
+      const info = await lookupGstin(gstin, known ? {
+        name: known.name,
+        address: known.address,
+        city: known.city,
+        stateCode: known.stateCode,
+      } : null);
+
+      if (!info) {
+        return reply.status(404).send({ error: "GSTIN not found or GST portal unavailable" });
+      }
+      return info;
+    }
+  );
+
   app.get("/api/masters", async (req) => {
     const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
     return loadMastersBundle(tenantId);
@@ -562,11 +640,16 @@ export async function buildApp() {
       arr.push(issue);
       issuesByDoc.set(issue.documentId, arr);
     }
+    const uploadIds = filtered
+      .map((r) => r.uploadId)
+      .filter((id): id is string => Boolean(id));
+    const captureByUpload = await captureMetaByUploadIds(uploadIds);
     return filtered.map((row) =>
       mapDocument(
         row,
         (linesByDoc.get(row.id) ?? []).sort((a, b) => a.seq - b.seq),
-        issuesByDoc.get(row.id) ?? []
+        issuesByDoc.get(row.id) ?? [],
+        row.uploadId ? captureByUpload.get(row.uploadId) : undefined
       )
     );
   });
@@ -681,8 +764,10 @@ export async function buildApp() {
       });
     }
     const clientId = multipartFieldValue(data.fields.client_id);
-    const docType = multipartFieldValue(data.fields.doc_type) || "purchase_invoice";
-    const fy = multipartFieldValue(data.fields.financial_year) || "2024-25";
+    // "auto" means the user wants AI to detect the doc type per segment.
+    const rawDocType = multipartFieldValue(data.fields.doc_type) || "auto";
+    const docType = rawDocType === "auto" ? "purchase_invoice" : rawDocType;
+    const fy = multipartFieldValue(data.fields.financial_year) || currentIndianFinancialYear();
     if (!clientId) return reply.status(400).send({ error: "client_id required" });
     const [client] = await db
       .select()
@@ -731,11 +816,13 @@ export async function buildApp() {
         source: "web",
         currentStage: "received",
         docType:
-          docType === "sales_invoice"
-            ? "sales_invoice"
-            : docType === "purchase_invoice"
-              ? "purchase_bill"
-              : "unknown",
+          rawDocType === "auto"
+            ? "unknown"
+            : docType === "sales_invoice"
+              ? "sales_invoice"
+              : docType === "purchase_invoice"
+                ? "purchase_bill"
+                : "unknown",
       })
       .returning();
 
@@ -766,7 +853,18 @@ export async function buildApp() {
     );
 
     await audit(ctx, "document.upload", "document", docId, { uploadId: uploadRow.id });
-    return mapDocument(docRow, [], []);
+    const [uploader] = ctx.userId
+      ? await db
+          .select({ name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.id, ctx.userId))
+          .limit(1)
+      : [];
+    return mapDocument(docRow, [], [], {
+      uploaded_by: uploader?.name?.trim() || uploader?.email || undefined,
+      captured_at: uploadRow.createdAt.toISOString(),
+      capture_source: "web",
+    });
   });
 
   app.post<{ Params: { id: string } }>(
@@ -869,6 +967,225 @@ export async function buildApp() {
     }
   );
 
+  // ─── Document version history (edit locked docs with audit trail) ────────
+
+  /** List all saved versions for a document, newest first. */
+  app.get<{ Params: { id: string } }>(
+    "/api/documents/:id/versions",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const [doc] = await db
+        .select({ id: gstDocuments.id })
+        .from(gstDocuments)
+        .where(and(eq(gstDocuments.id, req.params.id), eq(gstDocuments.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!doc) return reply.status(404).send({ error: "Not found" });
+
+      const versions = await db
+        .select({
+          id: documentVersions.id,
+          versionNo: documentVersions.versionNo,
+          changeSummary: documentVersions.changeSummary,
+          changedBy: documentVersions.changedBy,
+          changedAt: documentVersions.changedAt,
+        })
+        .from(documentVersions)
+        .where(eq(documentVersions.documentId, req.params.id))
+        .orderBy(desc(documentVersions.versionNo));
+      return versions;
+    }
+  );
+
+  /** Load a specific version's full snapshot. */
+  app.get<{ Params: { id: string; versionId: string } }>(
+    "/api/documents/:id/versions/:versionId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const [row] = await db
+        .select()
+        .from(documentVersions)
+        .where(
+          and(
+            eq(documentVersions.id, req.params.versionId),
+            eq(documentVersions.documentId, req.params.id),
+            eq(documentVersions.tenantId, ctx.tenantId)
+          )
+        )
+        .limit(1);
+      if (!row) return reply.status(404).send({ error: "Version not found" });
+      return row.snapshot;
+    }
+  );
+
+  /**
+   * Save current document state as a version, then apply new edits.
+   * Body: same as PATCH /documents/:id but also accepts changeSummary.
+   * Keeps the document locked.
+   */
+  app.post<{
+    Params: { id: string };
+    Body: Partial<Parameters<typeof mapDocument>[0]> & { changeSummary?: string };
+  }>(
+    "/api/documents/:id/versions",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const [existing] = await db
+        .select()
+        .from(gstDocuments)
+        .where(and(eq(gstDocuments.id, req.params.id), eq(gstDocuments.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!existing) return reply.status(404).send({ error: "Not found" });
+      if (existing.stage !== "locked") {
+        return reply.status(409).send({ error: "Only locked documents can be version-edited. Lock first." });
+      }
+
+      // Current line items for the snapshot
+      const existingLines = await db
+        .select()
+        .from(documentLines)
+        .where(eq(documentLines.documentId, req.params.id));
+      const existingIssues = await db
+        .select()
+        .from(documentIssues)
+        .where(eq(documentIssues.documentId, req.params.id));
+      const currentSnapshot = mapDocument(existing, existingLines, existingIssues);
+
+      // Next version number
+      const [{ maxVer }] = await db
+        .select({ maxVer: max(documentVersions.versionNo) })
+        .from(documentVersions)
+        .where(eq(documentVersions.documentId, req.params.id));
+      const nextVer = (maxVer ?? 0) + 1;
+
+      // Save current state as version
+      await db.insert(documentVersions).values({
+        documentId: req.params.id,
+        tenantId: ctx.tenantId,
+        versionNo: nextVer,
+        snapshot: currentSnapshot as unknown as Record<string, unknown>,
+        changeSummary: req.body?.changeSummary?.trim() ?? "",
+        changedBy: ctx.email ?? ctx.userId,
+      });
+
+      // Apply the PATCH from the body (reuse same logic as PATCH /documents/:id)
+      const body = req.body as unknown as GSTDocument;
+      const updateFields: Record<string, unknown> = { updatedAt: new Date() };
+      if (body.doc_type != null)       updateFields.docType = body.doc_type;
+      if (body.doc_number != null)     updateFields.docNumber = body.doc_number;
+      if (body.doc_date != null)       updateFields.docDate = body.doc_date;
+      if (body.financial_year != null) updateFields.financialYear = body.financial_year;
+      if (body.place_of_supply != null) updateFields.placeOfSupply = body.place_of_supply;
+      if (body.reverse_charge != null) updateFields.reverseCharge = body.reverse_charge;
+      if (body.supply_type != null)    updateFields.supplyType = body.supply_type;
+      if (body.itc_eligible != null)   updateFields.itcEligible = body.itc_eligible;
+      if (body.taxable_amount != null) updateFields.taxableAmount = String(body.taxable_amount);
+      if (body.igst != null)           updateFields.igst = String(body.igst);
+      if (body.cgst != null)           updateFields.cgst = String(body.cgst);
+      if (body.sgst != null)           updateFields.sgst = String(body.sgst);
+      if (body.total != null)          updateFields.total = String(body.total);
+      if (body.irn_hash != null)       updateFields.irnHash = body.irn_hash;
+      if (body.ack_number != null)     updateFields.ackNumber = body.ack_number;
+      if (body.ack_date != null)       updateFields.ackDate = body.ack_date;
+      if (body.supplier != null)       updateFields.supplier = body.supplier;
+      if (body.recipient != null)      updateFields.recipient = body.recipient;
+
+      await db.update(gstDocuments).set(updateFields).where(eq(gstDocuments.id, req.params.id));
+
+      if (body.lines?.length) {
+        await db.delete(documentLines).where(eq(documentLines.documentId, req.params.id));
+        if (body.lines.length > 0) {
+          await db.insert(documentLines).values(body.lines.map((l, i) => ({ documentId: req.params.id, ...lineToDb(l, i + 1) })));
+        }
+      }
+
+      await syncMastersFromDocument(ctx.tenantId, body as unknown as GSTDocument);
+      await audit(ctx, "document.version_edit", "document", req.params.id, { version: nextVer, summary: req.body?.changeSummary }, req);
+
+      const [updated] = await db.select().from(gstDocuments).where(eq(gstDocuments.id, req.params.id)).limit(1);
+      const updatedLines = await db.select().from(documentLines).where(eq(documentLines.documentId, req.params.id));
+      const updatedIssues = await db.select().from(documentIssues).where(eq(documentIssues.documentId, req.params.id));
+      return { doc: mapDocument(updated, updatedLines, updatedIssues), versionNo: nextVer };
+    }
+  );
+
+  /**
+   * Restore a saved version as the new current state (creates a new version entry for the restore act).
+   */
+  app.post<{ Params: { id: string; versionId: string }; Body: { changeSummary?: string } }>(
+    "/api/documents/:id/versions/:versionId/restore",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const [vrow] = await db
+        .select()
+        .from(documentVersions)
+        .where(
+          and(
+            eq(documentVersions.id, req.params.versionId),
+            eq(documentVersions.documentId, req.params.id),
+            eq(documentVersions.tenantId, ctx.tenantId)
+          )
+        )
+        .limit(1);
+      if (!vrow) return reply.status(404).send({ error: "Version not found" });
+
+      // Delegate to the version-edit endpoint logic using the snapshot as body
+      const snapshot = vrow.snapshot as unknown as GSTDocument;
+      const summary = req.body?.changeSummary?.trim() || `Restored from v${vrow.versionNo}`;
+
+      // Fake inner request by reusing the same insert logic
+      const [existing] = await db
+        .select().from(gstDocuments)
+        .where(and(eq(gstDocuments.id, req.params.id), eq(gstDocuments.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!existing) return reply.status(404).send({ error: "Not found" });
+      const existingLines = await db.select().from(documentLines).where(eq(documentLines.documentId, req.params.id));
+      const existingIssues = await db.select().from(documentIssues).where(eq(documentIssues.documentId, req.params.id));
+      const currentSnapshot = mapDocument(existing, existingLines, existingIssues);
+
+      const [{ maxVer }] = await db.select({ maxVer: max(documentVersions.versionNo) }).from(documentVersions).where(eq(documentVersions.documentId, req.params.id));
+      const nextVer = (maxVer ?? 0) + 1;
+
+      await db.insert(documentVersions).values({
+        documentId: req.params.id,
+        tenantId: ctx.tenantId,
+        versionNo: nextVer,
+        snapshot: currentSnapshot as unknown as Record<string, unknown>,
+        changeSummary: summary,
+        changedBy: ctx.email ?? ctx.userId,
+      });
+
+      await db.update(gstDocuments).set({
+        docType: snapshot.doc_type as typeof gstDocuments.$inferInsert["docType"],
+        docNumber: snapshot.doc_number,
+        docDate: snapshot.doc_date,
+        financialYear: snapshot.financial_year,
+        placeOfSupply: snapshot.place_of_supply,
+        reverseCharge: snapshot.reverse_charge,
+        supplyType: snapshot.supply_type as typeof gstDocuments.$inferInsert["supplyType"],
+        itcEligible: snapshot.itc_eligible,
+        taxableAmount: String(snapshot.taxable_amount),
+        igst: String(snapshot.igst),
+        cgst: String(snapshot.cgst),
+        sgst: String(snapshot.sgst),
+        total: String(snapshot.total),
+        irnHash: snapshot.irn_hash,
+        ackNumber: snapshot.ack_number,
+        ackDate: snapshot.ack_date,
+        supplier: snapshot.supplier as unknown as Record<string, unknown>,
+        recipient: snapshot.recipient as unknown as Record<string, unknown>,
+        updatedAt: new Date(),
+      }).where(eq(gstDocuments.id, req.params.id));
+
+      if (snapshot.lines?.length) {
+        await db.delete(documentLines).where(eq(documentLines.documentId, req.params.id));
+        await db.insert(documentLines).values(snapshot.lines.map((l, i) => ({ documentId: req.params.id, ...lineToDb(l, i + 1) })));
+      }
+
+      await audit(ctx, "document.version_restore", "document", req.params.id, { restoredFrom: vrow.versionNo, newVersion: nextVer }, req);
+      return { ok: true, versionNo: nextVer };
+    }
+  );
+
   app.post<{ Params: { id: string } }>(
     "/api/documents/:id/retry",
     async (req, reply) => {
@@ -925,6 +1242,42 @@ export async function buildApp() {
     }
   );
 
+  app.delete<{ Params: { id: string } }>(
+    "/api/documents/:id",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const result = await deleteGstDocument(req.params.id, ctx.tenantId);
+      if (!result.ok) {
+        return reply.status(result.status).send({ error: result.error });
+      }
+      await audit(ctx, "document.delete", "document", req.params.id, undefined, req);
+      return { ok: true, id: req.params.id };
+    }
+  );
+
+  app.post<{ Body: { ids?: string[] } }>(
+    "/api/documents/bulk-delete",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const ids = [...new Set((req.body?.ids ?? []).filter(Boolean))];
+      if (ids.length === 0) {
+        return reply.status(400).send({ error: "ids required" });
+      }
+      const deleted: string[] = [];
+      const errors: { id: string; error: string }[] = [];
+      for (const id of ids) {
+        const result = await deleteGstDocument(id, ctx.tenantId);
+        if (!result.ok) {
+          errors.push({ id, error: result.error });
+          continue;
+        }
+        await audit(ctx, "document.delete", "document", id, { bulk: true }, req);
+        deleted.push(id);
+      }
+      return { deleted, errors };
+    }
+  );
+
   app.get<{ Params: { id: string } }>(
     "/api/documents/:id/preview-url",
     async (req, reply) => {
@@ -967,7 +1320,13 @@ export async function buildApp() {
     const filtered = rows.filter((r) => {
       if (!types.includes(r.docType)) return false;
       if (q.client_id && r.clientId !== q.client_id) return false;
-      if (q.financial_year && r.financialYear !== q.financial_year) return false;
+      if (q.financial_year) {
+        // Use doc_date-derived FY as the source of truth (same logic as Records screen).
+        // Fall back to the stored financial_year column if doc_date is absent.
+        const effectiveFy =
+          (r.docDate ? financialYearFromIsoDate(r.docDate) : null) ?? r.financialYear;
+        if (effectiveFy !== q.financial_year) return false;
+      }
       return true;
     });
 
@@ -1010,7 +1369,11 @@ export async function buildApp() {
     const ids = all
       .filter((r) => {
         if (q.client_id && r.clientId !== q.client_id) return false;
-        if (q.financial_year && r.financialYear !== q.financial_year) return false;
+        if (q.financial_year) {
+          const effectiveFy =
+            (r.docDate ? financialYearFromIsoDate(r.docDate) : null) ?? r.financialYear;
+          if (effectiveFy !== q.financial_year) return false;
+        }
         return true;
       })
       .map((r) => r.id);

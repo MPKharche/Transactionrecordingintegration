@@ -25,7 +25,8 @@ def openrouter_only() -> bool:
         return False
     if raw in ("1", "true", "yes"):
         return True
-    return bool(OPENROUTER_API_KEY)
+    # Read from os.environ at call time so tests can monkeypatch it
+    return bool(os.environ.get("OPENROUTER_API_KEY", ""))
 
 
 SPLIT_SYSTEM_PROMPT = """You are an expert at Indian GST tax invoice PDFs (e-invoices, MAHAGENCO/utility bills, B2B purchase bills).
@@ -60,7 +61,7 @@ EXTRACT_SYSTEM_PROMPT = """You are a precision GST document parser for Indian CA
 Return ONLY valid JSON (no markdown fences). Use null for unknown fields. Amounts/quantities as strings without commas.
 
 {
-  "docType": "sales_invoice" | "purchase_bill" | "unknown",
+  "docType": "sales_invoice" | "purchase_bill" | "credit_note" | "debit_note" | "unknown",
   "confidence": "high" | "medium" | "low",
   "salesInvoice": { ... } | null,
   "purchaseBill": { ... } | null,
@@ -68,13 +69,20 @@ Return ONLY valid JSON (no markdown fences). Use null for unknown fields. Amount
   "issues": []
 }
 
+DOCUMENT TYPE RULES:
+- sales_invoice: TAX INVOICE issued by the client (BILL FROM = client/supplier)
+- purchase_bill: TAX INVOICE received by the client (BILL FROM = vendor/third party)
+- credit_note: document titled "CREDIT NOTE" or doc number starts with CRN/CN — use purchaseBill structure; fill billNumber with the credit note number
+- debit_note: document titled "DEBIT NOTE" or doc number starts with DN/DBN — use purchaseBill structure
+- unknown: cannot determine
+
 fieldConfidence: map each extracted field key to 0-100 confidence (100=certain from OCR).
 
 Indian GST invoice layout (e-invoice / utility bills):
 - IRN: 64-char hex hash at top-right of e-invoice
 - Ack Number & Ack Date from e-invoice footer
 - BILL FROM = supplier; BILL TO = recipient/buyer
-- Document Number = billNumber (purchase) or invoiceNumber (sales)
+- Document Number = billNumber (purchase/credit/debit note) or invoiceNumber (sales)
 - Document Date → YYYY-MM-DD
 - POS / Place of Supply → 2-digit state code (e.g. 27)
 - GSTIN: exactly 15 chars
@@ -82,7 +90,7 @@ Indian GST invoice layout (e-invoice / utility bills):
 - Line items: HSN/SAC, itemDescription (full product text e.g. SALE OF POND ASH / FLY ASH), qty, UQC (MTS/PCS/KGS), rate, gross, discount, taxable, CGST/SGST/IGST rates & amounts
 - itemDescription is REQUIRED for every line — never leave description null if any product text appears on the invoice
 
-purchaseBill (camelCase):
+purchaseBill (camelCase) — also used for credit_note and debit_note:
 billNumber, billDate, irnHash, ackNumber, ackDate, transactionType (B2B|B2C|SEZ|Export),
 vendorName, gstin (supplier), customerName, customerGstin,
 sourceOfSupply, destinationOfSupply, supplyType (intra_state|inter_state),
@@ -94,7 +102,7 @@ lines[{ itemName, itemDescription, hsnSac, quantity, uqc, rate, grossValue, disc
 
 salesInvoice: invoiceNumber, invoiceDate, irnHash, ackNumber, ackDate, placeOfSupply, lines[...]
 
-When upload category is PURCHASE: docType MUST be purchase_bill; vendor=BILL FROM; buyer=BILL TO.
+When upload category is PURCHASE: docType MUST be purchase_bill (or credit_note/debit_note if the document header says so); vendor=BILL FROM; buyer=BILL TO.
 If client GSTIN provided, recipient GSTIN should match when visible.
 
 List issues[] for missing critical fields. confidence=high only when bill number, date, supplier GSTIN, total present."""

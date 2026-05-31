@@ -1,5 +1,5 @@
 import { test, expect } from "@playwright/test";
-import { requireDevLogin, writeTempPdf, apiDevSession } from "./helpers";
+import { requireDevLogin, writeTempPdf, apiDevSession, ensureClientViaApi } from "./helpers";
 
 test.describe("User stories — Upload duplicate handling", () => {
   test.beforeEach(async ({ page }) => {
@@ -8,13 +8,7 @@ test.describe("User stories — Upload duplicate handling", () => {
 
   test("US-UPLOAD-03: duplicate upload shows clear error", async ({ page, request }) => {
     const session = await apiDevSession(request);
-    const clients = await request.get("http://localhost:4000/api/clients", {
-      headers: { "x-tenant-id": session.tenantId, "x-user-id": session.userId },
-    });
-    expect(clients.ok()).toBeTruthy();
-    const list = (await clients.json()) as { id: string }[];
-    const clientId = list[0]?.id;
-    if (!clientId) throw new Error("US-UPLOAD-03 BLOCKED: no client — run pnpm db:seed");
+    const clientId = await ensureClientViaApi(request, session);
 
     const pdfPath = await writeTempPdf();
     const buf = await import("fs").then((fs) => fs.promises.readFile(pdfPath));

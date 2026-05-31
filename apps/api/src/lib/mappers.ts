@@ -1,4 +1,4 @@
-import type { Client, GSTDocument, LineItem, Party } from "@ca-suite/shared";
+import type { Client, GSTDocument, LineItem, Party, CaptureSource } from "@ca-suite/shared";
 import {
   clients,
   documentIssues,
@@ -49,7 +49,12 @@ export function mapClient(row: ClientRow): Client {
 export function mapDocument(
   row: DocRow,
   lines: LineRow[],
-  issues: IssueRow[]
+  issues: IssueRow[],
+  capture?: {
+    uploaded_by?: string;
+    captured_at?: string;
+    capture_source?: CaptureSource;
+  }
 ): GSTDocument {
   return {
     id: row.id,
@@ -104,6 +109,9 @@ export function mapDocument(
       message: i.message,
     })),
     financial_year: row.financialYear ?? undefined,
+    uploaded_by: capture?.uploaded_by,
+    captured_at: capture?.captured_at ?? row.createdAt?.toISOString(),
+    capture_source: capture?.capture_source ?? "web",
     storage_path: row.storagePath,
     itc_eligible: row.itcEligible ?? true,
     b2b_category: (row.b2bCategory as GSTDocument["b2b_category"]) ?? "b2b",

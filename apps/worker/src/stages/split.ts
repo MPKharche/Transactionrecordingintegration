@@ -77,13 +77,16 @@ export async function splitStage(
         .where(eq(gstDocuments.id, primary.id));
     } else {
       docId = randomUUID();
+      // Segments beyond the first get docType=purchase_invoice as a placeholder;
+      // syncGstFromExtractor will overwrite it with the extractor-detected type.
+      // Do NOT bake in primary.docType — a multi-doc PDF may have mixed types.
       await db.insert(gstDocuments).values({
         id: docId,
         tenantId: primary.tenantId,
         clientId: primary.clientId,
         uploadId,
         filename: primary.filename,
-        docType: primary.docType,
+        docType: primary.docType,   // placeholder — extractor will override
         supplier: primary.supplier,
         recipient: primary.recipient,
         stage: "stored",

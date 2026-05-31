@@ -31,6 +31,10 @@ type Ctx = {
   ) => Promise<{ locked: string[]; errors: { id: string; errors: string[] }[] }>;
   rejectDocument: (id: string, reason?: string) => Promise<void>;
   retryDocument: (id: string) => Promise<void>;
+  deleteDocument: (id: string) => Promise<void>;
+  bulkDeleteDocuments: (
+    ids: string[]
+  ) => Promise<{ deleted: string[]; errors: { id: string; error: string }[] }>;
   uploadFile: (
     file: File,
     clientId: string,
@@ -190,6 +194,18 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     setDocs((prev) => prev.map((d) => (d.id === id ? updated : d)));
   }, []);
 
+  const deleteDocument = useCallback(async (id: string) => {
+    await api.documents.delete(id);
+    setDocs((prev) => prev.filter((d) => d.id !== id));
+  }, []);
+
+  const bulkDeleteDocuments = useCallback(async (ids: string[]) => {
+    const res = await api.documents.bulkDelete(ids);
+    const deletedSet = new Set(res.deleted);
+    setDocs((prev) => prev.filter((d) => !deletedSet.has(d.id)));
+    return res;
+  }, []);
+
   const uploadFile = useCallback(
     async (file: File, clientId: string, docType: string, fy?: string) => {
       const created = await api.documents.upload(file, clientId, docType, fy);
@@ -218,6 +234,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       bulkLockDocuments,
       rejectDocument,
       retryDocument,
+      deleteDocument,
+      bulkDeleteDocuments,
       uploadFile,
     }),
     [
@@ -238,6 +256,8 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       bulkLockDocuments,
       rejectDocument,
       retryDocument,
+      deleteDocument,
+      bulkDeleteDocuments,
       uploadFile,
     ]
   );

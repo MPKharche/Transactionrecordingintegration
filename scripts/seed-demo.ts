@@ -30,6 +30,13 @@ const SEED_CLIENTS = [
 ];
 
 async function main() {
+  if (process.env.SEED_DEMO !== "true") {
+    console.error(
+      "Refusing to seed demo clients (Acme/Beta). Set SEED_DEMO=true only for explicit dev fixtures."
+    );
+    process.exit(1);
+  }
+
   let [tenant] = await db.select().from(tenants).limit(1);
   if (!tenant) {
     [tenant] = await db

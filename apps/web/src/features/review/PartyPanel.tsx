@@ -1,8 +1,10 @@
 import type { Client, MasterOption, Party } from "@ca-suite/shared";
-import { Phone, Mail } from "lucide-react";
+import { Phone, Mail, Search, CheckCircle2, AlertCircle, Loader2 } from "lucide-react";
+import { useState } from "react";
 import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
 import { MasterCombobox } from "../../components/ui/MasterCombobox";
 import { buildPartyOptions, buildStateOptions, stateFromGstin } from "../../lib/master-options";
+import { api } from "../../lib/api";
 
 export function PartyPanel({
   title,
@@ -24,19 +26,56 @@ export function PartyPanel({
   onPersistParty?: (p: Party) => void | Promise<void>;
 }) {
   const inp = (err = false, cls = "") =>
-    `w-full rounded-lg px-3 py-2 text-sm border bg-input text-foreground focus:outline-none focus:ring-2 focus:ring-primary/30 disabled:opacity-60 disabled:cursor-not-allowed transition-all ${err ? "border-red-400" : "border-border"} ${cls}`;
+    `w-full rounded-md px-2.5 py-1.5 text-xs border bg-input text-foreground focus:outline-none focus:ring-1 focus:ring-primary/40 disabled:opacity-60 disabled:cursor-not-allowed transition-all ${err ? "border-red-400" : "border-border"} ${cls}`;
   const lbl = (text: string, required = false, icon?: React.ReactNode) => (
-    <label className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground mb-1">
+    <label className="flex items-center gap-1 text-[10px] font-medium text-muted-foreground mb-0.5 uppercase tracking-wide">
       {icon}
       {text}
       {required && <span className="text-red-500">*</span>}
     </label>
   );
 
+  const [lookupState, setLookupState] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [lookupMsg, setLookupMsg] = useState("");
+
   const partyOptions = buildPartyOptions(partyByGstin, clients);
   const stateOptions = buildStateOptions();
   const gstinValid = party.gstin ? isValidGSTIN(party.gstin) : null;
   const panValid = party.pan ? isValidPAN(party.pan) : null;
+
+  async function handleGstinLookup() {
+    if (!party.gstin || !isValidGSTIN(party.gstin)) return;
+    setLookupState("loading");
+    setLookupMsg("");
+    try {
+      const info = await api.gstin.lookup(party.gstin);
+      const st = stateFromGstin(party.gstin);
+      const next: Party = {
+        ...party,
+        name: info.legalName || party.name,
+        pan: info.pan || party.pan,
+        address: info.address || party.address,
+        city: info.city || party.city,
+        state_code: info.stateCode || st?.code || party.state_code,
+        state: info.state || st?.name || party.state,
+      };
+      onChange(next);
+      void onPersistParty?.(next);
+      setLookupState("ok");
+      setLookupMsg(
+        info.source === "master"
+          ? "Filled from your master"
+          : info.tradeName && info.tradeName !== info.legalName
+          ? `Trade name: ${info.tradeName}`
+          : `Status: ${info.status || "Active"}`
+      );
+      setTimeout(() => setLookupState("idle"), 4000);
+    } catch (err) {
+      setLookupState("error");
+      setLookupMsg(err instanceof Error ? err.message : "Lookup failed");
+      setTimeout(() => setLookupState("idle"), 5000);
+    }
+  }
 
   function applyParty(p: Party) {
     const st = stateFromGstin(p.gstin);
@@ -56,17 +95,17 @@ export function PartyPanel({
   }
 
   return (
-    <div className={embedded ? "space-y-3" : "rounded-xl border border-border bg-card shadow-sm overflow-hidden"}>
+    <div className={embedded ? "space-y-2" : "rounded-lg border border-border bg-card shadow-sm overflow-hidden"}>
       {!embedded && (
-        <div className="px-4 py-2.5 border-b border-border bg-muted/40">
-          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">{title}</p>
-          <p className="text-sm font-bold text-foreground mt-0.5 truncate">
+        <div className="px-3 py-2 border-b border-border bg-muted/30">
+          <p className="text-[10px] font-semibold text-muted-foreground uppercase tracking-wider">{title}</p>
+          <p className="text-xs font-bold text-foreground mt-0.5 truncate">
             {party.name || <span className="text-muted-foreground italic font-normal">Select from master</span>}
           </p>
         </div>
       )}
-      <div className={embedded ? "space-y-3" : "p-4 space-y-3"}>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+      <div className={embedded ? "space-y-2" : "p-3 space-y-2"}>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
           <div className="sm:col-span-2">
             {lbl("Party (name or GSTIN from master)", true)}
             <MasterCombobox<Party>
@@ -105,25 +144,55 @@ export function PartyPanel({
           </div>
           <div>
             {lbl("GSTIN", true)}
-            <MasterCombobox<Party>
-              disabled={locked}
-              value={party.gstin}
-              placeholder="15-char GSTIN"
-              options={partyOptions}
-              inputClassName={`font-mono uppercase ${gstinValid === false ? "border-red-400" : ""}`}
-              onChange={(v) => {
-                const g = v.toUpperCase().replace(/\s/g, "").slice(0, 15);
-                const st = stateFromGstin(g);
-                onChange({
-                  ...party,
-                  gstin: g,
-                  state_code: st?.code || party.state_code,
-                  state: st?.name || party.state,
-                });
-              }}
-              onSelectOption={(opt) => opt.meta && applyParty(opt.meta)}
-              onBlur={() => persistIfReady(party)}
-            />
+            <div className="flex gap-1 items-start">
+              <div className="flex-1 min-w-0">
+                <MasterCombobox<Party>
+                  disabled={locked}
+                  value={party.gstin}
+                  placeholder="15-char GSTIN"
+                  options={partyOptions}
+                  inputClassName={`font-mono uppercase ${gstinValid === false ? "border-red-400" : ""}`}
+                  onChange={(v) => {
+                    const g = v.toUpperCase().replace(/\s/g, "").slice(0, 15);
+                    const st = stateFromGstin(g);
+                    setLookupState("idle");
+                    onChange({
+                      ...party,
+                      gstin: g,
+                      state_code: st?.code || party.state_code,
+                      state: st?.name || party.state,
+                    });
+                  }}
+                  onSelectOption={(opt) => opt.meta && applyParty(opt.meta)}
+                  onBlur={() => persistIfReady(party)}
+                />
+              </div>
+              {!locked && gstinValid && (
+                <button
+                  type="button"
+                  onClick={() => { void handleGstinLookup(); }}
+                  disabled={lookupState === "loading"}
+                  title="Fetch name & address from GST portal"
+                  className="shrink-0 flex items-center gap-1 px-2 py-1.5 rounded-md border border-border bg-muted/40 hover:bg-muted text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+                >
+                  {lookupState === "loading" ? (
+                    <Loader2 size={13} className="animate-spin" />
+                  ) : lookupState === "ok" ? (
+                    <CheckCircle2 size={13} className="text-green-500" />
+                  ) : lookupState === "error" ? (
+                    <AlertCircle size={13} className="text-red-400" />
+                  ) : (
+                    <Search size={13} />
+                  )}
+                  <span className="hidden sm:inline">Fetch</span>
+                </button>
+              )}
+            </div>
+            {lookupMsg && lookupState !== "idle" && (
+              <p className={`mt-0.5 text-[10px] ${lookupState === "error" ? "text-red-400" : "text-emerald-500"}`}>
+                {lookupMsg}
+              </p>
+            )}
           </div>
           <div>
             {lbl("PAN")}

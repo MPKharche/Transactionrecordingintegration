@@ -4,7 +4,7 @@
  * lose precision in numeric types (Excel scientific notation problem).
  */
 import { pgTable, text, timestamp, uuid, boolean } from "drizzle-orm/pg-core";
-import { tenants } from "./tenants.js";
+import { tenants } from "./tenants";
 
 export const chartOfAccounts = pgTable("chart_of_accounts", {
   id: uuid("id").primaryKey().defaultRandom(),

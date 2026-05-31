@@ -75,10 +75,18 @@ describe.skipIf(!integrationEnabled)("Database migrations", () => {
     expect(rows[0].indexdef).toMatch(/segment_index/i);
   });
 
-  it("seed tenant and user are queryable", async () => {
-    const [tenant] = await sql`SELECT id FROM tenants LIMIT 1`;
-    expect(tenant?.id).toBeTruthy();
-    const users = await sql`SELECT id, email FROM users LIMIT 5`;
-    expect(users.length).toBeGreaterThan(0);
+  it("core tables exist after schema push", async () => {
+    const tables = await sql`
+      SELECT tablename FROM pg_tables
+      WHERE schemaname = 'public'
+        AND tablename IN ('tenants', 'users', 'clients', 'gst_documents')
+      ORDER BY tablename
+    `;
+    expect(tables.map((t) => t.tablename)).toEqual([
+      "clients",
+      "gst_documents",
+      "tenants",
+      "users",
+    ]);
   });
 });

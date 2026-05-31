@@ -265,3 +265,52 @@ export function currentIndianFinancialYear(date = new Date()): string {
   if (m >= 4) return `${y}-${String(y + 1).slice(-2)}`;
   return `${y - 1}-${String(y).slice(-2)}`;
 }
+
+/** Derive Indian FY from an invoice date (YYYY-MM-DD). */
+export function financialYearFromIsoDate(docDate: string | undefined | null): string | null {
+  if (!docDate) return null;
+  const m = docDate.trim().match(/^(\d{4})-(\d{2})-/);
+  if (!m) return null;
+  const y = parseInt(m[1]!, 10);
+  const month = parseInt(m[2]!, 10);
+  if (month >= 4) return `${y}-${String(y + 1).slice(-2)}`;
+  return `${y - 1}-${String(y).slice(-2)}`;
+}
+
+/**
+ * FY used for Records / registers: invoice date when known, else upload bucket.
+ * Avoids hiding docs when DB still has schema default (e.g. 2024-25).
+ */
+export function effectiveDocumentFinancialYear(doc: {
+  financial_year?: string;
+  doc_date?: string;
+}): string {
+  return financialYearFromIsoDate(doc.doc_date) ?? doc.financial_year?.trim() ?? "";
+}
+
+/** Whether a document belongs in Records (locked register only). Upload holds everything else. */
+export function documentInRecordsScope(
+  doc: { financial_year?: string; doc_date?: string; stage?: string; client_id?: string },
+  clientId: string,
+  financialYear: string
+): boolean {
+  if (doc.client_id !== clientId) return false;
+  if (doc.stage !== "locked") return false;
+  const eff = effectiveDocumentFinancialYear(doc);
+  if (!eff) return true;
+  return eff === financialYear;
+}
+
+/** Indian FY labels from `fromStartYear` (e.g. 2016 → 2016-17) through current, latest first. */
+export function listIndianFinancialYears(
+  fromStartYear = 2016,
+  asOf = new Date()
+): string[] {
+  const curStart = parseInt(currentIndianFinancialYear(asOf).split("-")[0]!, 10);
+  const start = Math.min(fromStartYear, curStart);
+  const out: string[] = [];
+  for (let y = curStart; y >= start; y--) {
+    out.push(`${y}-${String(y + 1).slice(-2)}`);
+  }
+  return out;
+}

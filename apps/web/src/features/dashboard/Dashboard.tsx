@@ -75,7 +75,7 @@ export function Dashboard({ docs, clients, isDark, onNav }: { docs: GSTDocument[
         <div className="flex items-center justify-between px-6 py-4 border-b border-border">
           <p className="text-sm font-semibold text-foreground">Locked records by client</p>
           <div className="flex items-center gap-3">
-            <button onClick={() => {
+            <button type="button" onClick={() => {
               exportCSV("dashboard_client_summary.csv",
                 ["Client","GSTIN","State","Locked Docs","Total (₹)"],
                 clientSummary.map(c => [c.name, c.gstin, c.state, c.count, c.total])
@@ -83,7 +83,7 @@ export function Dashboard({ docs, clients, isDark, onNav }: { docs: GSTDocument[
             }} className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground transition-colors">
               <Download size={13} /> Export
             </button>
-            <button onClick={() => onNav("records")} className="text-sm text-primary font-medium hover:underline flex items-center gap-1">
+            <button type="button" onClick={() => onNav("records")} className="text-sm text-primary font-medium hover:underline flex items-center gap-1">
               View all <ChevronRight size={14} />
             </button>
           </div>
@@ -91,8 +91,12 @@ export function Dashboard({ docs, clients, isDark, onNav }: { docs: GSTDocument[
         {clientSummary.length === 0
           ? <p className="px-6 py-8 text-center text-sm text-muted-foreground">No locked records yet</p>
           : clientSummary.map((c, i) => (
-            <div key={c.id} className={`flex items-center gap-4 px-6 py-4 hover:bg-muted/40 cursor-pointer transition-colors ${i < clientSummary.length - 1 ? "border-b border-border" : ""}`}
-              onClick={() => onNav("records")}>
+            <button
+              key={c.id}
+              type="button"
+              className={`w-full flex items-center gap-4 px-6 py-4 hover:bg-muted/40 cursor-pointer transition-colors text-left ${i < clientSummary.length - 1 ? "border-b border-border" : ""}`}
+              onClick={() => onNav("records")}
+            >
               <div className="w-9 h-9 rounded-full bg-primary/10 flex items-center justify-center shrink-0">
                 <Building2 size={16} className="text-primary" />
               </div>
@@ -105,7 +109,7 @@ export function Dashboard({ docs, clients, isDark, onNav }: { docs: GSTDocument[
                 <p className="text-xs text-muted-foreground mt-0.5">{c.count} document{c.count > 1 ? "s" : ""}</p>
               </div>
               <TrendingUp size={16} className="text-emerald-500 shrink-0" />
-            </div>
+            </button>
           ))
         }
       </div>
@@ -119,7 +123,7 @@ export function Dashboard({ docs, clients, isDark, onNav }: { docs: GSTDocument[
             </p>
             <p className="text-sm text-muted-foreground mt-0.5">Review and lock these records to complete processing.</p>
           </div>
-          <button onClick={() => onNav("records")} className="text-sm font-medium text-amber-600 hover:text-amber-700 whitespace-nowrap">Review now →</button>
+          <button type="button" onClick={() => onNav("records")} className="text-sm font-medium text-amber-600 hover:text-amber-700 whitespace-nowrap">Review now →</button>
         </div>
       )}
     </div>

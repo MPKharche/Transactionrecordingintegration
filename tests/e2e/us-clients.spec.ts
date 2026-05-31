@@ -10,7 +10,7 @@ test.describe("User stories — Clients", () => {
     await page.goto("/clients");
     await expect(page.getByRole("heading", { name: "Clients" })).toBeVisible();
     await expect(
-      page.getByText(/No clients yet|Acme|Beta|GSTIN|active clients/i).first()
+      page.getByText(/No clients yet|GSTIN|active clients/i).first()
     ).toBeVisible({ timeout: 15_000 });
   });
 

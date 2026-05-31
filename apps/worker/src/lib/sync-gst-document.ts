@@ -52,10 +52,40 @@ function inferSupplyType(supplierCode: string, recipientCode: string): string {
   return supplierCode === recipientCode ? "intra_state" : "inter_state";
 }
 
+const DOC_TYPE_MAP: Record<string, typeof gstDocuments.$inferInsert.docType> = {
+  sales_invoice: "sales_invoice",
+  purchase_bill: "purchase_invoice",
+  purchase_invoice: "purchase_invoice",
+  credit_note: "credit_note_received",
+  credit_note_received: "credit_note_received",
+  credit_note_issued: "credit_note_issued",
+  debit_note: "debit_note_received",
+  debit_note_received: "debit_note_received",
+  debit_note_issued: "debit_note_issued",
+  quotation: "quotation",
+  advance_receipt: "advance_receipt",
+  delivery_challan: "delivery_challan",
+};
+
 function mapGstDocType(raw: string): typeof gstDocuments.$inferInsert.docType {
-  if (raw === "sales_invoice") return "sales_invoice";
-  if (raw === "purchase_bill" || raw === "purchase_invoice") return "purchase_invoice";
-  return "purchase_invoice";
+  return DOC_TYPE_MAP[raw] ?? "purchase_invoice";
+}
+
+/**
+ * Heuristically detect credit/debit notes from doc number prefix when the
+ * extractor didn't classify them (e.g., doc starts with CRN, DN, etc.).
+ */
+function inferDocTypeFromNumber(
+  docNumber: string,
+  base: typeof gstDocuments.$inferInsert.docType
+): typeof gstDocuments.$inferInsert.docType {
+  if (!docNumber) return base;
+  const n = docNumber.trim().toUpperCase();
+  if (/^(CRN|CN)\d/.test(n)) return "credit_note_received";
+  if (/^(CSN|CNI)\d/.test(n)) return "credit_note_issued";
+  if (/^(DN|DBN)\d/.test(n) && base !== "sales_invoice") return "debit_note_received";
+  if (/^(DNI|DBNI)\d/.test(n)) return "debit_note_issued";
+  return base;
 }
 
 function normalizeLlmScores(raw: Record<string, unknown> | undefined): Record<string, number> {
@@ -178,7 +208,12 @@ export async function syncGstFromExtractor(
           ? "merged"
           : "ai";
 
-  if (result.docType === "sales_invoice" && result.salesInvoice) {
+  // Credit/debit notes from the extractor may come through as purchase_bill data
+  // (received notes) or sales_invoice data (issued notes).
+  const isBillLike = result.docType === "purchase_bill" || result.purchaseBill != null;
+  const isInvoiceLike = result.docType === "sales_invoice" || result.salesInvoice != null;
+
+  if (isInvoiceLike && result.salesInvoice) {
     const inv = result.salesInvoice as Record<string, unknown>;
     const lines = (inv.lines as Record<string, unknown>[]) ?? [];
     docNumber = String(inv.invoiceNumber ?? "");
@@ -224,7 +259,7 @@ export async function syncGstFromExtractor(
       taxable = lineRows.reduce((s, l) => s + parseNum(l.taxable), 0);
     }
     if (!total) total = taxable + igst + cgst + sgst;
-  } else if (result.docType === "purchase_bill" && result.purchaseBill) {
+  } else if (isBillLike && result.purchaseBill) {
     const bill = result.purchaseBill as Record<string, unknown>;
     const lines = (bill.lines as Record<string, unknown>[]) ?? [];
     docNumber = String(bill.billNumber ?? "");
@@ -307,10 +342,12 @@ export async function syncGstFromExtractor(
     sgst = taxTotal / 2;
   }
 
+  const resolvedDocType = inferDocTypeFromNumber(docNumber, mapGstDocType(result.docType));
+
   await db
     .update(gstDocuments)
     .set({
-      docType: mapGstDocType(result.docType),
+      docType: resolvedDocType,
       docNumber,
       docDate,
       irnHash: irnHash || null,

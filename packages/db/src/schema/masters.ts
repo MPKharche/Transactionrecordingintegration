@@ -7,7 +7,7 @@ import {
   timestamp,
   uuid,
 } from "drizzle-orm/pg-core";
-import { tenants } from "./tenants.js";
+import { tenants } from "./tenants";
 
 export const masterHsn = pgTable(
   "master_hsn",

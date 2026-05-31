@@ -6,11 +6,12 @@ test.describe("User stories — Review", () => {
     await requireDevLogin(page);
   });
 
-  test("US-REVIEW-01: review screen shows document details", async ({ page }) => {
+  test("US-REVIEW-01: review screen shows document meta and validation", async ({ page }) => {
     const docId = await ensureDocumentForReview(page);
     await page.goto(`/records/${docId}`);
-    await expect(page.getByText("Document Details")).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByText("1. Document identification")).toBeVisible({ timeout: 15_000 });
     await expect(page.getByText("Supply type")).toBeVisible();
+    await expect(page.getByText("Document ID", { exact: true })).toBeVisible();
   });
 
   test("US-REVIEW-02: place of supply updates supply type label", async ({ page }) => {

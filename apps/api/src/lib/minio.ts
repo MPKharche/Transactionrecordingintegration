@@ -46,3 +46,7 @@ export async function putObject(path: string, buf: Buffer, mime: string) {
 export async function presignedGet(path: string, expiry = 3600) {
   return getMinio().presignedGetObject(BUCKET, path, expiry);
 }
+
+export async function removeObject(path: string) {
+  await getMinio().removeObject(BUCKET, path);
+}

@@ -41,9 +41,8 @@ console.log("✓ Regression preflight: Postgres, Redis, MinIO reachable");
 
 try {
   execSync("pnpm db:push", { stdio: "inherit", env: process.env });
-  execSync("pnpm db:seed", { stdio: "inherit", env: process.env });
-  console.log("✓ Database schema pushed and seed applied");
+  console.log("✓ Database schema pushed (no demo seed — E2E creates clients via API)");
 } catch (e) {
-  console.error("❌ db:push or db:seed failed");
+  console.error("❌ db:push failed");
   process.exit(1);
 }

@@ -3,7 +3,7 @@ import path from "path";
 import { fileURLToPath } from "url";
 import { drizzle } from "drizzle-orm/postgres-js";
 import postgres from "postgres";
-import * as schema from "./schema/index.js";
+import * as schema from "./schema/index";
 
 if (!process.env.DATABASE_URL) {
   const here = path.dirname(fileURLToPath(import.meta.url));

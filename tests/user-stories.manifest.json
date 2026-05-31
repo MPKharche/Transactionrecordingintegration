@@ -87,7 +87,7 @@
       "id": "US-RECORDS-01",
       "persona": "Article clerk",
       "objective": "Find documents by client and type",
-      "acceptance": "Records tabs and client filter work",
+      "acceptance": "Records tabs, FY filter, and capture columns align with filtered documents",
       "layer": "e2e",
       "test": "us-records.spec.ts"
     },

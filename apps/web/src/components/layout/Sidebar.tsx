@@ -10,10 +10,11 @@ import {
   ChevronLeft,
   ChevronRight,
 } from "lucide-react";
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ThemeMode } from "../../hooks/useTheme";
 import { ThemeToggle } from "./ThemeToggle";
 import { api } from "../../lib/api";
+import { handleVerticalListKeyDown } from "../../lib/a11y";
 
 export type Screen =
   | "dashboard"
@@ -47,6 +48,8 @@ export function Sidebar({
   const navigate = useNavigate();
   const isReview = screen === "review";
   const [collapsed, setCollapsed] = useState(isReview);
+  const [navFocus, setNavFocus] = useState(0);
+  const navRefs = useRef<(HTMLButtonElement | null)[]>([]);
 
   useEffect(() => {
     if (isReview) setCollapsed(true);
@@ -106,8 +109,17 @@ export function Sidebar({
         </button>
       </div>
 
-      <nav className={`flex-1 py-2 space-y-1 ${collapsed ? "px-2" : "px-3"}`}>
-        {NAV.map(({ id, label, icon: Icon }) => {
+      <nav
+        className={`flex-1 py-2 space-y-1 ${collapsed ? "px-2" : "px-3"}`}
+        aria-label="Main navigation"
+        onKeyDown={(e) => {
+          handleVerticalListKeyDown(e, NAV.length, navFocus, (idx) => {
+            setNavFocus(idx);
+            navRefs.current[idx]?.focus();
+          });
+        }}
+      >
+        {NAV.map(({ id, label, icon: Icon }, i) => {
           const active =
             screen === id ||
             (screen === "review" && id === "records") ||
@@ -115,10 +127,12 @@ export function Sidebar({
           return (
             <button
               key={id}
+              ref={(el) => { navRefs.current[i] = el; }}
               type="button"
-              title={collapsed ? label : undefined}
+              title={collapsed ? `${label} (Alt+${i + 1})` : `${label} — Alt+${i + 1}`}
               aria-current={active ? "page" : undefined}
               aria-label={label}
+              onFocus={() => setNavFocus(i)}
               onClick={() => onNav(id as Screen)}
               className={`w-full flex items-center rounded-lg text-sm font-medium transition-all relative ${
                 collapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
@@ -130,14 +144,15 @@ export function Sidebar({
             >
               <Icon size={16} className={`shrink-0 ${active ? "opacity-90" : "opacity-70"}`} />
               {!collapsed && <span className="flex-1 text-left">{label}</span>}
-              {!collapsed && id === "records" && pendingCount > 0 && (
+              {!collapsed && id === "upload" && pendingCount > 0 && (
                 <span
+                  title="Documents needing review"
                   className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}
                 >
                   {pendingCount}
                 </span>
               )}
-              {collapsed && id === "records" && pendingCount > 0 && (
+              {collapsed && id === "upload" && pendingCount > 0 && (
                 <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500" />
               )}
             </button>

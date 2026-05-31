@@ -48,7 +48,7 @@ _extract_sem = asyncio.Semaphore(max(1, min(_EXTRACT_SLOTS, 16)))
 
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 EXTRACTOR_SHARED_SECRET = os.environ.get("EXTRACTOR_SHARED_SECRET", "")
-MODEL = os.environ.get("OPENROUTER_MODEL", "google/gemini-flash-1.5")
+MODEL = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 
 # ─── Auth ─────────────────────────────────────────────────────────────────────
 

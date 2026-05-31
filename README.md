@@ -28,12 +28,11 @@ cp .env.example .env
 cd infra
 docker compose up -d postgres redis minio
 
-# Schema + demo clients
+# Schema only — no demo clients (add real clients in the app)
 cd ..
 $env:DATABASE_URL="postgresql://ca_user:ca_pass@localhost:5433/ca_saas"
 pnpm install
 pnpm db:push
-pnpm db:seed
 
 # API + worker + web (3 terminals)
 $env:AUTH_DEV_BYPASS="true"

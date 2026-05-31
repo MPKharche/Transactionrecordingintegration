@@ -6,10 +6,12 @@ test.describe("User stories — GST Registers", () => {
     await requireDevLogin(page);
   });
 
-  test("US-GST-01: registers screen loads", async ({ page }) => {
+  test("US-GST-01: registers screen loads with FY selector", async ({ page }) => {
     await page.goto("/registers");
     await expect(page.getByRole("heading", { name: "GST Registers" })).toBeVisible();
-    await expect(page.locator("select").first()).toBeVisible();
+    const fySelect = page.locator("select").filter({ has: page.locator('option[value="2016-17"]') });
+    await expect(fySelect).toBeVisible();
+    await expect(fySelect.locator('option[value="2026-27"]')).toHaveCount(1);
     await expect(page.getByRole("button", { name: /Zoho CSV/i })).toBeVisible();
   });
 

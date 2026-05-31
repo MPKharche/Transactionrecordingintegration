@@ -12,8 +12,8 @@ import {
   boolean,
   integer,
 } from "drizzle-orm/pg-core";
-import { tenants, users } from "./tenants.js";
-import { uploads } from "./documents.js";
+import { tenants, users } from "./tenants";
+import { uploads } from "./documents";
 
 export const salesInvoiceHeaders = pgTable("sales_invoice_headers", {
   id: uuid("id").primaryKey().defaultRandom(),

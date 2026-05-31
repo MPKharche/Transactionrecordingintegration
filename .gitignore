@@ -10,3 +10,5 @@ playwright-report/
 coverage/
 .turbo/
 _vite-flat-backup/
+
+.vercel

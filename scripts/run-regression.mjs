@@ -56,7 +56,7 @@ const skipPreflight = process.argv.includes("--skip-preflight");
 
 try {
   if (!skipPreflight) {
-    run("node scripts/regression-preflight.mjs", "Preflight (infra + db seed)");
+    run("node scripts/regression-preflight.mjs", "Preflight (infra + db push)");
   }
   run("pnpm test:audit", "Lucide import audit");
   run("pnpm test", "Unit + API + workflow tests");

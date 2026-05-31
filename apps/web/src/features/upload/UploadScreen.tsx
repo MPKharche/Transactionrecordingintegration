@@ -1,15 +1,13 @@
 import { useState, useRef, useMemo } from "react";
-import type { Client, GSTDocument, DocStage, DocType, Party, LineItem, FieldWarning } from "@ca-suite/shared";
-import { PageHeader, KpiCard } from "../../components/layout/PageHeader";
-import { DocTypeBadge, StageBadge } from "../../components/badges/DocTypeBadge";
-import { CopyBtn } from "../../components/ui/CopyBtn";
-import { INR, INR_SIGNED, getCounterParty, clientByIdFrom } from "../../lib/format";
+import type { Client, GSTDocument, DocStage, DocType } from "@ca-suite/shared";
+import { PageHeader } from "../../components/layout/PageHeader";
 import { exportCSV } from "../../lib/csv-export";
 import { DOC_TYPE_META, STAGE_META } from "../../lib/constants";
-import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
-import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
+import { clientByIdFrom } from "../../lib/format";
 import { useAppData } from "../../context/AppDataContext";
-import { currentFinancialYear } from "../../lib/api";
+import { currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
+import { activateOnEnterSpace } from "../../lib/a11y";
+import { DocumentWorklistTable } from "../../components/documents/DocumentWorklistTable";
 
 const UPLOAD_BATCH = Math.min(
   10,
@@ -17,7 +15,6 @@ const UPLOAD_BATCH = Math.min(
 );
 import {
   Plus, Search, Download, Upload, ChevronDown, FileText, X,
-  FileWarning, CheckCircle, Eye, RefreshCw,
 } from "lucide-react";
 
 export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void }) {
@@ -25,7 +22,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
   const clientById = (id: string) => clientByIdFrom(clients, id);
   const [dragging, setDragging] = useState(false);
   const [selClient, setSelClient] = useState(clients[0]?.id ?? "");
-  const [selType, setSelType] = useState<DocType | "">("purchase_invoice");
+  const [selType, setSelType] = useState<DocType | "auto">("auto");
   const [queued, setQueued] = useState<{ file: File; name: string; size: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
@@ -47,8 +44,8 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
   }
 
   async function startUpload() {
-    if (!selClient || !selType) {
-      setUploadError("Select a client and document type before uploading.");
+    if (!selClient) {
+      setUploadError("Select a client before uploading.");
       return;
     }
     setUploadError("");
@@ -72,7 +69,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
             : "";
       setUploadError(
         err.existingId
-          ? `${err.message}${dupHint} — open Records (${err.existingId.slice(0, 8)}…)`
+          ? `${err.message}${dupHint} — open Upload worklist (${err.existingId.slice(0, 8)}…)`
           : err.message || "Upload failed"
       );
     } finally {
@@ -80,7 +77,12 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
     }
   }
 
-  const filtered = docs.filter(d => {
+  const worklistDocs = useMemo(
+    () => docs.filter((d) => d.stage !== "locked"),
+    [docs]
+  );
+
+  const filtered = worklistDocs.filter((d) => {
     if (stageF !== "all" && d.stage !== stageF) return false;
     const q = search.toLowerCase();
     if (q && !d.filename.toLowerCase().includes(q) && !(clientById(d.client_id)?.name ?? "").toLowerCase().includes(q)) return false;
@@ -89,7 +91,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Upload Documents" subtitle="Drag and drop PDF, JPG, or PNG files to begin processing"
+      <PageHeader title="Upload Documents" subtitle="Upload new files and manage in-progress documents until they are locked into Records"
         action={
           <button onClick={() => ref.current?.click()}
             className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
@@ -97,13 +99,20 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
           </button>
         } />
 
-      <div onDragOver={e => { e.preventDefault(); setDragging(true); }} onDragLeave={() => setDragging(false)}
+      <div
+        role="button"
+        tabIndex={0}
+        aria-label="Upload files — drop PDF, JPG, or PNG here, or press Enter to browse"
+        onDragOver={e => { e.preventDefault(); setDragging(true); }}
+        onDragLeave={() => setDragging(false)}
         onDrop={e => { e.preventDefault(); setDragging(false); addFiles(e.dataTransfer.files); }}
         onClick={() => ref.current?.click()}
-        className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-4 cursor-pointer transition-all ${
+        onKeyDown={(e) => activateOnEnterSpace(e, () => ref.current?.click())}
+        className={`border-2 border-dashed rounded-xl p-10 flex flex-col items-center gap-4 cursor-pointer transition-all focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary ${
           dragging ? "border-primary bg-primary/5" : "border-border hover:border-primary/50 hover:bg-muted/30"
-        }`}>
-        <input ref={ref} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => addFiles(e.target.files)} />
+        }`}
+      >
+        <input ref={ref} type="file" multiple accept=".pdf,.jpg,.jpeg,.png" className="hidden" onChange={e => addFiles(e.target.files)} aria-hidden />
         <div className="w-14 h-14 rounded-2xl bg-primary/10 flex items-center justify-center">
           <Upload size={26} className="text-primary" />
         </div>
@@ -121,9 +130,9 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
             <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
           </div>
           <div className="relative">
-            <select value={selType} onChange={e => setSelType(e.target.value as DocType | "")}
+            <select value={selType} onChange={e => setSelType(e.target.value as DocType | "auto")}
               className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
-              <option value="">Document type</option>
+              <option value="auto">Auto-detect (Mixed PDF)</option>
               {(Object.entries(DOC_TYPE_META) as [DocType, typeof DOC_TYPE_META[DocType]][]).map(([k, v]) =>
                 <option key={k} value={k}>{v.label}</option>)}
             </select>
@@ -136,7 +145,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
               className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer"
               aria-label="Financial year"
             >
-              {["2022-23", "2023-24", "2024-25", "2025-26"].map((fy) => (
+              {listIndianFinancialYears(2016).map((fy) => (
                 <option key={fy} value={fy}>
                   FY {fy}
                 </option>
@@ -194,7 +203,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
           </button>
           <div className="flex gap-1.5">
             {([["all","All"],["ready_for_review","Needs Review"],["extracting","Processing"],["locked","Locked"],["failed","Failed"]] as [DocStage|"all",string][]).map(([id, label]) => (
-              <button key={id} onClick={() => setStageF(id)}
+              <button key={id} type="button" onClick={() => setStageF(id)}
                 className={`px-3 py-2 text-sm rounded-lg transition-colors ${stageF === id ? "bg-primary text-white font-medium" : "bg-card border border-border text-muted-foreground hover:text-foreground"}`}>
                 {label}
               </button>
@@ -202,61 +211,12 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
           </div>
         </div>
 
-        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
-          <table className="w-full">
-            <thead>
-              <tr className="border-b border-border bg-muted/50">
-                {["Filename", "Client", "Type", "Status", "Issues", ""].map((h, i) => (
-                  <th key={i} className="px-5 py-3 text-left text-xs font-semibold text-muted-foreground uppercase tracking-wide">{h}</th>
-                ))}
-              </tr>
-            </thead>
-            <tbody className="divide-y divide-border">
-              {filtered.map(d => (
-                <tr key={d.id} className="hover:bg-muted/30 cursor-pointer transition-colors" onClick={() => onReview(d.id)}>
-                  <td className="px-5 py-3.5">
-                    <div className="flex items-center gap-2.5">
-                      <FileText size={15} className="text-muted-foreground shrink-0" />
-                      <span className="text-sm text-foreground truncate max-w-[240px]">
-                        {d.invoice_label || d.doc_number || d.filename}
-                      </span>
-                    </div>
-                  </td>
-                  <td className="px-5 py-3.5 text-sm text-muted-foreground">{clientById(d.client_id)?.name ?? <span className="text-red-500 italic">Not assigned</span>}</td>
-                  <td className="px-5 py-3.5"><DocTypeBadge type={d.doc_type} isDark={isDark} /></td>
-                  <td className="px-5 py-3.5"><StageBadge stage={d.stage} isDark={isDark} /></td>
-                  <td className="px-5 py-3.5">
-                    {d.issues.length > 0
-                      ? <span className={`flex items-center gap-1.5 text-sm ${d.issues.some(i => i.severity === "error") ? "text-red-500" : "text-amber-500"}`}>
-                          <FileWarning size={14} />{d.issues.length} issue{d.issues.length > 1 ? "s" : ""}
-                        </span>
-                      : d.stage === "locked" ? <CheckCircle size={16} className="text-emerald-500" /> : <span className="text-muted-foreground">—</span>}
-                  </td>
-                  <td className="px-5 py-3.5">
-                    {d.stage === "ready_for_review" && (
-                      <button className="flex items-center gap-1.5 text-sm font-medium text-primary hover:underline">
-                        <Eye size={14} /> Review
-                      </button>
-                    )}
-                    {d.stage === "failed" && (
-                      <span className="flex items-center gap-1.5 text-sm text-red-500">
-                        <RefreshCw size={14} /> Failed — retry from Records
-                      </span>
-                    )}
-                    {d.stage === "locked" && (
-                      <button className="flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground">
-                        <Eye size={14} /> View
-                      </button>
-                    )}
-                  </td>
-                </tr>
-              ))}
-              {filtered.length === 0 && (
-                <tr><td colSpan={6} className="px-5 py-10 text-center text-sm text-muted-foreground">No documents match your filter</td></tr>
-              )}
-            </tbody>
-          </table>
-        </div>
+        <DocumentWorklistTable
+          docs={filtered}
+          clients={clients}
+          isDark={isDark}
+          onReview={onReview}
+        />
       </div>
     </div>
   );

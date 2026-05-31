@@ -12,7 +12,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { tenants } from "./tenants.js";
+import { tenants } from "./tenants";
 
 export const gstDocStageEnum = pgEnum("gst_doc_stage", [
   "stored",
@@ -62,6 +62,29 @@ export const clients = pgTable("clients", {
 }, (t) => ({
   tenantGstinIdx: uniqueIndex("clients_tenant_gstin_uidx").on(t.tenantId, t.gstin),
 }));
+
+/**
+ * Immutable audit log of every edit made to a locked document.
+ * The "current" state lives in gst_documents; each edit here stores the
+ * snapshot that was replaced, so you can browse history or restore.
+ */
+export const documentVersions = pgTable("document_versions", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  documentId: uuid("document_id")
+    .notNull()
+    .references(() => gstDocuments.id, { onDelete: "cascade" }),
+  tenantId: uuid("tenant_id")
+    .notNull()
+    .references(() => tenants.id, { onDelete: "cascade" }),
+  /** Sequential version number for this document. v1 = original locked state. */
+  versionNo: integer("version_no").notNull(),
+  /** Full GSTDocument JSON snapshot (what it looked like before this edit). */
+  snapshot: jsonb("snapshot").notNull(),
+  /** Human-readable summary supplied by the editor ("Corrected taxable value, line 2"). */
+  changeSummary: text("change_summary").default(""),
+  changedBy: text("changed_by").notNull(),
+  changedAt: timestamp("changed_at").defaultNow().notNull(),
+});
 
 export const partyMaster = pgTable(
   "party_master",

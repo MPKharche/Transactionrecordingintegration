@@ -145,6 +145,13 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ reason }),
       }),
+    delete: (id: string) =>
+      request<{ ok: boolean; id: string }>(`/documents/${id}`, { method: "DELETE" }),
+    bulkDelete: (ids: string[]) =>
+      request<{ deleted: string[]; errors: { id: string; error: string }[] }>(
+        "/documents/bulk-delete",
+        { method: "POST", body: JSON.stringify({ ids }) }
+      ),
     previewUrl: (id: string) =>
       request<{ url: string }>(`/documents/${id}/preview-url`),
     upload: async (file: File, clientId: string, docType: string, fy?: string) => {
@@ -233,6 +240,45 @@ export const api = {
         "/compliance/calendar"
       ),
   },
+  versions: {
+    list: (docId: string) =>
+      request<{ id: string; versionNo: number; changeSummary: string | null; changedBy: string; changedAt: string }[]>(
+        `/documents/${docId}/versions`
+      ),
+    load: (docId: string, versionId: string) =>
+      request<GSTDocument>(`/documents/${docId}/versions/${versionId}`),
+    save: (
+      docId: string,
+      doc: Partial<GSTDocument> & { changeSummary?: string }
+    ) =>
+      request<{ doc: GSTDocument; versionNo: number }>(
+        `/documents/${docId}/versions`,
+        { method: "POST", body: JSON.stringify(doc) }
+      ),
+    restore: (docId: string, versionId: string, changeSummary?: string) =>
+      request<{ ok: boolean; versionNo: number }>(
+        `/documents/${docId}/versions/${versionId}/restore`,
+        { method: "POST", body: JSON.stringify({ changeSummary }) }
+      ),
+  },
+  gstin: {
+    lookup: (gstin: string) =>
+      request<{
+        gstin: string;
+        legalName: string;
+        tradeName: string;
+        status: string;
+        registrationDate: string;
+        stateCode: string;
+        state: string;
+        address: string;
+        city: string;
+        pincode: string;
+        pan: string;
+        constitutionOfBusiness: string;
+        source: "cache" | "master" | "portal" | "api";
+      }>(`/gstin/lookup/${encodeURIComponent(gstin)}`),
+  },
 };
 
-export { currentIndianFinancialYear as currentFinancialYear } from "@ca-suite/shared";
+export { currentIndianFinancialYear as currentFinancialYear, listIndianFinancialYears } from "@ca-suite/shared";

@@ -1,7 +1,8 @@
 import { useNavigate, useParams, useLocation } from "react-router";
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { useTheme } from "../hooks/useTheme";
+import { useAppKeyboardShortcuts } from "../hooks/useAppKeyboardShortcuts";
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBanner } from "../components/ui/StatusBanner";
 import { EmptyState } from "../components/ui/EmptyState";
@@ -28,6 +29,8 @@ export function AppShell() {
     bulkLockDocuments,
     rejectDocument,
     retryDocument,
+    deleteDocument,
+    bulkDeleteDocuments,
   } = useAppData();
   const { mode, setMode, isDark } = useTheme();
   const navigate = useNavigate();
@@ -53,6 +56,7 @@ export function AppShell() {
   const reviewId = routeDocId ?? null;
   const selectedClientId = routeClientId ?? null;
   const pending = docs.filter((d) => d.stage === "ready_for_review").length;
+  const mainRef = useRef<HTMLElement>(null);
 
   useEffect(() => {
     if (!loading && !session) navigate("/login");
@@ -82,6 +86,8 @@ export function AppShell() {
     else if (s === "audit") navigate("/audit");
     else if (s === "clients") navigate("/clients");
   }
+
+  useAppKeyboardShortcuts(navTo);
 
   const main =
     loading && docs.length === 0 && clients.length === 0 ? (
@@ -114,21 +120,36 @@ export function AppShell() {
             clients={clients}
             isDark={isDark}
             onReview={openReview}
-            onRetry={retryDocument}
-            onBulkLock={bulkLockDocuments}
+            onDelete={deleteDocument}
           />
         )}
         {screen === "review" && reviewId && (
-          <ReviewScreen
-            docId={reviewId}
-            docs={docs}
-            isDark={isDark}
-            onBack={() => navigate("/records")}
-            partyByGstin={partyByGstin}
-            onPatch={patchDocument}
-            onLock={lockDocument}
-            onReject={rejectDocument}
-          />
+          docs.some((d) => d.id === reviewId) ? (
+            <ReviewScreen
+              docId={reviewId}
+              docs={docs}
+              isDark={isDark}
+              onBack={() => navigate("/records")}
+              partyByGstin={partyByGstin}
+              onPatch={patchDocument}
+              onLock={lockDocument}
+              onReject={rejectDocument}
+            />
+          ) : (
+            <EmptyState
+              title="Document not found"
+              description="This document was removed or the link is outdated."
+              action={
+                <button
+                  type="button"
+                  onClick={() => navigate("/records")}
+                  className="px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-lg"
+                >
+                  Back to Records
+                </button>
+              }
+            />
+          )
         )}
         {screen === "clients" && (
           <ClientsScreen docs={docs} clients={clients} isDark={isDark} onClientClick={openClient} />
@@ -159,6 +180,9 @@ export function AppShell() {
         colorScheme: isDark ? "dark" : "light",
       }}
     >
+      <a href="#main-content" className="skip-link">
+        Skip to main content
+      </a>
       {error && !loading && (
         <StatusBanner variant="warning" message={error} onRetry={() => refresh()} />
       )}
@@ -173,7 +197,12 @@ export function AppShell() {
           userName={session?.name ?? session?.email}
           userRole={session?.role ?? "operator"}
         />
-        <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
+        <main
+          id="main-content"
+          ref={mainRef}
+          tabIndex={-1}
+          className="flex-1 min-h-0 flex flex-col overflow-hidden outline-none"
+        >
           <div
             className={
               screen === "review"

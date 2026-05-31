@@ -7,7 +7,7 @@ import {
   jsonb,
   pgEnum,
 } from "drizzle-orm/pg-core";
-import { tenants, users } from "./tenants.js";
+import { tenants, users } from "./tenants";
 
 export const batchStatusEnum = pgEnum("batch_status", [
   "open",
@@ -44,7 +44,7 @@ export const batches = pgTable("batches", {
   createdById: uuid("created_by_id").references(() => users.id, {
     onDelete: "set null",
   }),
-  source: text("source", { enum: ["telegram", "web", "email"] })
+  source: text("source", { enum: ["telegram", "web", "email", "whatsapp"] })
     .notNull()
     .default("web"),
   telegramChatId: text("telegram_chat_id"),
@@ -74,7 +74,7 @@ export const uploads = pgTable("uploads", {
   contentSha256: text("content_sha256").notNull(),
   storagePath: text("storage_path").notNull(),
   storageUrl: text("storage_url"),
-  source: text("source", { enum: ["telegram", "web", "email"] })
+  source: text("source", { enum: ["telegram", "web", "email", "whatsapp"] })
     .notNull()
     .default("web"),
   telegramFileId: text("telegram_file_id"),

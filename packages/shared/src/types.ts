@@ -20,6 +20,9 @@ export type DocType =
 
 export type ExtractionMethod = "template" | "ai" | "merged" | "manual";
 
+/** Channel through which the original file was received. */
+export type CaptureSource = "web" | "telegram" | "whatsapp" | "email";
+
 export interface Party {
   name: string;
   gstin: string;
@@ -104,6 +107,12 @@ export interface GSTDocument {
   extraction_method: ExtractionMethod;
   issues: FieldWarning[];
   financial_year?: string;
+  /** User who uploaded / captured the file (from upload batch). */
+  uploaded_by?: string;
+  /** ISO timestamp when the file was received in the system. */
+  captured_at?: string;
+  /** Ingest channel — web upload, Telegram bot, WhatsApp, email. */
+  capture_source?: CaptureSource;
   storage_path?: string;
   /** Purchase docs: claim input tax credit when true */
   itc_eligible?: boolean;

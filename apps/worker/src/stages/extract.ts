@@ -92,7 +92,15 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
 
   let result: ExtractorResponse;
   try {
-    const docTypeHint = targetDoc?.docType ?? upload.docType ?? "";
+    // For segments beyond the first in a multi-document PDF (segmentIndex > 0),
+    // or when the upload type is unknown/auto, pass an empty hint so the
+    // extractor auto-detects the type rather than being forced into the wrong type.
+    const isNonPrimarySegment = (targetDoc?.segmentIndex ?? 0) > 0;
+    const uploadTypeIsAuto = !upload.docType || upload.docType === "unknown";
+    const docTypeHint =
+      isNonPrimarySegment || uploadTypeIsAuto
+        ? ""
+        : (targetDoc?.docType ?? upload.docType ?? "");
     result = await callExtractorResilient(
       upload.storagePath,
       ocrText,

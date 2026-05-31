@@ -28,7 +28,7 @@
     "db:seed": "tsx scripts/seed-demo.ts",
     "db:clear": "tsx scripts/db-clear-demo.ts",
     "db:wipe": "tsx scripts/db-wipe-all.ts",
-    "db:reset": "pnpm db:clear && pnpm db:seed",
+    "db:reset": "pnpm db:clear",
     "minio:clear": "tsx scripts/clear-minio.ts",
     "queue:flush": "node scripts/flush-pipeline-queue.mjs",
     "prod:bootstrap": "node scripts/prod-bootstrap.mjs",
