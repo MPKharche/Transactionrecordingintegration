@@ -15,7 +15,7 @@ DEPLOY_TARGET="${DEPLOY_TARGET:-standalone}"
 case "$DEPLOY_TARGET" in
   vps|VPS)
     export COMPOSE_FILE="infra/docker-compose.yml:infra/docker-compose.vps.yml"
-    APP_HTTP_URL="${APP_HTTP_URL:-http://127.0.0.1:3080}"
+    APP_HTTP_URL="${APP_HTTP_URL:-http://127.0.0.1:4000}"
     ;;
   standalone|STANDALONE|"")
     export COMPOSE_FILE="infra/docker-compose.yml"

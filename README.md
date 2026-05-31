@@ -126,6 +126,8 @@ Must match `API_PUBLIC_URL` (same scheme and host).
 
 ---
 
+**Vercel UI + VPS API:** [`docs/VERCEL-FRONTEND.md`](docs/VERCEL-FRONTEND.md) — use when frontend is only on Vercel.
+
 **More:** [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`docs/DEPLOYMENT_FIXES.md`](docs/DEPLOYMENT_FIXES.md) · **Updates:** `git pull` then `./scripts/deploy.sh`
 
 ## Local dev
