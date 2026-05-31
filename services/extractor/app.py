@@ -79,6 +79,7 @@ class DetectInvoicesRequest(BaseModel):
     storage_path: str
     mime_type: str = ""
     pages: list[dict] = []
+    prefer_heuristic: bool = False
 
 
 class InvoiceSegment(BaseModel):
@@ -297,8 +298,20 @@ async def detect_invoices(req: DetectInvoicesRequest):
     if file_bytes and not pages:
         pages = pdf_pages_from_bytes(file_bytes)
 
+    page_count = len(pages) or (1 if file_bytes else 0)
+    split_heuristic_threshold = int(os.environ.get("SPLIT_HEURISTIC_PAGE_THRESHOLD", "6"))
+
     segments: list[dict] = []
-    if openrouter_only() and OPENROUTER_API_KEY:
+
+    if req.prefer_heuristic and pages:
+        segments = detect_invoice_segments_heuristic(pages)
+        log.info("Heuristic split (requested): %d segment(s)", len(segments))
+
+    if not segments and pages and page_count >= split_heuristic_threshold:
+        segments = detect_invoice_segments_heuristic(pages)
+        log.info("Heuristic split (>= %d pages): %d segment(s)", split_heuristic_threshold, len(segments))
+
+    if not segments and openrouter_only() and OPENROUTER_API_KEY and not req.prefer_heuristic:
         try:
             segments = await llm_detect_segments(pages)
             log.info("LLM split: %d segment(s)", len(segments))
@@ -306,19 +319,20 @@ async def detect_invoices(req: DetectInvoicesRequest):
             log.error("LLM split failed: %s", e)
             segments = []
 
+    if not segments and pages:
+        segments = detect_invoice_segments_heuristic(pages)
+        log.info("Heuristic split (fallback): %d segment(s)", len(segments))
+
     if not segments:
-        if openrouter_only():
-            max_page = max((int(p.get("page") or 1) for p in pages), default=1)
-            segments = [
-                {
-                    "pageStart": 1,
-                    "pageEnd": max_page,
-                    "billNumber": None,
-                    "confidence": "low",
-                }
-            ]
-        else:
-            segments = detect_invoice_segments_heuristic(pages)
+        max_page = max((int(p.get("page") or 1) for p in pages), default=1)
+        segments = [
+            {
+                "pageStart": 1,
+                "pageEnd": max_page,
+                "billNumber": None,
+                "confidence": "low",
+            }
+        ]
 
     return DetectInvoicesResponse(
         segments=[InvoiceSegment(**s) for s in segments]

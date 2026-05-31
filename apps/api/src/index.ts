@@ -219,13 +219,14 @@ export async function buildApp() {
   await app.register(multipart, { limits: { fileSize: 50 * 1024 * 1024 } });
 
   app.addHook("preHandler", async (req, reply) => {
+    const urlPath = req.url.split("?")[0] ?? req.url;
     const open =
-      req.url.startsWith("/api/health") ||
-      req.url.startsWith("/api/auth/google") ||
-      req.url.startsWith("/api/auth/config") ||
-      req.url.startsWith("/api/auth/dev-login") ||
-      req.url.startsWith("/api/auth/session") ||
-      req.url.startsWith("/api/auth/logout");
+      urlPath.startsWith("/api/health") ||
+      urlPath.startsWith("/api/auth/google") ||
+      urlPath.startsWith("/api/auth/config") ||
+      urlPath.startsWith("/api/auth/dev-login") ||
+      urlPath.startsWith("/api/auth/session") ||
+      urlPath.startsWith("/api/auth/logout");
     if (open) return;
     const ctx = await resolveAuth(req);
     if (!ctx) {
@@ -1292,6 +1293,44 @@ export async function buildApp() {
   );
 
   app.get<{ Params: { id: string } }>(
+    "/api/documents/:id/file",
+    async (req, reply) => {
+      const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
+      const [row] = await db
+        .select()
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.id, req.params.id),
+            eq(gstDocuments.tenantId, tenantId)
+          )
+        )
+        .limit(1);
+      if (!row?.storagePath) return reply.status(404).send({ error: "Not found" });
+
+      const [upload] = await db
+        .select({ mimeType: uploads.mimeType })
+        .from(uploads)
+        .where(eq(uploads.id, row.uploadId!))
+        .limit(1);
+
+      const { getObjectStream, statObject } = await import("./lib/minio.js");
+      const stat = await statObject(row.storagePath);
+      const stream = await getObjectStream(row.storagePath);
+      const mime =
+        upload?.mimeType ||
+        (stat.metaData?.["content-type"] as string | undefined) ||
+        "application/octet-stream";
+
+      return reply
+        .header("Content-Type", mime)
+        .header("Content-Disposition", `inline; filename="${encodeURIComponent(row.filename)}"`)
+        .header("Cache-Control", "private, max-age=3600")
+        .send(stream);
+    }
+  );
+
+  app.get<{ Params: { id: string } }>(
     "/api/documents/:id/preview-url",
     async (req, reply) => {
       const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
@@ -1306,8 +1345,8 @@ export async function buildApp() {
         )
         .limit(1);
       if (!row) return reply.status(404).send({ error: "Not found" });
-      const { presignedGet } = await import("./lib/minio.js");
-      let url = await presignedGet(row.storagePath);
+      // Same-origin HTTPS proxy — avoids mixed content (http://minio:9000) in browser iframe
+      let url = `/api/documents/${req.params.id}/file`;
       if (row.pageStart != null && row.pageStart > 0) {
         url = `${url}#page=${row.pageStart}`;
       }

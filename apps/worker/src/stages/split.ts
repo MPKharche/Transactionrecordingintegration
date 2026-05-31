@@ -5,11 +5,12 @@ import { Job } from "bullmq";
 import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
 import { gstDocuments, uploads } from "@ca-suite/db";
-import { eq, asc } from "drizzle-orm";
+import { eq, asc, and } from "drizzle-orm";
 import { isUploadPastStage } from "@ca-suite/shared";
 import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import { callDetectInvoices } from "../lib/extractor-client.js";
 import { enqueuePipelineStage } from "../lib/pipeline-queue.js";
+import { pipelineJobs } from "@ca-suite/db";
 
 type Segment = { pageStart: number; pageEnd: number; billNumber?: string | null };
 
@@ -25,18 +26,49 @@ export async function splitStage(
   }
 
   const ocrOut = (job.data as { ocrPages?: { page: number; text: string }[] }).ocrPages;
+  let ocrPages = ocrOut ?? [];
+  if (ocrPages.length === 0) {
+    const [ocrJob] = await db
+      .select({ output: pipelineJobs.output })
+      .from(pipelineJobs)
+      .where(and(eq(pipelineJobs.uploadId, uploadId), eq(pipelineJobs.stage, "ocr")))
+      .limit(1);
+    const out = ocrJob?.output as { pages?: { page: number; text: string }[] } | null;
+    ocrPages = out?.pages ?? [];
+  }
+
   let segments: Segment[] = [];
 
+  async function detect(preferHeuristic: boolean) {
+    const detected = await callDetectInvoices(upload.storagePath, upload.mimeType, ocrPages, {
+      preferHeuristic,
+      timeoutMs: preferHeuristic ? 120_000 : undefined,
+    });
+    return detected.segments ?? [];
+  }
+
   try {
-    const detected = await callDetectInvoices(upload.storagePath, upload.mimeType, ocrOut ?? []);
-    segments = detected.segments ?? [];
+    segments = await detect(false);
   } catch (err) {
-    console.warn("[split] detect failed, single segment:", err);
-    segments = [{ pageStart: 1, pageEnd: 1 }];
+    console.warn("[split] detect failed, retrying heuristic:", err);
+    try {
+      segments = await detect(true);
+    } catch (err2) {
+      console.warn("[split] heuristic detect failed:", err2);
+    }
   }
 
   if (segments.length === 0) {
-    segments = [{ pageStart: 1, pageEnd: 1 }];
+    const maxPage = ocrPages.length > 0 ? Math.max(...ocrPages.map((p) => p.page)) : 1;
+    segments = [{ pageStart: 1, pageEnd: maxPage }];
+  }
+
+  if (segments.length === 1 && segments[0].pageEnd === 1 && ocrPages.length > 1) {
+    const maxPage = Math.max(...ocrPages.map((p) => p.page));
+    if (maxPage > 1) {
+      console.warn("[split] single page segment on multi-page PDF — expanding to full range");
+      segments = [{ pageStart: 1, pageEnd: maxPage }];
+    }
   }
 
   const docs = await db

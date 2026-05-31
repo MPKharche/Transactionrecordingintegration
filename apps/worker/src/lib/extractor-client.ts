@@ -89,21 +89,30 @@ export type InvoiceSegmentResult = {
   confidence?: string;
 };
 
+const DETECT_TIMEOUT_MS = parseInt(process.env.DETECT_INVOICES_TIMEOUT_MS ?? "240000", 10);
+
 export async function callDetectInvoices(
   storagePath: string,
   mimeType: string,
-  pages: { page: number; text: string }[] = []
+  pages: { page: number; text: string }[] = [],
+  options: { preferHeuristic?: boolean; timeoutMs?: number } = {}
 ): Promise<{ segments: InvoiceSegmentResult[] }> {
   const headers = {
     "Content-Type": "application/json",
     ...(EXTRACTOR_SECRET ? { Authorization: `Bearer ${EXTRACTOR_SECRET}` } : {}),
   };
   const origin = (await resolveExtractEndpoint()).replace(/\/extract$/, "");
+  const timeoutMs = options.timeoutMs ?? DETECT_TIMEOUT_MS;
   const res = await fetch(`${origin}/detect-invoices`, {
     method: "POST",
     headers,
-    body: JSON.stringify({ storage_path: storagePath, mime_type: mimeType, pages }),
-    signal: AbortSignal.timeout(90_000),
+    body: JSON.stringify({
+      storage_path: storagePath,
+      mime_type: mimeType,
+      pages,
+      prefer_heuristic: options.preferHeuristic === true,
+    }),
+    signal: AbortSignal.timeout(timeoutMs),
   });
   if (!res.ok) {
     const text = await res.text();
