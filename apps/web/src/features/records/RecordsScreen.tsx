@@ -1,10 +1,12 @@
-import { useState, useRef, useMemo, useEffect, useCallback } from "react";
+import { useState, useRef, useMemo, useCallback } from "react";
 import type { Client, GSTDocument, DocType } from "@ca-suite/shared";
 import {
   documentInRecordsScope,
   effectiveDocumentFinancialYear,
   currentIndianFinancialYear,
   listIndianFinancialYears,
+  reconcileOtherCharges,
+  sumLineTotals,
 } from "@ca-suite/shared";
 import { DocTypeBadge } from "../../components/badges/DocTypeBadge";
 import { CopyBtn } from "../../components/ui/CopyBtn";
@@ -16,7 +18,7 @@ import { api } from "../../lib/api";
 import {
   Search, Download, ExternalLink, Building2, ChevronDown,
   ChevronRight, Pencil, Trash2, History, RotateCcw, X, Check,
-  AlertTriangle, Info,
+  AlertTriangle, Info, Eye,
 } from "lucide-react";
 import { handleTabListKeyDown } from "../../lib/a11y";
 import { VersionHistoryModal } from "./VersionHistoryModal";
@@ -73,6 +75,15 @@ function fuzzyScore(doc: GSTDocument, q: string): number {
   return score;
 }
 
+function docOtherCharges(d: GSTDocument): number {
+  const stored = d.other_charges_tcs ?? 0;
+  if (Math.abs(stored) > 0.005) return stored;
+  const linesSub = d.lines?.length ? sumLineTotals(d.lines) : d.taxable_amount + d.igst + d.cgst + d.sgst;
+  return reconcileOtherCharges(d.total, linesSub);
+}
+
+const TABLE_COLS = 11;
+
 // ─── Compact party column ────────────────────────────────────────────────────
 function PartyChip({ name, gstin, city }: { name: string; gstin?: string; city?: string }) {
   return (
@@ -121,7 +132,7 @@ function ExpandedDetail({
 
   return (
     <tr className="bg-muted/20">
-      <td colSpan={9} className="px-0 py-0">
+      <td colSpan={TABLE_COLS} className="px-0 py-0">
         <div className="mx-0 border-t border-border/50 px-3 py-2 text-xs">
 
           {/* Supplier + Buyer side by side */}
@@ -246,33 +257,8 @@ export function RecordsScreen({
     [docs, clientId, financialYear]
   );
 
-  const clientLockedDocs = useMemo(
-    () => docs.filter((d) => d.client_id === clientId && d.stage === "locked"),
-    [docs, clientId]
-  );
-
-  useEffect(() => {
-    if (fyScoped.length > 0 || clientLockedDocs.length === 0) return;
-    const counts = new Map<string, number>();
-    for (const d of clientLockedDocs) {
-      const fy = effectiveDocumentFinancialYear(d) || financialYear;
-      counts.set(fy, (counts.get(fy) ?? 0) + 1);
-    }
-    const best = [...counts.entries()].sort((a, b) => b[1] - a[1])[0]?.[0];
-    if (best && best !== financialYear) setFinancialYear(best);
-  }, [clientId, clientLockedDocs, fyScoped.length, financialYear]);
-
   const filtered = useMemo(() => {
-    let base = fyScoped.filter((d) => {
-      if (docTab !== "all") {
-        if (!["debit_note_issued","debit_note_received"].includes(d.doc_type) && docTab === "debit_note_issued" && d.doc_type !== "debit_note_issued") return false;
-        if (!["credit_note_issued","credit_note_received"].includes(d.doc_type) && docTab === "credit_note_issued" && d.doc_type !== "credit_note_issued") return false;
-        if (!["debit_note_issued","debit_note_received","credit_note_issued","credit_note_received"].includes(docTab as string)) {
-          if (d.doc_type !== docTab) return false;
-        }
-      }
-      return true;
-    });
+    let base = fyScoped.filter((d) => docTab === "all" || d.doc_type === docTab);
 
     if (!search.trim()) return base.sort((a, b) => (b.doc_date ?? "").localeCompare(a.doc_date ?? ""));
 
@@ -286,22 +272,14 @@ export function RecordsScreen({
 
   const totals = useMemo(() => ({
     taxable: filtered.reduce((s, d) => s + d.taxable_amount, 0),
-    igst:    filtered.reduce((s, d) => s + d.igst, 0),
-    cgst:    filtered.reduce((s, d) => s + d.cgst, 0),
-    sgst:    filtered.reduce((s, d) => s + d.sgst, 0),
-    total:   filtered.reduce((s, d) => s + d.total, 0),
+    tax: filtered.reduce((s, d) => s + d.igst + d.cgst + d.sgst, 0),
+    other: filtered.reduce((s, d) => s + docOtherCharges(d), 0),
+    total: filtered.reduce((s, d) => s + d.total, 0),
   }), [filtered]);
 
   const tabCount = (id: DocType | "all") => {
     if (id === "all") return fyScoped.length;
-    const isDN = id === "debit_note_issued";
-    const isCN = id === "credit_note_issued";
-    return fyScoped.filter(
-      (d) =>
-        d.doc_type === id ||
-        (isDN && d.doc_type === "debit_note_received") ||
-        (isCN && d.doc_type === "credit_note_received")
-    ).length;
+    return fyScoped.filter((d) => d.doc_type === id).length;
   };
 
   const toggleRow = (id: string) => setExpandedId(prev => prev === id ? null : id);
@@ -330,10 +308,10 @@ export function RecordsScreen({
             onClick={() => {
               const cp = (d: GSTDocument) => getCounterParty(d);
               exportCSV(`records_${clientId}_${financialYear}.csv`,
-                ["#","Doc Number","Date","Type","Counter-party","GSTIN","Taxable","IGST","CGST+SGST","Total","FY","Uploaded","Source"],
+                ["#","Doc Number","Date","Type","Counter-party","GSTIN","Taxable","Tax","Other","Total","FY","Uploaded","Source"],
                 filtered.map((d, i) => {
                   const eff = effectiveDocumentFinancialYear(d);
-                  return [i+1, d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type]?.label ?? d.doc_type, cp(d).name, cp(d).gstin, d.taxable_amount, d.igst, d.cgst+d.sgst, d.total, eff ?? financialYear, formatCapturedAt(d.captured_at), d.capture_source ? CAPTURE_SOURCE_LABELS[d.capture_source] : ""];
+                  return [i+1, d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type]?.label ?? d.doc_type, cp(d).name, cp(d).gstin, d.taxable_amount, d.igst+d.cgst+d.sgst, docOtherCharges(d), d.total, eff ?? financialYear, formatCapturedAt(d.captured_at), d.capture_source ? CAPTURE_SOURCE_LABELS[d.capture_source] : ""];
                 })
               );
             }}
@@ -379,13 +357,14 @@ export function RecordsScreen({
       </div>
 
       {/* KPI cards */}
-      <div className="grid grid-cols-2 sm:grid-cols-4 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-5 gap-3">
         {[
-          { label: "Documents",   value: String(filtered.length) },
-          { label: "Taxable",     value: INR_SIGNED(totals.taxable) },
-          { label: "Total Tax",   value: INR_SIGNED(totals.igst + totals.cgst + totals.sgst) },
+          { label: "Documents", value: String(filtered.length) },
+          { label: "Taxable", value: INR_SIGNED(totals.taxable) },
+          { label: "Total Tax", value: INR_SIGNED(totals.tax) },
+          { label: "Other charges", value: INR_SIGNED(totals.other) },
           { label: "Grand Total", value: INR_SIGNED(totals.total) },
-        ].map(k => (
+        ].map((k) => (
           <div key={k.label} className="bg-card border border-border rounded-xl px-4 py-3 shadow-sm">
             <p className="text-xs text-muted-foreground">{k.label}</p>
             <p className="text-lg font-bold font-mono text-foreground mt-1">{k.value}</p>
@@ -451,15 +430,17 @@ export function RecordsScreen({
           <thead>
             <tr className="border-b border-border bg-muted/50">
               {[
-                { label: "#",            align: "left",  w: "w-8"   },
-                { label: "",             align: "left",  w: "w-6"   },  // expand chevron
-                { label: "Doc Number",   align: "left",  w: ""      },
-                { label: "Date",         align: "left",  w: ""      },
-                { label: "Type",         align: "left",  w: ""      },
-                { label: "Counter-party",align: "left",  w: ""      },
-                { label: "Taxable",      align: "right", w: ""      },
-                { label: "Tax",          align: "right", w: ""      },
-                { label: "Total",        align: "right", w: ""      },
+                { label: "#", align: "left", w: "w-8" },
+                { label: "", align: "left", w: "w-6" },
+                { label: "Doc Number", align: "left", w: "" },
+                { label: "Date", align: "left", w: "" },
+                { label: "Type", align: "left", w: "" },
+                { label: "Counter-party", align: "left", w: "" },
+                { label: "Taxable", align: "right", w: "" },
+                { label: "Tax", align: "right", w: "" },
+                { label: "Other", align: "right", w: "" },
+                { label: "Total", align: "right", w: "" },
+                { label: "", align: "right", w: "w-16" },
               ].map((h, i) => (
                 <th
                   key={i}
@@ -473,8 +454,8 @@ export function RecordsScreen({
           <tbody className="divide-y divide-border">
             {filtered.length === 0 && (
               <tr>
-                <td colSpan={9} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                  No locked records for this client and FY. Lock documents from Upload after review.
+                <td colSpan={TABLE_COLS} className="px-5 py-8 text-center text-sm text-muted-foreground">
+                  No locked records for FY {financialYear} on this tab. Try another FY or document type.
                 </td>
               </tr>
             )}
@@ -488,15 +469,21 @@ export function RecordsScreen({
                 <>
                   <tr
                     key={d.id}
-                    onClick={() => toggleRow(d.id)}
-                    className={`cursor-pointer transition-colors ${isExpanded ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                    className={`transition-colors ${isExpanded ? "bg-primary/5" : "hover:bg-muted/30"}`}
                   >
                     <td className="px-2 py-1.5 text-xs text-muted-foreground">{idx + 1}</td>
                     <td className="px-1 py-1.5 text-muted-foreground">
-                      <ChevronRight
-                        size={13}
-                        className={`transition-transform ${isExpanded ? "rotate-90" : ""}`}
-                      />
+                      <button
+                        type="button"
+                        aria-label={isExpanded ? "Collapse row" : "Expand row"}
+                        onClick={() => toggleRow(d.id)}
+                        className="p-0.5 rounded hover:bg-muted/60"
+                      >
+                        <ChevronRight
+                          size={13}
+                          className={`transition-transform ${isExpanded ? "rotate-90" : ""}`}
+                        />
+                      </button>
                     </td>
                     <td className="px-2 py-1.5">
                       <div className="flex items-center gap-1.5">
@@ -522,7 +509,20 @@ export function RecordsScreen({
                     <td className="px-2 py-1.5 font-mono text-xs text-right whitespace-nowrap tabular-nums" style={{ color: isDark ? "#a78bfa" : "#6941c6" }}>
                       {INR(d.igst + d.cgst + d.sgst)}
                     </td>
+                    <td className="px-2 py-1.5 font-mono text-xs text-right whitespace-nowrap tabular-nums text-muted-foreground">
+                      {Math.abs(docOtherCharges(d)) > 0.005 ? INR(docOtherCharges(d)) : "—"}
+                    </td>
                     <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-foreground whitespace-nowrap tabular-nums">{INR(d.total)}</td>
+                    <td className="px-2 py-1.5 text-right">
+                      <button
+                        type="button"
+                        title="Open invoice details"
+                        onClick={() => onReview(d.id)}
+                        className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 font-medium transition-colors"
+                      >
+                        <Eye size={12} /> View
+                      </button>
+                    </td>
                   </tr>
                   {isExpanded && (
                     <ExpandedDetail
@@ -548,9 +548,11 @@ export function RecordsScreen({
                 </td>
                 <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-foreground tabular-nums">{INR_SIGNED(totals.taxable)}</td>
                 <td className="px-2 py-1.5 font-mono text-xs font-bold text-right tabular-nums" style={{ color: isDark ? "#a78bfa" : "#6941c6" }}>
-                  {INR_SIGNED(totals.igst + totals.cgst + totals.sgst)}
+                  {INR_SIGNED(totals.tax)}
                 </td>
+                <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-muted-foreground tabular-nums">{INR_SIGNED(totals.other)}</td>
                 <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-foreground tabular-nums">{INR_SIGNED(totals.total)}</td>
+                <td />
               </tr>
             </tfoot>
           )}
