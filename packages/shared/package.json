@@ -8,5 +8,8 @@
     "./server": "./src/server.ts",
     "./types": "./src/types.ts",
     "./validators": "./src/validators.ts"
+  },
+  "dependencies": {
+    "decimal.js": "^10.6.0"
   }
 }

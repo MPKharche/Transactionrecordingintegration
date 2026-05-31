@@ -5,4 +5,5 @@ export * from "./pipeline-stages.js";
 export * from "./duplicate-policy.js";
 export * from "./field-confidence.js";
 export * from "./gstr-readiness.js";
+export * from "./invoice-totals.js";
 export * from "./masters.js";

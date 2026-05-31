@@ -8,7 +8,7 @@ import { INR } from "../../lib/format";
 import { lineGrossQtyRate, recalcLineItem } from "../../lib/line-items";
 import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
 import { isValidGSTIN } from "../../lib/validators-local";
-import { validateGstDocument, applyDocumentTaxFromPos, computeDocumentCompleteness, computeGstrReadiness } from "@ca-suite/shared";
+import { validateGstDocument, applyDocumentTaxFromPos, computeDocumentCompleteness, computeGstrReadiness, reconcileOtherCharges, invoiceTotalsMatch } from "@ca-suite/shared";
 import { useAppData } from "../../context/AppDataContext";
 import { MasterCombobox } from "../../components/ui/MasterCombobox";
 import { EnumSelect } from "../../components/ui/EnumSelect";
@@ -63,6 +63,8 @@ export function ReviewScreen({
   const [isDirty, setIsDirty] = useState(false);
   const autoSaveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const loadedDocIdRef = useRef<string | null>(null);
+  const otherChargesManualRef = useRef(false);
+  const otherChargesManualAtTotalRef = useRef<number | null>(null);
   const rejectPanelRef = useRef<HTMLDivElement>(null);
   const [previewUrl, setPreviewUrl] = useState<string | null>(null);
   const [supplier, setSupplier] = useState<Party>(doc.supplier);
@@ -81,6 +83,8 @@ export function ReviewScreen({
   const [supplyType, setSupplyType] = useState(doc.supply_type);
   const [itcEligible, setItcEligible] = useState(doc.itc_eligible !== false);
   const [docType, setDocType] = useState<DocType>(doc.doc_type);
+  /** Printed invoice total from the document (PDF); used to balance TCS / other charges. */
+  const [documentTotalTarget, setDocumentTotalTarget] = useState(doc.total);
   const isPurchase =
     docType === "purchase_invoice" ||
     docType === "debit_note_received" ||
@@ -200,11 +204,18 @@ export function ReviewScreen({
 
     if (loadedDocIdRef.current !== docId) {
       loadedDocIdRef.current = docId;
+      otherChargesManualRef.current = false;
+      otherChargesManualAtTotalRef.current = null;
       setLocked(d.stage === "locked");
       setRejected(d.stage === "rejected");
       setSupplier(d.supplier);
       setRecipient(d.recipient);
-      setLines(d.lines.length ? d.lines.map(recalcLineItem) : []);
+      const loadedLines = d.lines.length ? d.lines.map(recalcLineItem) : [];
+      setLines(loadedLines);
+      const linesSubtotal = loadedLines.reduce((s, l) => s + l.total, 0);
+      const targetTotal = d.total;
+      setDocumentTotalTarget(targetTotal);
+      const reconciledOther = targetTotal > 0 ? reconcileOtherCharges(targetTotal, linesSubtotal) : (d.other_charges_tcs ?? 0);
       setDocMeta({
         doc_number: d.doc_number === "—" ? "" : d.doc_number,
         doc_date: d.doc_date,
@@ -213,13 +224,13 @@ export function ReviewScreen({
         irn_hash: d.irn_hash ?? "",
         ack_number: d.ack_number ?? "",
         ack_date: d.ack_date ?? "",
-        other_charges_tcs: d.other_charges_tcs ?? 0,
+        other_charges_tcs: reconciledOther,
       });
       setSupplyType(d.supply_type);
       setItcEligible(d.itc_eligible !== false);
       setDocType(d.doc_type);
       setActionError("");
-      setIsDirty(false);
+      setIsDirty(reconciledOther !== (d.other_charges_tcs ?? 0));
       setSavedAt(null);
       return;
     }
@@ -227,6 +238,22 @@ export function ReviewScreen({
     setLocked(d.stage === "locked");
     setRejected(d.stage === "rejected");
   }, [docId, docs]);
+
+  // Re-balance TCS / other charges when line totals change (qty, rate, GST slab, etc.)
+  useEffect(() => {
+    if (!documentTotalTarget) return;
+    if (
+      otherChargesManualRef.current &&
+      otherChargesManualAtTotalRef.current != null &&
+      otherChargesManualAtTotalRef.current === computedTotal
+    ) {
+      return;
+    }
+    otherChargesManualRef.current = false;
+    otherChargesManualAtTotalRef.current = null;
+    const other = reconcileOtherCharges(documentTotalTarget, computedTotal);
+    setDocMeta((p) => (p.other_charges_tcs === other ? p : { ...p, other_charges_tcs: other }));
+  }, [documentTotalTarget, computedTotal]);
 
   // Auto-save 4 s after last edit
   useEffect(() => {
@@ -257,10 +284,11 @@ export function ReviewScreen({
       igst: lines.reduce((s, l) => s + l.igst, 0),
       cgst: lines.reduce((s, l) => s + l.cgst, 0),
       sgst: lines.reduce((s, l) => s + l.sgst, 0),
-      total: computedTotal,
+      other_charges_tcs: docMeta.other_charges_tcs,
+      total: computedTotal + docMeta.other_charges_tcs,
       issues: [],
-    }).filter((i) => i.severity === "error");
-  }, [locked, docMeta, supplier, recipient, lines, supplyType, itcEligible, docType, computedTaxable, computedTotal]);
+    }, { documentTotal: documentTotalTarget > 0 ? documentTotalTarget : undefined }).filter((i) => i.severity === "error");
+  }, [locked, lockedEditMode, docMeta, supplier, recipient, lines, supplyType, itcEligible, docType, computedTaxable, computedTotal, documentTotalTarget]);
 
   const liveWarnings = useMemo<FieldWarning[]>(() => {
     if (locked && !lockedEditMode) return [];
@@ -279,9 +307,10 @@ export function ReviewScreen({
       igst: lines.reduce((s, l) => s + l.igst, 0),
       cgst: lines.reduce((s, l) => s + l.cgst, 0),
       sgst: lines.reduce((s, l) => s + l.sgst, 0),
-      total: computedTotal,
+      other_charges_tcs: docMeta.other_charges_tcs,
+      total: computedTotal + docMeta.other_charges_tcs,
       issues: [],
-    }).filter((i) => i.severity === "warning");
+    }, { documentTotal: documentTotalTarget > 0 ? documentTotalTarget : undefined }).filter((i) => i.severity === "warning");
     const w: FieldWarning[] = [...gst];
     if (supplier.gstin && isValidGSTIN(supplier.gstin)) {
       const master = partyByGstin[supplier.gstin.toUpperCase()];
@@ -313,6 +342,7 @@ export function ReviewScreen({
     docType,
     computedTaxable,
     computedTotal,
+    documentTotalTarget,
     partyByGstin,
   ]);
 
@@ -902,9 +932,24 @@ export function ReviewScreen({
           <div>
             <label className="block text-[11px] font-medium text-muted-foreground mb-0.5">TCS / Other charges (₹)</label>
             <input type="number" disabled={locked && !lockedEditMode} value={docMeta.other_charges_tcs || ""}
-              onChange={(e) => { setDocMeta((p) => ({ ...p, other_charges_tcs: parseFloat(e.target.value) || 0 })); setIsDirty(true); }}
+              onChange={(e) => {
+                otherChargesManualRef.current = true;
+                otherChargesManualAtTotalRef.current = computedTotal;
+                setDocMeta((p) => ({ ...p, other_charges_tcs: parseFloat(e.target.value) || 0 }));
+                setIsDirty(true);
+              }}
               className={inpCls("other_charges_tcs")} />
             <FieldHint fieldKey="other_charges_tcs" completeness={fieldMap} />
+            {documentTotalTarget > 0 && docMeta.other_charges_tcs !== 0 && invoiceTotalsMatch(documentTotalTarget, computedTotal, docMeta.other_charges_tcs) && (
+              <p className="text-[10px] text-muted-foreground mt-0.5">
+                Document total {INR(documentTotalTarget)} — {INR(docMeta.other_charges_tcs)} allocated here to match PDF
+              </p>
+            )}
+            {documentTotalTarget > 0 && !invoiceTotalsMatch(documentTotalTarget, computedTotal, docMeta.other_charges_tcs) && (
+              <p className="text-[10px] text-amber-600 dark:text-amber-400 mt-0.5">
+                Document total {INR(documentTotalTarget)} ≠ line total {INR(computedTotal + docMeta.other_charges_tcs)}
+              </p>
+            )}
           </div>
           <div className="col-span-2 sm:col-span-3 lg:col-span-5 pt-1 border-t border-border">
             <div className="flex items-center justify-between">

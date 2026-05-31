@@ -11,7 +11,7 @@ import {
   gstDocuments,
 } from "@ca-suite/db";
 import { eq } from "drizzle-orm";
-import { computeDocumentCompleteness } from "@ca-suite/shared";
+import { computeDocumentCompleteness, reconcileOtherCharges } from "@ca-suite/shared";
 import type { ExtractorResponse } from "@ca-suite/zoho-schema";
 import { mapGstRowToDocument } from "./map-gst-doc.js";
 
@@ -330,6 +330,13 @@ export async function syncGstFromExtractor(
       taxable = lineRows.reduce((s, l) => s + parseNum(l.taxable), 0);
     }
     if (!total) total = taxable + igst + cgst + sgst + otherChargesTcs;
+  }
+
+  const linesSubtotal = lineRows.reduce((s, l) => s + parseNum(l.total), 0);
+  if (total > 0 && linesSubtotal > 0) {
+    otherChargesTcs = reconcileOtherCharges(total, linesSubtotal);
+  } else if (!total && linesSubtotal > 0) {
+    total = linesSubtotal + otherChargesTcs;
   }
 
   supplyType = inferSupplyType(supplier.state_code, recipient.state_code);

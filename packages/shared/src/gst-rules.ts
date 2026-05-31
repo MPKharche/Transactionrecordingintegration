@@ -111,8 +111,9 @@ export function validateGstDocument(
     | "cgst"
     | "sgst"
     | "total"
+    | "other_charges_tcs"
   >,
-  opts?: { clientGstin?: string; existingLockedNumbers?: string[] }
+  opts?: { clientGstin?: string; existingLockedNumbers?: string[]; documentTotal?: number }
 ): FieldWarning[] {
   const issues: FieldWarning[] = [];
 
@@ -254,6 +255,20 @@ export function validateGstDocument(
       severity: "warning",
       message: "ITC marked ineligible — will exclude from purchase register ITC column",
     });
+  }
+
+  const documentTotal = opts?.documentTotal;
+  if (documentTotal != null && documentTotal > 0 && doc.lines.length > 0) {
+    const linesSubtotal = doc.lines.reduce((s: number, l: LineItem) => s + l.total, 0);
+    const other = doc.other_charges_tcs ?? 0;
+    const appTotal = linesSubtotal + other;
+    if (Math.abs(appTotal - documentTotal) > 0.01) {
+      issues.push({
+        field: "total",
+        severity: "warning",
+        message: `Invoice total (${appTotal.toFixed(2)}) does not match document (${documentTotal.toFixed(2)}) — adjust TCS / other charges`,
+      });
+    }
   }
 
   return issues;
