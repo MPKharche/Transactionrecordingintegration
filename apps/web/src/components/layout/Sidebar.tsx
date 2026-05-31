@@ -7,7 +7,10 @@ import {
   Shield,
   ReceiptText,
   LogOut,
+  ChevronLeft,
+  ChevronRight,
 } from "lucide-react";
+import { useEffect, useState } from "react";
 import type { ThemeMode } from "../../hooks/useTheme";
 import { ThemeToggle } from "./ThemeToggle";
 import { api } from "../../lib/api";
@@ -42,6 +45,13 @@ export function Sidebar({
   userRole?: string;
 }) {
   const navigate = useNavigate();
+  const isReview = screen === "review";
+  const [collapsed, setCollapsed] = useState(isReview);
+
+  useEffect(() => {
+    if (isReview) setCollapsed(true);
+  }, [isReview]);
+
   const NAV = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "upload", label: "Upload", icon: Upload },
@@ -65,20 +75,38 @@ export function Sidebar({
   }
 
   return (
-    <aside className="w-56 shrink-0 flex flex-col border-r border-border bg-sidebar h-screen sticky top-0">
-      <div className="px-5 py-5 border-b border-sidebar-border">
-        <div className="flex items-center gap-3">
+    <aside
+      className={`shrink-0 flex flex-col border-r border-border bg-sidebar h-screen sticky top-0 transition-[width] duration-200 ${
+        collapsed ? "w-[4.25rem]" : "w-56"
+      }`}
+    >
+      <div className={`border-b border-sidebar-border flex items-center ${collapsed ? "px-2 py-4 justify-center" : "px-5 py-5"}`}>
+        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-3"}`}>
           <div className="w-8 h-8 rounded-lg bg-primary flex items-center justify-center shrink-0">
             <Shield size={15} className="text-white" />
           </div>
-          <div>
-            <p className="text-sm font-bold text-sidebar-foreground leading-tight">CA Suite</p>
-            <p className="text-xs text-muted-foreground mt-0.5">GST Practice Suite</p>
-          </div>
+          {!collapsed && (
+            <div>
+              <p className="text-sm font-bold text-sidebar-foreground leading-tight">CA Suite</p>
+              <p className="text-xs text-muted-foreground mt-0.5">GST Practice Suite</p>
+            </div>
+          )}
         </div>
       </div>
 
-      <nav className="flex-1 px-3 py-4 space-y-1">
+      <div className={`px-2 py-2 ${collapsed ? "" : "px-3"}`}>
+        <button
+          type="button"
+          onClick={() => setCollapsed((c) => !c)}
+          className="w-full flex items-center justify-center gap-2 py-2 rounded-lg text-xs text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors"
+          title={collapsed ? "Expand menu" : "Collapse menu"}
+        >
+          {collapsed ? <ChevronRight size={16} /> : <ChevronLeft size={16} />}
+          {!collapsed && <span>Collapse</span>}
+        </button>
+      </div>
+
+      <nav className={`flex-1 py-2 space-y-1 ${collapsed ? "px-2" : "px-3"}`}>
         {NAV.map(({ id, label, icon: Icon }) => {
           const active =
             screen === id ||
@@ -88,46 +116,69 @@ export function Sidebar({
             <button
               key={id}
               type="button"
+              title={collapsed ? label : undefined}
               aria-current={active ? "page" : undefined}
+              aria-label={label}
               onClick={() => onNav(id as Screen)}
-              className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm font-medium transition-all ${
+              className={`w-full flex items-center rounded-lg text-sm font-medium transition-all relative ${
+                collapsed ? "justify-center p-2.5" : "gap-3 px-3 py-2.5"
+              } ${
                 active
                   ? "bg-primary text-white shadow-sm"
                   : "text-muted-foreground hover:text-sidebar-foreground hover:bg-sidebar-accent"
               }`}
             >
-              <Icon size={16} className={active ? "opacity-90" : "opacity-70"} />
-              <span className="flex-1 text-left">{label}</span>
-              {id === "records" && pendingCount > 0 && (
+              <Icon size={16} className={`shrink-0 ${active ? "opacity-90" : "opacity-70"}`} />
+              {!collapsed && <span className="flex-1 text-left">{label}</span>}
+              {!collapsed && id === "records" && pendingCount > 0 && (
                 <span
                   className={`text-xs font-semibold px-1.5 py-0.5 rounded-full ${active ? "bg-white/20 text-white" : "bg-amber-100 text-amber-700"}`}
                 >
                   {pendingCount}
                 </span>
               )}
+              {collapsed && id === "records" && pendingCount > 0 && (
+                <span className="absolute top-1 right-1 w-2 h-2 rounded-full bg-amber-500" />
+              )}
             </button>
           );
         })}
       </nav>
 
-      <div className="px-4 py-4 border-t border-sidebar-border space-y-3">
-        <ThemeToggle mode={mode} setMode={setMode} />
-        <div className="flex items-center gap-2.5">
+      <div className={`border-t border-sidebar-border space-y-3 ${collapsed ? "px-2 py-3" : "px-4 py-4"}`}>
+        {!collapsed && <ThemeToggle mode={mode} setMode={setMode} />}
+        {collapsed && (
+          <button
+            type="button"
+            title="Theme"
+            className="w-full flex justify-center py-2 text-muted-foreground"
+            onClick={() => setMode(mode === "dark" ? "light" : mode === "light" ? "system" : "dark")}
+          >
+            <span className="text-xs">{mode === "dark" ? "🌙" : mode === "light" ? "☀️" : "◐"}</span>
+          </button>
+        )}
+        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2.5"}`}>
           <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
             {initials}
           </div>
-          <div className="min-w-0 flex-1">
-            <p className="text-sm font-semibold text-sidebar-foreground truncate">{displayName}</p>
-            <p className="text-xs text-muted-foreground">{userRole ?? "Practitioner"}</p>
-          </div>
+          {!collapsed && (
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-sidebar-foreground truncate">{displayName}</p>
+              <p className="text-xs text-muted-foreground">{userRole ?? "Practitioner"}</p>
+            </div>
+          )}
         </div>
         <button
           type="button"
           onClick={signOut}
           aria-label="Sign out"
-          className="w-full flex items-center justify-center gap-2 py-2 text-sm text-muted-foreground hover:text-foreground border border-border rounded-lg hover:bg-muted transition-colors"
+          title="Sign out"
+          className={`flex items-center text-sm text-muted-foreground hover:text-foreground border border-border rounded-lg hover:bg-muted transition-colors ${
+            collapsed ? "w-full justify-center p-2.5" : "w-full justify-center gap-2 py-2"
+          }`}
         >
-          <LogOut size={14} /> Sign out
+          <LogOut size={14} />
+          {!collapsed && "Sign out"}
         </button>
       </div>
     </aside>

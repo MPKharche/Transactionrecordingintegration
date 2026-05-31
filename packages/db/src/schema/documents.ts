@@ -7,7 +7,7 @@ import {
   jsonb,
   pgEnum,
 } from "drizzle-orm/pg-core";
-import { tenants, users } from "./tenants";
+import { tenants, users } from "./tenants.js";
 
 export const batchStatusEnum = pgEnum("batch_status", [
   "open",

@@ -12,7 +12,7 @@ async function getWorker(): Promise<TessWorker> {
     init = (async () => {
       const { createWorker } = await import("tesseract.js");
       const w = await createWorker("eng");
-      worker = w as TessWorker;
+      worker = w as unknown as TessWorker;
       return worker;
     })();
   }

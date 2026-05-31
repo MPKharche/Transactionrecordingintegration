@@ -40,6 +40,8 @@ export interface LineItem {
   unit: string;
   qty: number;
   rate: number;
+  gross_value?: number;
+  discount_amount?: number;
   taxable: number;
   igst_rate: number;
   igst: number;
@@ -47,8 +49,29 @@ export interface LineItem {
   cgst: number;
   sgst_rate: number;
   sgst: number;
+  cess_rate?: number;
   cess: number;
   total: number;
+}
+
+export type FieldStatus = "verified" | "review" | "missing" | "invalid";
+
+export interface FieldConfidenceEntry {
+  field: string;
+  label: string;
+  group: "metadata" | "supplier" | "recipient" | "totals" | "line";
+  value: string;
+  score: number;
+  status: FieldStatus;
+  message?: string;
+  line_seq?: number;
+}
+
+export interface DocumentCompleteness {
+  overall_score: number;
+  fields_captured: number;
+  fields_total: number;
+  fields: FieldConfidenceEntry[];
 }
 
 export interface FieldWarning {
@@ -91,6 +114,12 @@ export interface GSTDocument {
   page_start?: number;
   page_end?: number;
   invoice_label?: string;
+  irn_hash?: string;
+  ack_number?: string;
+  ack_date?: string;
+  other_charges_tcs?: number;
+  completeness_score?: number;
+  field_confidence?: DocumentCompleteness;
 }
 
 export interface Client {

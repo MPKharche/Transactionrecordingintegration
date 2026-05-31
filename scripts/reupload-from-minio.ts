@@ -62,26 +62,29 @@ async function main() {
   console.log("downloaded bytes", buf.length);
 
   const boundary = "----reupload-minio";
-  const body = [
-    `--${boundary}`,
-    'Content-Disposition: form-data; name="client_id"',
-    "",
-    row.client_id,
-    `--${boundary}`,
-    'Content-Disposition: form-data; name="doc_type"',
-    "",
-    row.doc_type,
-    `--${boundary}`,
-    'Content-Disposition: form-data; name="financial_year"',
-    "",
-    row.financial_year ?? "2026-27",
-    `--${boundary}`,
-    `Content-Disposition: form-data; name="file"; filename="${row.filename}"`,
-    "Content-Type: application/pdf",
-    "",
-    buf.toString("binary"),
-    `--${boundary}--`,
-  ].join("\r\n");
+  const preamble = Buffer.from(
+    [
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="client_id"',
+      "",
+      row.client_id,
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="doc_type"',
+      "",
+      row.doc_type,
+      `--${boundary}`,
+      'Content-Disposition: form-data; name="financial_year"',
+      "",
+      row.financial_year ?? "2026-27",
+      `--${boundary}`,
+      `Content-Disposition: form-data; name="file"; filename="${row.filename}"`,
+      "Content-Type: application/pdf",
+      "",
+    ].join("\r\n") + "\r\n",
+    "utf8"
+  );
+  const closing = Buffer.from(`\r\n--${boundary}--\r\n`, "utf8");
+  const body = Buffer.concat([preamble, buf, closing]);
 
   const upload = await app.inject({
     method: "POST",

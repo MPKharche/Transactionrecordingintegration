@@ -8,8 +8,8 @@ import {
   uuid,
   integer,
 } from "drizzle-orm/pg-core";
-import { tenants, users } from "./tenants";
-import { uploads } from "./documents";
+import { tenants, users } from "./tenants.js";
+import { uploads } from "./documents.js";
 
 export const purchaseBillHeaders = pgTable("purchase_bill_headers", {
   id: uuid("id").primaryKey().defaultRandom(),

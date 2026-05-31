@@ -8,17 +8,20 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import type { Client, GSTDocument, Party } from "@ca-suite/shared";
+import type { Client, GSTDocument, MastersBundle, Party } from "@ca-suite/shared";
 import { api, getAuth, trySession, type AuthHeaders } from "../lib/api";
 
 type Ctx = {
   docs: GSTDocument[];
   clients: Client[];
   partyByGstin: Record<string, Party>;
+  masters: MastersBundle;
   session: AuthHeaders | null;
   loading: boolean;
   error: string | null;
   refresh: () => Promise<void>;
+  refreshMasters: () => Promise<void>;
+  upsertParty: (party: Party) => Promise<void>;
   createClient: (body: Partial<Client>) => Promise<Client>;
   patchClient: (id: string, patch: Partial<Client>) => Promise<void>;
   patchDocument: (id: string, patch: Partial<GSTDocument>) => Promise<void>;
@@ -42,6 +45,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const [docs, setDocs] = useState<GSTDocument[]>([]);
   const [clients, setClients] = useState<Client[]>([]);
   const [partyByGstin, setPartyByGstin] = useState<Record<string, Party>>({});
+  const [masters, setMasters] = useState<MastersBundle>({ hsn: [], units: [], items: [] });
   const [session, setSession] = useState<AuthHeaders | null>(getAuth());
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -57,21 +61,25 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
         setClients([]);
         setDocs([]);
         setPartyByGstin({});
+      setMasters({ hsn: [], units: [], items: [] });
         return;
       }
-      const [c, d, parties] = await Promise.all([
+      const [c, d, parties, m] = await Promise.all([
         api.clients.list(),
         api.documents.list(),
         api.parties.list(),
+        api.masters.list().catch(() => ({ hsn: [], units: [], items: [] })),
       ]);
       setClients(c);
       setDocs(d);
       setPartyByGstin(parties);
+      setMasters(m);
     } catch (e) {
       setError(e instanceof Error ? e.message : "Could not load data from API");
       setClients([]);
       setDocs([]);
       setPartyByGstin({});
+      setMasters({ hsn: [], units: [], items: [] });
     } finally {
       if (!silent) setLoading(false);
     }
@@ -91,9 +99,9 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     let timer: ReturnType<typeof setTimeout>;
     const schedule = () => {
       const processing = docsRef.current.some((d) =>
-        ["stored", "processing", "review"].includes(d.stage)
+        ["stored", "ocr", "split", "extracting"].includes(d.stage)
       );
-      const ms = document.hidden ? 60_000 : processing ? 12_000 : 30_000;
+      const ms = document.hidden ? 60_000 : processing ? 8_000 : 30_000;
       timer = setTimeout(async () => {
         await refresh(true);
         schedule();
@@ -123,17 +131,36 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     );
   }, []);
 
+  const refreshMasters = useCallback(async () => {
+    try {
+      setMasters(await api.masters.list());
+    } catch {
+      /* ignore */
+    }
+  }, []);
+
+  const upsertParty = useCallback(async (party: Party) => {
+    if (!party.gstin) return;
+    await api.parties.upsert(party);
+    setPartyByGstin((prev) => ({
+      ...prev,
+      [party.gstin.toUpperCase()]: { ...party, gstin: party.gstin.toUpperCase() },
+    }));
+  }, []);
+
   const patchDocument = useCallback(async (id: string, patch: Partial<GSTDocument>) => {
     const updated = await api.documents.patch(id, patch);
     setDocs((prev) => prev.map((d) => (d.id === id ? updated : d)));
-  }, []);
+    await refreshMasters();
+  }, [refreshMasters]);
 
   const lockDocument = useCallback(async (id: string) => {
     const updated = await api.documents.lock(id);
     setDocs((prev) => prev.map((d) => (d.id === id ? updated : d)));
     const parties = await api.parties.list();
     setPartyByGstin(parties);
-  }, []);
+    await refreshMasters();
+  }, [refreshMasters]);
 
   const bulkLockDocuments = useCallback(async (ids: string[]) => {
     const res = await api.documents.bulkLock(ids);
@@ -148,9 +175,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     if (res.locked.length > 0) {
       const parties = await api.parties.list();
       setPartyByGstin(parties);
+      await refreshMasters();
     }
     return res;
-  }, []);
+  }, [refreshMasters]);
 
   const rejectDocument = useCallback(async (id: string, reason?: string) => {
     const updated = await api.documents.reject(id, reason);
@@ -176,10 +204,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       docs,
       clients,
       partyByGstin,
+      masters,
       session,
       loading,
       error,
       refresh,
+      refreshMasters,
+      upsertParty,
       createClient,
       patchClient,
       patchDocument,
@@ -193,10 +224,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       docs,
       clients,
       partyByGstin,
+      masters,
       session,
       loading,
       error,
       refresh,
+      refreshMasters,
+      upsertParty,
       createClient,
       patchClient,
       patchDocument,

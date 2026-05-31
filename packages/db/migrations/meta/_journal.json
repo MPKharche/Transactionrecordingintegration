@@ -15,6 +15,20 @@
       "when": 1779982800000,
       "tag": "0001_dup_policy_and_split",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1779982900000,
+      "tag": "0002_invoice_metadata_confidence",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1779983000000,
+      "tag": "0003_reference_masters",
+      "breakpoints": true
     }
   ]
 }

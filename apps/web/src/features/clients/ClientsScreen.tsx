@@ -6,7 +6,7 @@ import { INDIAN_STATES } from "../../lib/validators-local";
 import { isValidGSTIN } from "../../lib/validators-local";
 import { useAppData } from "../../context/AppDataContext";
 import { EmptyState } from "../../components/ui/EmptyState";
-import { Plus, Search, Building2, ChevronRight } from "lucide-react";
+import { Plus, Search, Building2, ChevronRight, Pencil, X } from "lucide-react";
 
 export function ClientsScreen({
   docs,
@@ -31,6 +31,34 @@ export function ClientsScreen({
     state: "",
     state_code: "",
   });
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editForm, setEditForm] = useState<Partial<Client>>({});
+  const [editError, setEditError] = useState("");
+  const [editSaving, setEditSaving] = useState(false);
+
+  function startEdit(c: Client) {
+    setEditingId(c.id);
+    setEditForm({ name: c.name, gstin: c.gstin, pan: c.pan ?? "", state: c.state ?? "", state_code: c.state_code ?? "" });
+    setEditError("");
+  }
+
+  async function submitEdit(id: string) {
+    const gstin = (editForm.gstin ?? "").trim().toUpperCase();
+    if (gstin && !isValidGSTIN(gstin)) {
+      setEditError("Invalid GSTIN format");
+      return;
+    }
+    setEditSaving(true);
+    setEditError("");
+    try {
+      await patchClient(id, { ...editForm, gstin: gstin || undefined });
+      setEditingId(null);
+    } catch (err) {
+      setEditError(err instanceof Error ? err.message : "Save failed");
+    } finally {
+      setEditSaving(false);
+    }
+  }
 
   const filtered = clients.filter(
     (c) =>
@@ -41,16 +69,30 @@ export function ClientsScreen({
 
   async function submitClient(e: React.FormEvent) {
     e.preventDefault();
-    if (!form.name.trim() || !isValidGSTIN(form.gstin)) {
-      setFormError("Name and valid GSTIN are required.");
+    const name = form.name.trim();
+    const gstin = form.gstin.trim().toUpperCase();
+    if (!name) {
+      setFormError("Client name is required.");
+      return;
+    }
+    if (gstin.length !== 15) {
+      setFormError(
+        `GSTIN must be exactly 15 characters (yours is ${gstin.length}). Example: 27AAAAA0000A1Z5`
+      );
+      return;
+    }
+    if (!isValidGSTIN(gstin)) {
+      setFormError(
+        "GSTIN format is invalid. Use: 2-digit state + 10-char PAN + entity + Z + checksum (e.g. 27AAAAA0000A1Z5)."
+      );
       return;
     }
     setSaving(true);
     setFormError("");
     try {
       await createClient({
-        name: form.name.trim(),
-        gstin: form.gstin.toUpperCase(),
+        name,
+        gstin,
         pan: form.pan || undefined,
         state: form.state,
         state_code: form.state_code,
@@ -187,16 +229,52 @@ export function ClientsScreen({
                 key={c.id}
                 className="bg-card border border-border rounded-xl p-5 shadow-sm text-left hover:shadow-md hover:border-primary/40 transition-all group relative"
               >
-                <button
-                  type="button"
-                  onClick={(e) => {
-                    e.stopPropagation();
-                    void patchClient(c.id, { active: !c.active });
-                  }}
-                  className="absolute top-3 right-3 text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
-                >
-                  {c.active ? "Deactivate" : "Activate"}
-                </button>
+                {editingId === c.id ? (
+                  <div className="space-y-2" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-between mb-1">
+                      <p className="text-sm font-semibold text-foreground">Edit client</p>
+                      <button type="button" onClick={() => setEditingId(null)} className="text-muted-foreground hover:text-foreground"><X size={15} /></button>
+                    </div>
+                    <input value={editForm.name ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, name: e.target.value }))}
+                      placeholder="Legal name" className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm" />
+                    <input value={editForm.gstin ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, gstin: e.target.value.toUpperCase() }))}
+                      placeholder="GSTIN" className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm font-mono" />
+                    <input value={editForm.pan ?? ""} onChange={(e) => setEditForm((f) => ({ ...f, pan: e.target.value.toUpperCase() }))}
+                      placeholder="PAN (optional)" className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm font-mono" />
+                    <select value={editForm.state_code ?? ""} onChange={(e) => {
+                      const s = INDIAN_STATES.find((x) => x.code === e.target.value);
+                      setEditForm((f) => ({ ...f, state_code: e.target.value, state: s?.name ?? "" }));
+                    }} className="w-full bg-input border border-border rounded-lg px-3 py-1.5 text-sm">
+                      <option value="">State</option>
+                      {INDIAN_STATES.map((s) => <option key={s.code} value={s.code}>{s.name}</option>)}
+                    </select>
+                    {editError && <p className="text-xs text-red-500">{editError}</p>}
+                    <div className="flex gap-2 pt-1">
+                      <button type="button" disabled={editSaving} onClick={() => submitEdit(c.id)}
+                        className="px-3 py-1.5 bg-primary text-white text-xs font-semibold rounded-lg disabled:opacity-60">
+                        {editSaving ? "Saving…" : "Save"}
+                      </button>
+                      <button type="button" onClick={() => setEditingId(null)} className="px-3 py-1.5 border border-border text-xs rounded-lg">Cancel</button>
+                    </div>
+                  </div>
+                ) : (
+                <>
+                <div className="absolute top-3 right-3 flex items-center gap-2">
+                  <button type="button" onClick={(e) => { e.stopPropagation(); startEdit(c); }}
+                    className="text-muted-foreground hover:text-primary p-1 rounded" title="Edit client">
+                    <Pencil size={13} />
+                  </button>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      void patchClient(c.id, { active: !c.active });
+                    }}
+                    className="text-xs text-muted-foreground hover:text-foreground underline-offset-2 hover:underline"
+                  >
+                    {c.active ? "Deactivate" : "Activate"}
+                  </button>
+                </div>
               <button
                 type="button"
                 onClick={() => onClientClick(c.id)}
@@ -250,6 +328,8 @@ export function ClientsScreen({
                   )}
                 </div>
               </button>
+              </>
+              )}
               </div>
             );
           })}

@@ -19,11 +19,11 @@ import {
   type JobPipelineStage,
 } from "@ca-suite/shared/server";
 import { eq, and, lt } from "drizzle-orm";
-import { normalizeStage } from "./stages/normalize";
-import { ocrStage } from "./stages/ocr";
-import { splitStage } from "./stages/split";
-import { extractStage } from "./stages/extract";
-import { validateStage } from "./stages/validate";
+import { normalizeStage } from "./stages/normalize.js";
+import { ocrStage } from "./stages/ocr.js";
+import { splitStage } from "./stages/split.js";
+import { extractStage } from "./stages/extract.js";
+import { validateStage } from "./stages/validate.js";
 import type { PipelineJobData } from "./lib/pipeline-queue.js";
 import { createSemaphore } from "./lib/semaphore.js";
 import { enqueuePipelineStage, closePipelineQueue } from "./lib/pipeline-queue.js";

@@ -1,5 +1,5 @@
-import { readIntEnv } from "./throughput";
-import type { JobPipelineStage } from "./pipeline-stages";
+import { readIntEnv } from "./throughput.js";
+import type { JobPipelineStage } from "./pipeline-stages.js";
 
 const constrained = process.env.DEPLOY_PROFILE === "constrained";
 

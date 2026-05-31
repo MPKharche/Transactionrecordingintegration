@@ -173,8 +173,16 @@ export function AppShell() {
           userName={session?.name ?? session?.email}
           userRole={session?.role ?? "operator"}
         />
-        <main className="flex-1 overflow-y-auto">
-          <div className="max-w-[1440px] mx-auto px-7 py-7">{main}</div>
+        <main className="flex-1 min-h-0 flex flex-col overflow-hidden">
+          <div
+            className={
+              screen === "review"
+                ? "flex-1 min-h-0 flex flex-col overflow-hidden"
+                : "flex-1 overflow-y-auto max-w-[1440px] w-full mx-auto px-7 py-7"
+            }
+          >
+            {main}
+          </div>
         </main>
       </div>
     </div>

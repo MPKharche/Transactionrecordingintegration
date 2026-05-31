@@ -14,6 +14,15 @@ import {
   Search, Download, ExternalLink, Building2, ChevronDown, Lock, X,
 } from "lucide-react";
 
+function currentFY(): string {
+  const now = new Date();
+  const year = now.getFullYear();
+  const month = now.getMonth() + 1; // 1-based
+  // Indian FY: April (4) to March (3)
+  const fyStart = month >= 4 ? year : year - 1;
+  return `FY ${fyStart}-${String(fyStart + 1).slice(2)}`;
+}
+
 /** US-RECORDS-02: bulk lock (approve) for ready_for_review documents */
 const RECORD_TABS: { id: DocType | "all"; label: string }[] = [
   { id: "all", label: "All" },
@@ -205,7 +214,7 @@ export function RecordsScreen({
         <div><p className="text-xs text-muted-foreground">GSTIN</p><p className="text-sm font-mono font-semibold text-foreground mt-0.5">{client.gstin}</p></div>
         <div><p className="text-xs text-muted-foreground">PAN</p><p className="text-sm font-mono font-semibold text-foreground mt-0.5">{client.pan}</p></div>
         <div><p className="text-xs text-muted-foreground">State</p><p className="text-sm font-semibold text-foreground mt-0.5">{client.state}</p></div>
-        <div className="ml-auto text-xs text-muted-foreground">FY 2024-25</div>
+        <div className="ml-auto text-xs text-muted-foreground">{currentFY()}</div>
       </div>
 
       <div className="grid grid-cols-2 sm:grid-cols-4 gap-4">

@@ -79,6 +79,7 @@ except Exception:
 MIN_TEXT_LEN = 80
 EXTRACT_MAX_PAGES = int(os.environ.get("EXTRACT_MAX_PAGES", "30"))
 
+# Legacy prompt — prefer openrouter_intel.EXTRACT_SYSTEM_PROMPT for production extraction.
 SYSTEM_PROMPT = """You are a GST document parser for Indian tax invoices and purchase bills.
 Return ONLY valid JSON (no markdown). Use null for missing fields. Amounts and quantities as strings.
 
@@ -328,6 +329,8 @@ def template_to_extractor_shape(tpl: dict[str, Any]) -> dict[str, Any]:
 
 
 async def llm_extract(text: str) -> dict[str, Any]:
+    from openrouter_intel import llm_extract_document, openrouter_only
+
     if not OPENROUTER_API_KEY:
         return {
             "docType": "unknown",
@@ -336,42 +339,54 @@ async def llm_extract(text: str) -> dict[str, Any]:
             "extractionMethod": "stub",
         }
 
-    payload: dict[str, Any] = {
-        "model": MODEL,
-        "messages": [
-            {"role": "system", "content": SYSTEM_PROMPT},
-            {"role": "user", "content": f"Document text:\n\n{text[:6000]}"},
-        ],
-        "temperature": 0.1,
-    }
-    if "gpt" in MODEL or "gemini" in MODEL or "claude" in MODEL:
-        payload["response_format"] = {"type": "json_object"}
-
-    async with httpx.AsyncClient(timeout=90) as client:
-        resp = await client.post(
-            "https://openrouter.ai/api/v1/chat/completions",
-            headers={
-                "Authorization": f"Bearer {OPENROUTER_API_KEY}",
-                "Content-Type": "application/json",
-                "HTTP-Referer": "https://ca-suite.local",
-                "X-Title": "CA Suite Extractor",
-            },
-            json=payload,
-        )
-        resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
-
-    match = re.search(r"\{[\s\S]*\}", content)
-    if not match:
-        return {
-            "docType": "unknown",
-            "confidence": "low",
-            "issues": ["LLM did not return valid JSON"],
-            "extractionMethod": "ai",
+    try:
+        return await llm_extract_document(text)
+    except Exception as e:
+        log.error("OpenRouter extract failed: %s", e)
+        if openrouter_only():
+            return {
+                "docType": "unknown",
+                "confidence": "low",
+                "issues": [f"OpenRouter extraction failed: {e}"],
+                "extractionMethod": "stub",
+            }
+        # Legacy inline fallback (tests / openrouter_only=false)
+        payload: dict[str, Any] = {
+            "model": MODEL,
+            "messages": [
+                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "user", "content": f"Document text:\n\n{text[:6000]}"},
+            ],
+            "temperature": 0.1,
         }
-    parsed = json.loads(match.group())
-    parsed["extractionMethod"] = "ai"
-    return parsed
+        if "gpt" in MODEL or "gemini" in MODEL or "claude" in MODEL:
+            payload["response_format"] = {"type": "json_object"}
+
+        async with httpx.AsyncClient(timeout=90) as client:
+            resp = await client.post(
+                "https://openrouter.ai/api/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {OPENROUTER_API_KEY}",
+                    "Content-Type": "application/json",
+                    "HTTP-Referer": "https://ca-suite.local",
+                    "X-Title": "CA Suite Extractor",
+                },
+                json=payload,
+            )
+            resp.raise_for_status()
+            content = resp.json()["choices"][0]["message"]["content"]
+
+        match = re.search(r"\{[\s\S]*\}", content)
+        if not match:
+            return {
+                "docType": "unknown",
+                "confidence": "low",
+                "issues": ["LLM did not return valid JSON"],
+                "extractionMethod": "ai",
+            }
+        parsed = json.loads(match.group())
+        parsed["extractionMethod"] = "ai"
+        return parsed
 
 
 def merge_results(template: Optional[dict], llm: dict) -> dict:

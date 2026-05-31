@@ -12,7 +12,7 @@ import {
   uniqueIndex,
 } from "drizzle-orm/pg-core";
 import { sql } from "drizzle-orm";
-import { tenants } from "./tenants";
+import { tenants } from "./tenants.js";
 
 export const gstDocStageEnum = pgEnum("gst_doc_stage", [
   "stored",
@@ -125,8 +125,14 @@ export const gstDocuments = pgTable("gst_documents", {
   segmentIndex: integer("segment_index").notNull().default(0),
   pageStart: integer("page_start"),
   pageEnd: integer("page_end"),
-  invoiceLabel: text("invoice_label"),
-  createdAt: timestamp("created_at").defaultNow().notNull(),
+    invoiceLabel: text("invoice_label"),
+    irnHash: text("irn_hash"),
+    ackNumber: text("ack_number"),
+    ackDate: text("ack_date"),
+    otherChargesTcs: numeric("other_charges_tcs", { precision: 12, scale: 2 }).default("0"),
+    completenessScore: numeric("completeness_score", { precision: 5, scale: 2 }).default("0"),
+    fieldConfidence: jsonb("field_confidence").$type<Record<string, unknown>>().default({}),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
   tenantShaActiveIdx: uniqueIndex("gst_documents_tenant_sha_active_uidx")
@@ -172,6 +178,9 @@ export const documentLines = pgTable("document_lines", {
   sgstRate: numeric("sgst_rate", { precision: 6, scale: 2 }),
   sgst: numeric("sgst", { precision: 18, scale: 2 }),
   cess: numeric("cess", { precision: 18, scale: 2 }),
+  grossValue: numeric("gross_value", { precision: 15, scale: 2 }).default("0"),
+  discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }).default("0"),
+  cessRate: numeric("cess_rate", { precision: 6, scale: 2 }).default("0"),
   total: numeric("total", { precision: 18, scale: 2 }),
 });
 

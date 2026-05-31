@@ -3,30 +3,66 @@ set -euo pipefail
 ROOT="$(cd "$(dirname "$0")/.." && pwd)"
 cd "$ROOT"
 
+# ── Pre-flight checks ────────────────────────────────────────────────────────
 if [[ ! -f .env ]]; then
-  echo "Missing .env — copy .env.example and configure secrets first."
+  echo "ERROR: Missing .env — copy .env.production.example and configure secrets."
+  echo "       Required: DATABASE_URL, AUTH_SECRET, GOOGLE_CLIENT_ID, GOOGLE_CLIENT_SECRET,"
+  echo "                 OPENROUTER_API_KEY, API_PUBLIC_URL, WEB_ORIGIN"
   exit 1
 fi
 
-echo "==> Building images"
-docker compose -f infra/docker-compose.yml --env-file .env build
+# Warn if dev-bypass is accidentally left on
+if grep -q "AUTH_DEV_BYPASS=true" .env 2>/dev/null; then
+  echo "WARNING: AUTH_DEV_BYPASS=true detected in .env — disable before production deployment"
+  read -p "Continue anyway? (y/N) " yn
+  [[ "$yn" == "y" || "$yn" == "Y" ]] || exit 1
+fi
 
-echo "==> Starting infrastructure"
+echo "==> Building Docker images"
+docker compose -f infra/docker-compose.yml --env-file .env build --parallel
+
+echo "==> Starting infrastructure (postgres, redis, minio)"
 docker compose -f infra/docker-compose.yml --env-file .env up -d postgres redis minio
-sleep 15
 
-echo "==> Database schema"
+echo "==> Waiting for postgres to be ready…"
+for i in $(seq 1 20); do
+  docker compose -f infra/docker-compose.yml --env-file .env exec -T postgres \
+    pg_isready -U ca_user -d ca_saas -q 2>/dev/null && break
+  echo "   attempt $i/20…"; sleep 3
+done
+
+echo "==> Applying database migrations"
 docker compose -f infra/docker-compose.yml --env-file .env run --rm api pnpm db:push
 
-echo "==> Bootstrap (flush stale BullMQ queue)"
-docker compose -f infra/docker-compose.yml --env-file .env run --rm worker node scripts/flush-pipeline-queue.mjs
+echo "==> Flushing stale BullMQ jobs"
+docker compose -f infra/docker-compose.yml --env-file .env run --rm \
+  api node -e "
+    const { connect } = await import('./node_modules/ioredis/built/index.js');
+    const r = new connect(process.env.REDIS_HOST || 'redis', Number(process.env.REDIS_PORT || 6379));
+    const keys = await r.keys('bull:*');
+    if (keys.length) await r.del(...keys);
+    console.log('Flushed', keys.length, 'queue keys');
+    r.disconnect();
+  " 2>/dev/null || pnpm queue:flush || true
 
 echo "==> Starting application services"
 docker compose -f infra/docker-compose.yml --env-file .env up -d extractor api worker web nginx
 
-echo "==> Health"
-sleep 5
-curl -sf "http://127.0.0.1/api/health" && echo " API OK" || echo " API check failed"
-curl -sf "http://127.0.0.1/" >/dev/null && echo " Web OK" || echo " Web check failed"
+echo "==> Health check (waiting up to 60s)…"
+OK=0
+for i in $(seq 1 12); do
+  if curl -sf "http://127.0.0.1/api/health" >/dev/null 2>&1; then
+    echo " API health OK"
+    OK=1; break
+  fi
+  echo "   attempt $i/12 — waiting 5s…"; sleep 5
+done
+[[ $OK -eq 1 ]] || echo " WARNING: API health check did not pass — check 'docker compose logs api'"
 
-echo "Done. Open http://YOUR_SERVER/"
+curl -sf "http://127.0.0.1/" >/dev/null 2>&1 && echo " Web OK" || echo " WARNING: Web check failed"
+
+echo ""
+echo "==> Deployment complete."
+echo "    Production URL:  $(grep API_PUBLIC_URL .env | cut -d= -f2)"
+echo "    To monitor logs: docker compose -f infra/docker-compose.yml logs -f --tail=50"
+echo "    To run health:   pnpm prod:health --remote"

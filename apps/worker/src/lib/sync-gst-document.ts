@@ -11,7 +11,9 @@ import {
   gstDocuments,
 } from "@ca-suite/db";
 import { eq } from "drizzle-orm";
+import { computeDocumentCompleteness } from "@ca-suite/shared";
 import type { ExtractorResponse } from "@ca-suite/zoho-schema";
+import { mapGstRowToDocument } from "./map-gst-doc.js";
 
 function parseNum(v: unknown): number {
   if (v == null) return 0;
@@ -54,6 +56,62 @@ function mapGstDocType(raw: string): typeof gstDocuments.$inferInsert.docType {
   if (raw === "sales_invoice") return "sales_invoice";
   if (raw === "purchase_bill" || raw === "purchase_invoice") return "purchase_invoice";
   return "purchase_invoice";
+}
+
+function normalizeLlmScores(raw: Record<string, unknown> | undefined): Record<string, number> {
+  if (!raw) return {};
+  const m: Record<string, number> = {};
+  const put = (k: string, v: unknown) => {
+    const n = typeof v === "number" ? v : parseFloat(String(v));
+    if (Number.isFinite(n)) m[k] = n;
+  };
+  for (const [k, v] of Object.entries(raw)) put(k, v);
+  if (raw.billNumber != null) put("doc_number", raw.billNumber);
+  if (raw.invoiceNumber != null) put("doc_number", raw.invoiceNumber);
+  if (raw.irnHash != null) put("irn_hash", raw.irnHash);
+  if (raw.ackNumber != null) put("ack_number", raw.ackNumber);
+  if (raw.ackDate != null) put("ack_date", raw.ackDate);
+  if (raw.gstin != null) put("supplier.gstin", raw.gstin);
+  if (raw.vendorGstin != null) put("supplier.gstin", raw.vendorGstin);
+  if (raw.customerGstin != null) put("recipient.gstin", raw.customerGstin);
+  if (raw.vendorName != null) put("supplier.name", raw.vendorName);
+  if (raw.customerName != null) put("recipient.name", raw.customerName);
+  if (raw.subtotal != null) put("taxable_amount", raw.subtotal);
+  if (raw.totalTaxableValue != null) put("taxable_amount", raw.totalTaxableValue);
+  if (raw.otherChargesTcs != null) put("other_charges_tcs", raw.otherChargesTcs);
+  if (raw.total != null) put("total", raw.total);
+  return m;
+}
+
+async function persistCompleteness(
+  docId: string,
+  llmScores?: Record<string, number>
+) {
+  const [row] = await db
+    .select()
+    .from(gstDocuments)
+    .where(eq(gstDocuments.id, docId))
+    .limit(1);
+  if (!row) return;
+  const lines = await db
+    .select()
+    .from(documentLines)
+    .where(eq(documentLines.documentId, docId))
+    .orderBy(documentLines.seq);
+  const gstDoc = mapGstRowToDocument(row, lines);
+  gstDoc.irn_hash = row.irnHash ?? undefined;
+  gstDoc.ack_number = row.ackNumber ?? undefined;
+  gstDoc.ack_date = row.ackDate ?? undefined;
+  gstDoc.other_charges_tcs = parseNum(row.otherChargesTcs);
+  const completeness = computeDocumentCompleteness(gstDoc, llmScores);
+  await db
+    .update(gstDocuments)
+    .set({
+      completenessScore: String(completeness.overall_score),
+      fieldConfidence: completeness as unknown as Record<string, unknown>,
+      updatedAt: new Date(),
+    })
+    .where(eq(gstDocuments.id, docId));
 }
 
 export async function syncGstFromExtractor(
@@ -100,8 +158,15 @@ export async function syncGstFromExtractor(
   let cgst = 0;
   let sgst = 0;
   let total = 0;
+  let otherChargesTcs = 0;
+  let irnHash = "";
+  let ackNumber = "";
+  let ackDate = "";
   let supplyType = "intra_state";
   const lineRows: (typeof documentLines.$inferInsert)[] = [];
+  const llmScores = normalizeLlmScores(
+    (result as Record<string, unknown>).fieldConfidence as Record<string, unknown>
+  );
 
   const rawMethod = result.extractionMethod ?? "";
   const extractionMethod =
@@ -118,6 +183,9 @@ export async function syncGstFromExtractor(
     const lines = (inv.lines as Record<string, unknown>[]) ?? [];
     docNumber = String(inv.invoiceNumber ?? "");
     docDate = String(inv.invoiceDate ?? "");
+    irnHash = String(inv.irnHash ?? "").replace(/\s/g, "");
+    ackNumber = String(inv.ackNumber ?? "");
+    ackDate = String(inv.ackDate ?? "");
     placeOfSupply = String(inv.placeOfSupply ?? "");
     supplier = clientAsParty(client);
     recipient = party(String(inv.customerName ?? ""), String(inv.gstin ?? ""));
@@ -133,7 +201,7 @@ export async function syncGstFromExtractor(
         id: randomUUID(),
         documentId: doc.id,
         seq: i + 1,
-        description: String(line.itemDesc ?? line.itemName ?? ""),
+        description: String(line.itemDesc ?? line.itemName ?? line.itemDescription ?? ""),
         hsnSac: String(line.hsnSac ?? ""),
         unit: String(line.usageUnit ?? "NOS"),
         qty: String(qty),
@@ -161,44 +229,72 @@ export async function syncGstFromExtractor(
     const lines = (bill.lines as Record<string, unknown>[]) ?? [];
     docNumber = String(bill.billNumber ?? "");
     docDate = String(bill.billDate ?? "");
+    irnHash = String(bill.irnHash ?? bill.irn_hash ?? "").replace(/\s/g, "");
+    ackNumber = String(bill.ackNumber ?? bill.ack_number ?? "");
+    ackDate = String(bill.ackDate ?? bill.ack_date ?? "");
+    otherChargesTcs = parseNum(bill.otherChargesTcs ?? bill.other_charges_tcs);
     placeOfSupply = String(bill.destinationOfSupply ?? bill.sourceOfSupply ?? "");
     supplier = party(String(bill.vendorName ?? ""), String(bill.gstin ?? ""));
-    recipient = clientAsParty(client);
-    taxable = parseNum(bill.subtotal);
+    const buyerGstin = String(bill.customerGstin ?? bill.customer_gstin ?? "");
+    recipient = buyerGstin
+      ? party(String(bill.customerName ?? client.name), buyerGstin)
+      : clientAsParty(client);
+    taxable = parseNum(bill.subtotal ?? bill.totalTaxableValue);
     total = parseNum(bill.total) || taxable;
+    const headerCgst = parseNum(bill.cgst);
+    const headerSgst = parseNum(bill.sgst);
+    const headerIgst = parseNum(bill.igst);
     lines.forEach((line, i) => {
       const qty = parseNum(line.quantity) || 1;
       const rate = parseNum(line.rate);
-      const taxableLine = parseNum(line.itemTotal) || qty * rate;
-      const taxPct = parseNum(line.taxPercentage);
-      const taxAmt = parseNum(line.taxAmount) || (taxableLine * taxPct) / 100;
+      const grossVal = parseNum(line.grossValue) || qty * rate;
+      const discount = parseNum(line.discountAmount);
+      const taxableLine =
+        parseNum(line.taxableValue) || parseNum(line.itemTotal) || grossVal - discount || qty * rate;
+      const cgstRate = parseNum(line.cgstRate) || parseNum(line.taxPercentage) / 2;
+      const sgstRate = parseNum(line.sgstRate) || parseNum(line.taxPercentage) / 2;
+      const igstRate = parseNum(line.igstRate) || 0;
+      const cgstAmt = parseNum(line.cgstAmount) || (taxableLine * cgstRate) / 100;
+      const sgstAmt = parseNum(line.sgstAmount) || (taxableLine * sgstRate) / 100;
+      const igstAmt = parseNum(line.igstAmount) || (taxableLine * igstRate) / 100;
+      const taxAmt = parseNum(line.taxAmount) || cgstAmt + sgstAmt + igstAmt;
+      const cessRate = parseNum(line.cessRate);
+      const cessAmt = parseNum(line.cessAmount);
       lineRows.push({
         id: randomUUID(),
         documentId: doc.id,
         seq: i + 1,
-        description: String(line.itemDescription ?? line.itemName ?? ""),
+        description: String(
+          [line.itemDescription, line.itemName, line.description]
+            .filter((x) => x != null && String(x).trim())
+            .map((x) => String(x).trim())
+            .join(" — ") || "Line item"
+        ),
         hsnSac: String(line.hsnSac ?? ""),
-        unit: String(line.usageUnit ?? "NOS"),
+        unit: String(line.uqc ?? line.usageUnit ?? "NOS"),
         qty: String(qty),
         rate: String(rate),
+        grossValue: String(grossVal),
+        discountAmount: String(discount),
         taxable: String(taxableLine),
-        igstRate: "0",
-        igst: "0",
-        cgstRate: String(taxPct / 2),
-        cgst: String(taxAmt / 2),
-        sgstRate: String(taxPct / 2),
-        sgst: String(taxAmt / 2),
-        cess: "0",
-        total: String(taxableLine + taxAmt),
+        igstRate: String(igstRate),
+        igst: String(igstAmt || (igstRate ? taxAmt : 0)),
+        cgstRate: String(cgstRate),
+        cgst: String(cgstAmt || (cgstRate ? taxAmt / 2 : 0)),
+        sgstRate: String(sgstRate),
+        sgst: String(sgstAmt || (sgstRate ? taxAmt / 2 : 0)),
+        cessRate: String(cessRate),
+        cess: String(cessAmt),
+        total: String(taxableLine + taxAmt + cessAmt),
       });
     });
-    igst = lineRows.reduce((s, l) => s + parseNum(l.igst), 0);
-    cgst = lineRows.reduce((s, l) => s + parseNum(l.cgst), 0);
-    sgst = lineRows.reduce((s, l) => s + parseNum(l.sgst), 0);
+    igst = headerIgst || lineRows.reduce((s, l) => s + parseNum(l.igst), 0);
+    cgst = headerCgst || lineRows.reduce((s, l) => s + parseNum(l.cgst), 0);
+    sgst = headerSgst || lineRows.reduce((s, l) => s + parseNum(l.sgst), 0);
     if (!taxable && lineRows.length) {
       taxable = lineRows.reduce((s, l) => s + parseNum(l.taxable), 0);
     }
-    if (!total) total = taxable + igst + cgst + sgst;
+    if (!total) total = taxable + igst + cgst + sgst + otherChargesTcs;
   }
 
   supplyType = inferSupplyType(supplier.state_code, recipient.state_code);
@@ -217,6 +313,10 @@ export async function syncGstFromExtractor(
       docType: mapGstDocType(result.docType),
       docNumber,
       docDate,
+      irnHash: irnHash || null,
+      ackNumber: ackNumber || null,
+      ackDate: ackDate || null,
+      otherChargesTcs: String(otherChargesTcs),
       placeOfSupply,
       supplier,
       recipient,
@@ -241,6 +341,12 @@ export async function syncGstFromExtractor(
       issues.map((i) => ({ documentId: doc.id, ...i }))
     );
   }
+
+  await persistCompleteness(doc.id, llmScores);
+}
+
+export async function refreshDocumentCompleteness(gstDocumentId: string) {
+  await persistCompleteness(gstDocumentId);
 }
 
 export async function syncValidationIssuesToGst(

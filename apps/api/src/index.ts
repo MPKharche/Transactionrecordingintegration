@@ -37,9 +37,18 @@ import {
   isValidGSTIN,
   isValidPAN,
   validateGstDocument,
+  computeDocumentCompleteness,
   type GstRegisterRow,
 } from "@ca-suite/shared";
 import { mapClient, mapDocument, lineToDb } from "./lib/mappers.js";
+import {
+  loadMastersBundle,
+  syncMastersFromDocument,
+  upsertHsnMaster,
+  upsertItemMaster,
+  upsertPartyMaster,
+  upsertUnitMaster,
+} from "./lib/sync-masters.js";
 import { lockedDocsToZohoPurchaseCsv, lockedDocsToZohoSalesCsv } from "./lib/zoho-export.js";
 import { putObject, sha256, storagePath } from "./lib/minio.js";
 import type { GSTDocument } from "@ca-suite/shared";
@@ -174,7 +183,7 @@ export async function buildApp() {
     if (!ctx) {
       return reply.status(401).send({ error: "Unauthorized" });
     }
-    (req as { auth: AuthContext }).auth = ctx;
+    (req as unknown as { auth: AuthContext }).auth = ctx;
   });
 
   app.get("/api/health", async () => {
@@ -336,12 +345,12 @@ export async function buildApp() {
   }
 
   app.get("/api/clients", async (req) => {
-    const ctx = (req as { auth: AuthContext }).auth;
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
     return clientsForTenant(ctx.tenantId, ctx.userId, ctx.role);
   });
 
   app.post<{ Body: Partial<Client> }>("/api/clients", async (req, reply) => {
-    const { tenantId, userId } = (req as { auth: AuthContext }).auth;
+    const { tenantId, userId } = (req as unknown as { auth: AuthContext }).auth;
     const b = req.body ?? {};
     if (!b.name || !b.gstin) {
       return reply.status(400).send({ error: "name and gstin required" });
@@ -381,7 +390,7 @@ export async function buildApp() {
       })
       .returning();
     await audit(
-      { tenantId, userId },
+      { tenantId, userId } as AuthContext,
       "client.create",
       "client",
       row.id
@@ -392,7 +401,7 @@ export async function buildApp() {
   app.patch<{ Params: { id: string }; Body: Partial<Client> }>(
     "/api/clients/:id",
     async (req, reply) => {
-      const ctx = (req as { auth: AuthContext }).auth;
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
       const b = req.body ?? {};
       const [existing] = await db
         .select()
@@ -430,7 +439,7 @@ export async function buildApp() {
   );
 
   app.get("/api/parties", async (req) => {
-    const { tenantId } = (req as { auth: AuthContext }).auth;
+    const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
     const rows = await db
       .select()
       .from(partyMaster)
@@ -453,8 +462,53 @@ export async function buildApp() {
     return out;
   });
 
+  app.post<{ Body: import("@ca-suite/shared").Party }>("/api/parties", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const p = req.body;
+    if (!p?.gstin || !isValidGSTIN(p.gstin)) {
+      return reply.status(400).send({ error: "Valid GSTIN required" });
+    }
+    await upsertPartyMaster(ctx.tenantId, p);
+    return { ...p, gstin: p.gstin.toUpperCase() };
+  });
+
+  app.get("/api/masters", async (req) => {
+    const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
+    return loadMastersBundle(tenantId);
+  });
+
+  app.post<{ Body: { code: string; description?: string; default_gst_rate?: number } }>(
+    "/api/masters/hsn",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const row = await upsertHsnMaster(ctx.tenantId, req.body ?? { code: "" });
+      if (!row) return reply.status(400).send({ error: "code required" });
+      return row;
+    }
+  );
+
+  app.post<{ Body: { code: string; label?: string } }>(
+    "/api/masters/units",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const row = await upsertUnitMaster(ctx.tenantId, req.body ?? { code: "" });
+      if (!row) return reply.status(400).send({ error: "code required" });
+      return row;
+    }
+  );
+
+  app.post<{ Body: { description: string; hsn_code?: string; unit_code?: string } }>(
+    "/api/masters/items",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const row = await upsertItemMaster(ctx.tenantId, req.body ?? { description: "" });
+      if (!row) return reply.status(400).send({ error: "description required" });
+      return row;
+    }
+  );
+
   app.get("/api/documents", async (req) => {
-    const ctx = (req as { auth: AuthContext }).auth;
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
     const q = req.query as {
       client_id?: string;
       stage?: string;
@@ -518,16 +572,20 @@ export async function buildApp() {
   });
 
   app.get<{ Params: { id: string } }>("/api/documents/:id", async (req, reply) => {
-    const { tenantId } = (req as { auth: AuthContext }).auth;
-    const doc = await loadDocument(req.params.id, tenantId);
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const doc = await loadDocument(req.params.id, ctx.tenantId);
     if (!doc) return reply.status(404).send({ error: "Not found" });
+    const allowed = await clientsForTenant(ctx.tenantId, ctx.userId, ctx.role);
+    if (!allowed.some((c) => c.id === doc.client_id)) {
+      return reply.status(403).send({ error: "Access denied" });
+    }
     return doc;
   });
 
   app.patch<{ Params: { id: string }; Body: Partial<GSTDocument> }>(
     "/api/documents/:id",
     async (req, reply) => {
-      const ctx = (req as { auth: AuthContext }).auth;
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
       const [existing] = await db
         .select()
         .from(gstDocuments)
@@ -539,6 +597,10 @@ export async function buildApp() {
         )
         .limit(1);
       if (!existing) return reply.status(404).send({ error: "Not found" });
+      const allowedClients = await clientsForTenant(ctx.tenantId, ctx.userId, ctx.role);
+      if (!allowedClients.some((c) => c.id === existing.clientId)) {
+        return reply.status(403).send({ error: "Access denied" });
+      }
       if (existing.stage === "locked") {
         return reply.status(409).send({ error: "Document is locked" });
       }
@@ -549,8 +611,15 @@ export async function buildApp() {
           docNumber: b.doc_number ?? existing.docNumber,
           docDate: b.doc_date ?? existing.docDate,
           docType: (b.doc_type as typeof existing.docType) ?? existing.docType,
-          supplier: (b.supplier as object) ?? existing.supplier,
-          recipient: (b.recipient as object) ?? existing.recipient,
+          irnHash: b.irn_hash ?? existing.irnHash,
+          ackNumber: b.ack_number ?? existing.ackNumber,
+          ackDate: b.ack_date ?? existing.ackDate,
+          otherChargesTcs:
+            b.other_charges_tcs != null
+              ? String(b.other_charges_tcs)
+              : existing.otherChargesTcs,
+          supplier: (b.supplier as unknown as Record<string, unknown>) ?? existing.supplier,
+          recipient: (b.recipient as unknown as Record<string, unknown>) ?? existing.recipient,
           supplyType: b.supply_type ?? existing.supplyType,
           reverseCharge: b.reverse_charge ?? existing.reverseCharge,
           placeOfSupply: b.place_of_supply ?? existing.placeOfSupply,
@@ -572,6 +641,15 @@ export async function buildApp() {
       if (merged) {
         const gstIssues = validateGstDocument(merged);
         await saveDocumentIssues(req.params.id, b.issues ?? gstIssues);
+        const completeness = computeDocumentCompleteness(merged);
+        await db
+          .update(gstDocuments)
+          .set({
+            completenessScore: String(completeness.overall_score),
+            fieldConfidence: completeness as unknown as Record<string, unknown>,
+          })
+          .where(eq(gstDocuments.id, req.params.id));
+        await syncMastersFromDocument(ctx.tenantId, merged);
       }
       await audit(ctx, "document.update", "document", req.params.id);
       const doc = await loadDocument(req.params.id, ctx.tenantId);
@@ -580,7 +658,7 @@ export async function buildApp() {
   );
 
   app.post("/api/documents/upload", async (req, reply) => {
-    const ctx = (req as { auth: AuthContext }).auth;
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
     try {
       await assertPipelineCapacity();
     } catch (err: unknown) {
@@ -694,7 +772,7 @@ export async function buildApp() {
   app.post<{ Params: { id: string } }>(
     "/api/documents/:id/lock",
     async (req, reply) => {
-      const ctx = (req as { auth: AuthContext }).auth;
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
       const doc = await loadDocument(req.params.id, ctx.tenantId);
       if (!doc) return reply.status(404).send({ error: "Not found" });
       const [client] = await db
@@ -728,38 +806,9 @@ export async function buildApp() {
       }
 
       for (const p of [doc.supplier, doc.recipient]) {
-        if (!p.gstin) continue;
-        await db
-          .insert(partyMaster)
-          .values({
-            gstin: p.gstin.toUpperCase(),
-            tenantId: ctx.tenantId,
-            name: p.name,
-            pan: p.pan,
-            address: p.address,
-            city: p.city,
-            state: p.state,
-            stateCode: p.state_code,
-            mobile: p.mobile,
-            email: p.email,
-            isRegistered: p.is_registered,
-          })
-          .onConflictDoUpdate({
-            target: [partyMaster.tenantId, partyMaster.gstin],
-            set: {
-              name: p.name,
-              pan: p.pan,
-              address: p.address,
-              city: p.city,
-              state: p.state,
-              stateCode: p.state_code,
-              mobile: p.mobile,
-              email: p.email,
-              isRegistered: p.is_registered,
-              lastSeen: new Date(),
-            },
-          });
+        await upsertPartyMaster(ctx.tenantId, p);
       }
+      await syncMastersFromDocument(ctx.tenantId, doc);
 
       await db
         .update(gstDocuments)
@@ -786,7 +835,7 @@ export async function buildApp() {
   app.post<{ Params: { id: string }; Body: { reason?: string } }>(
     "/api/documents/:id/reject",
     async (req, reply) => {
-      const ctx = (req as { auth: AuthContext }).auth;
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
       const [existing] = await db
         .select()
         .from(gstDocuments)
@@ -823,7 +872,7 @@ export async function buildApp() {
   app.post<{ Params: { id: string } }>(
     "/api/documents/:id/retry",
     async (req, reply) => {
-      const ctx = (req as { auth: AuthContext }).auth;
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
       const [row] = await db
         .select()
         .from(gstDocuments)
@@ -879,7 +928,7 @@ export async function buildApp() {
   app.get<{ Params: { id: string } }>(
     "/api/documents/:id/preview-url",
     async (req, reply) => {
-      const { tenantId } = (req as { auth: AuthContext }).auth;
+      const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
       const [row] = await db
         .select()
         .from(gstDocuments)
@@ -901,7 +950,7 @@ export async function buildApp() {
   );
 
   app.get<{ Params: { kind: string } }>("/api/registers/:kind", async (req, reply) => {
-    const ctx = (req as { auth: AuthContext }).auth;
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
     const q = req.query as { client_id?: string; financial_year?: string };
     const kind = req.params.kind;
     const salesTypes = ["sales_invoice", "debit_note_issued", "credit_note_issued"];
@@ -949,7 +998,7 @@ export async function buildApp() {
   });
 
   app.get("/api/export/zoho", async (req, reply) => {
-    const ctx = (req as { auth: AuthContext }).auth;
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
     const q = req.query as { type?: string; client_id?: string; financial_year?: string };
     const type = q.type === "purchase" ? "purchase" : "sales";
     const all = await db
@@ -974,6 +1023,12 @@ export async function buildApp() {
       type === "purchase"
         ? lockedDocsToZohoPurchaseCsv(docs)
         : lockedDocsToZohoSalesCsv(docs);
+    await audit(ctx, "export.zoho_csv", "export", `${type}_${q.financial_year ?? "all"}`, {
+      type,
+      client_id: q.client_id ?? null,
+      financial_year: q.financial_year ?? null,
+      doc_count: docs.length,
+    }, req);
     reply.header("Content-Type", "text/csv; charset=utf-8");
     reply.header(
       "Content-Disposition",
@@ -983,19 +1038,27 @@ export async function buildApp() {
   });
 
   app.get("/api/audit-log", async (req) => {
-    const ctx = (req as { auth: AuthContext }).auth;
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
     const rows = await db
       .select()
       .from(auditLog)
       .where(eq(auditLog.tenantId, ctx.tenantId))
       .orderBy(desc(auditLog.createdAt))
       .limit(200);
+    const userIds = [...new Set(rows.map((r) => r.userId).filter(Boolean))];
+    const userRows =
+      userIds.length > 0
+        ? await db.select().from(users).where(inArray(users.id, userIds as string[]))
+        : [];
+    const userMap = new Map(userRows.map((u) => [u.id, { name: u.name, email: u.email }]));
     return rows.map((r) => ({
       id: r.id,
       action: r.action,
       entity_type: r.entityType,
       entity_id: r.entityId,
       user_id: r.userId,
+      user_name: r.userId ? (userMap.get(r.userId)?.name ?? null) : null,
+      user_email: r.userId ? (userMap.get(r.userId)?.email ?? null) : null,
       created_at: r.createdAt.toISOString(),
       ip_address: r.ipAddress ?? undefined,
     }));
@@ -1004,7 +1067,7 @@ export async function buildApp() {
   app.put<{ Params: { id: string }; Body: { user_ids?: string[] } }>(
     "/api/clients/:id/assignments",
     async (req, reply) => {
-      const ctx = (req as { auth: AuthContext }).auth;
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
       if (ctx.role === "operator") {
         return reply.status(403).send({ error: "Managers or admins only" });
       }
@@ -1040,7 +1103,7 @@ export async function buildApp() {
   );
 
   app.post<{ Body: { ids?: string[] } }>("/api/documents/bulk-lock", async (req, reply) => {
-    const ctx = (req as { auth: AuthContext }).auth;
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
     const ids = req.body?.ids ?? [];
     const locked: string[] = [];
     const errors: { id: string; errors: string[] }[] = [];
@@ -1087,40 +1150,16 @@ export async function buildApp() {
         errors.push({ id, errors: check.errors });
         continue;
       }
+      const completeness = computeDocumentCompleteness(doc);
+      if (completeness.overall_score < 60) {
+        errors.push({ id, errors: [`Completeness score too low (${completeness.overall_score}%) — review before bulk lock`] });
+        continue;
+      }
 
       for (const p of [doc.supplier, doc.recipient]) {
-        if (!p.gstin) continue;
-        await db
-          .insert(partyMaster)
-          .values({
-            gstin: p.gstin.toUpperCase(),
-            tenantId: ctx.tenantId,
-            name: p.name,
-            pan: p.pan,
-            address: p.address,
-            city: p.city,
-            state: p.state,
-            stateCode: p.state_code,
-            mobile: p.mobile,
-            email: p.email,
-            isRegistered: p.is_registered,
-          })
-          .onConflictDoUpdate({
-            target: [partyMaster.tenantId, partyMaster.gstin],
-            set: {
-              name: p.name,
-              pan: p.pan,
-              address: p.address,
-              city: p.city,
-              state: p.state,
-              stateCode: p.state_code,
-              mobile: p.mobile,
-              email: p.email,
-              isRegistered: p.is_registered,
-              lastSeen: new Date(),
-            },
-          });
+        await upsertPartyMaster(ctx.tenantId, p);
       }
+      await syncMastersFromDocument(ctx.tenantId, doc);
 
       await db
         .update(gstDocuments)

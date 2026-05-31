@@ -55,7 +55,12 @@ Start-Sleep -Seconds 8
 
 Write-Host "==> DB + queue"
 pnpm db:push
-pnpm db:seed
+if ($env:SEED_DEMO -eq "true") {
+  Write-Host "==> Seeding demo clients (SEED_DEMO=true)"
+  pnpm db:seed
+} else {
+  Write-Host "==> Skipping demo seed (set SEED_DEMO=true to add Acme/Beta clients)"
+}
 pnpm queue:flush
 
 $webPort = if ($env:E2E_WEB_PORT) { $env:E2E_WEB_PORT } else { "5180" }

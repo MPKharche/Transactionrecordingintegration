@@ -16,7 +16,7 @@ import { isValidGSTIN, validateGstDocument } from "@ca-suite/shared";
 import { isUploadPastStage } from "@ca-suite/shared";
 import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import type { PipelineJobData } from "../lib/pipeline-queue.js";
-import { syncValidationIssuesToGst } from "../lib/sync-gst-document.js";
+import { syncValidationIssuesToGst, refreshDocumentCompleteness } from "../lib/sync-gst-document.js";
 import { mapGstRowToDocument } from "../lib/map-gst-doc.js";
 import { saveDocumentIssues } from "../lib/persist-issues.js";
 
@@ -111,6 +111,9 @@ export async function validateStage(uploadId: string, tenantId: string, job: Job
   await syncValidationIssuesToGst(uploadId, pipelineIssues, gstRow?.id);
   if (gstRow && gstFieldIssues.length) {
     await saveDocumentIssues(gstRow.id, gstFieldIssues);
+  }
+  if (gstRow) {
+    await refreshDocumentCompleteness(gstRow.id);
   }
 
   const { syncGstStageForDocument, syncGstStageFromUpload } = await import("../lib/gst-sync.js");

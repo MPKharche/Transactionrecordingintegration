@@ -1,5 +1,5 @@
-import type { GSTDocument, LineItem, FieldWarning } from "./types";
-import { isValidGSTIN } from "./validators";
+import type { GSTDocument, LineItem, FieldWarning } from "./types.js";
+import { isValidGSTIN } from "./validators.js";
 
 /** First two digits of GSTIN = state code */
 export function gstinStateCode(gstin: string): string {
@@ -227,8 +227,8 @@ export function validateGstDocument(
     }
   });
 
-  const sumTaxable = doc.lines.reduce((s, l) => s + l.taxable, 0);
-  const sumTax = doc.lines.reduce((s, l) => s + l.igst + l.cgst + l.sgst, 0);
+  const sumTaxable = doc.lines.reduce((s: number, l: LineItem) => s + l.taxable, 0);
+  const sumTax = doc.lines.reduce((s: number, l: LineItem) => s + l.igst + l.cgst + l.sgst, 0);
   if (doc.lines.length > 0 && Math.abs(sumTaxable - doc.taxable_amount) > 2) {
     issues.push({
       field: "taxable_amount",

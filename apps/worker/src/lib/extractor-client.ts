@@ -120,6 +120,8 @@ export async function callExtractorResilient(
   docTypeHint = "",
   pageStart?: number,
   pageEnd?: number,
+  clientGstin = "",
+  clientName = "",
   attempt = 0
 ): Promise<ExtractorResponse> {
   const controller = new AbortController();
@@ -132,6 +134,8 @@ export async function callExtractorResilient(
       source_url: minioUrl,
       mime_type: mimeType,
       doc_type_hint: docTypeHint,
+      client_gstin: clientGstin,
+      client_name: clientName,
       ...(pageStart != null ? { page_start: pageStart } : {}),
       ...(pageEnd != null ? { page_end: pageEnd } : {}),
     });
@@ -159,6 +163,8 @@ export async function callExtractorResilient(
           docTypeHint,
           pageStart,
           pageEnd,
+          clientGstin,
+          clientName,
           attempt + 1
         );
       }
@@ -189,6 +195,8 @@ export async function callExtractorResilient(
         docTypeHint,
         pageStart,
         pageEnd,
+        clientGstin,
+        clientName,
         attempt + 1
       );
     }

@@ -13,6 +13,7 @@ import {
   purchaseBillLines,
   extractions,
   gstDocuments,
+  clients,
 } from "@ca-suite/db";
 import { eq, and } from "drizzle-orm";
 import type { ExtractorResponse } from "@ca-suite/zoho-schema";
@@ -75,6 +76,20 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
   const pageStart = targetDoc?.pageStart ?? undefined;
   const pageEnd = targetDoc?.pageEnd ?? undefined;
 
+  let clientGstin = "";
+  let clientName = "";
+  if (targetDoc?.clientId) {
+    const [client] = await db
+      .select()
+      .from(clients)
+      .where(eq(clients.id, targetDoc.clientId))
+      .limit(1);
+    if (client) {
+      clientGstin = client.gstin;
+      clientName = client.name;
+    }
+  }
+
   let result: ExtractorResponse;
   try {
     const docTypeHint = targetDoc?.docType ?? upload.docType ?? "";
@@ -85,7 +100,9 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
       upload.mimeType,
       docTypeHint,
       pageStart ?? undefined,
-      pageEnd ?? undefined
+      pageEnd ?? undefined,
+      clientGstin,
+      clientName
     );
   } catch (err: any) {
     result = {
@@ -108,15 +125,22 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
   });
 
   if (result.extractionMethod === "stub") {
-    await db.update(uploads).set({ currentStage: "dead_letter", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
     const { syncValidationIssuesToGst } = await import("../lib/sync-gst-document.js");
+    const { syncGstStageForDocument, syncGstStageFromUpload } = await import("../lib/gst-sync.js");
     await syncValidationIssuesToGst(
       uploadId,
       result.issues ?? ["Extractor unavailable"],
       gstDocumentId
     );
-    const { syncGstStageFromUpload } = await import("../lib/gst-sync.js");
-    await syncGstStageFromUpload(uploadId, "dead_letter");
+    if (gstDocumentId) {
+      await syncGstStageForDocument(gstDocumentId, "failed");
+    } else {
+      await db
+        .update(uploads)
+        .set({ currentStage: "dead_letter", updatedAt: new Date() })
+        .where(eq(uploads.id, uploadId));
+      await syncGstStageFromUpload(uploadId, "dead_letter");
+    }
     throw new Error(`Extraction failed (stub): ${result.issues?.join("; ") || "no details"}`);
   }
 

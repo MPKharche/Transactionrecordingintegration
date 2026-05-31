@@ -1,4 +1,4 @@
-import type { AuditLogEntry, Client, GSTDocument, GstRegisterRow, Party, UserRole } from "@ca-suite/shared";
+import type { AuditLogEntry, Client, GSTDocument, GstRegisterRow, MastersBundle, Party, UserRole } from "@ca-suite/shared";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -100,6 +100,17 @@ export const api = {
   },
   parties: {
     list: () => request<Record<string, Party>>("/parties"),
+    upsert: (party: Party) =>
+      request<Party>("/parties", { method: "POST", body: JSON.stringify(party) }),
+  },
+  masters: {
+    list: () => request<MastersBundle>("/masters"),
+    upsertHsn: (body: { code: string; description?: string; default_gst_rate?: number }) =>
+      request("/masters/hsn", { method: "POST", body: JSON.stringify(body) }),
+    upsertUnit: (body: { code: string; label?: string }) =>
+      request("/masters/units", { method: "POST", body: JSON.stringify(body) }),
+    upsertItem: (body: { description: string; hsn_code?: string; unit_code?: string }) =>
+      request("/masters/items", { method: "POST", body: JSON.stringify(body) }),
   },
   documents: {
     list: (params?: {

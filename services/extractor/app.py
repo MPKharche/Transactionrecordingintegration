@@ -71,6 +71,8 @@ class ExtractRequest(BaseModel):
     doc_type_hint: str = ""  # e.g. purchase_invoice | sales_invoice
     page_start: Optional[int] = None
     page_end: Optional[int] = None
+    client_gstin: str = ""
+    client_name: str = ""
 
 
 class DetectInvoicesRequest(BaseModel):
@@ -254,13 +256,13 @@ class ExtractorResponse(BaseModel):
 from extractor_core import (
     MIN_TEXT_LEN,
     extract_document_text,
-    llm_extract,
     merge_results,
     pdf_pages_from_bytes,
     template_to_extractor_shape,
     try_invoice2data,
 )
-from invoice_split import detect_invoice_segments
+from invoice_split import detect_invoice_segments as detect_invoice_segments_heuristic
+from openrouter_intel import llm_detect_segments, llm_extract_document, openrouter_only
 from minio_fetch import fetch_object
 
 # ─── Routes ───────────────────────────────────────────────────────────────────
@@ -284,6 +286,7 @@ async def health():
         "pymupdf": HAS_PYMUPDF,
         "pdf_ocr": HAS_PDF2IMAGE,
         "openrouter": bool(OPENROUTER_API_KEY),
+        "openrouter_only": openrouter_only(),
         "model": MODEL,
     }
 
@@ -293,7 +296,30 @@ async def detect_invoices(req: DetectInvoicesRequest):
     pages = req.pages or []
     if file_bytes and not pages:
         pages = pdf_pages_from_bytes(file_bytes)
-    segments = detect_invoice_segments(pages)
+
+    segments: list[dict] = []
+    if openrouter_only() and OPENROUTER_API_KEY:
+        try:
+            segments = await llm_detect_segments(pages)
+            log.info("LLM split: %d segment(s)", len(segments))
+        except Exception as e:
+            log.error("LLM split failed: %s", e)
+            segments = []
+
+    if not segments:
+        if openrouter_only():
+            max_page = max((int(p.get("page") or 1) for p in pages), default=1)
+            segments = [
+                {
+                    "pageStart": 1,
+                    "pageEnd": max_page,
+                    "billNumber": None,
+                    "confidence": "low",
+                }
+            ]
+        else:
+            segments = detect_invoice_segments_heuristic(pages)
+
     return DetectInvoicesResponse(
         segments=[InvoiceSegment(**s) for s in segments]
     )
@@ -326,7 +352,7 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
             combined_text = file_text
             text_method = file_method
 
-    combined_text = combined_text[:8000].strip()
+    combined_text = combined_text[:14000].strip()
 
     if not combined_text:
         return ExtractorResponse(
@@ -336,27 +362,36 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
             issues=["No text extracted — ensure PDF has a text layer or image is readable"],
         )
 
+    hint = (req.doc_type_hint or "").strip().lower()
+    use_or_only = openrouter_only()
+
     template_result = None
-    if file_bytes:
+    if not use_or_only and file_bytes:
         tpl_raw = try_invoice2data(file_bytes, req.storage_path)
         if tpl_raw:
             template_result = template_to_extractor_shape(tpl_raw)
 
     try:
-        hint = (req.doc_type_hint or "").strip().lower()
-        hint_note = ""
-        if hint in ("purchase_invoice", "purchase_bill", "purchase"):
-            hint_note = (
-                "\n\nUpload category: PURCHASE (buyer books). "
-                "Use docType purchase_bill. vendorName + gstin = BILL FROM / supplier. "
-                "customerName = BILL TO / buyer."
+        if not OPENROUTER_API_KEY:
+            return ExtractorResponse(
+                docType="unknown",
+                confidence="low",
+                extractionMethod="stub",
+                issues=["OPENROUTER_API_KEY not set — AI extraction required"],
             )
-        elif hint in ("sales_invoice", "sales"):
-            hint_note = (
-                "\n\nUpload category: SALES (seller books). Use docType sales_invoice."
-            )
-        llm_result = await llm_extract(combined_text + hint_note)
-        if template_result and llm_result.get("extractionMethod") != "stub":
+
+        llm_result = await llm_extract_document(
+            combined_text,
+            doc_type_hint=hint,
+            client_gstin=(req.client_gstin or "").strip().upper(),
+            client_name=(req.client_name or "").strip(),
+            page_start=req.page_start,
+            page_end=req.page_end,
+        )
+
+        if use_or_only:
+            result = llm_result
+        elif template_result and llm_result.get("extractionMethod") != "stub":
             result = merge_results(template_result, llm_result)
         elif template_result and llm_result.get("extractionMethod") == "stub":
             result = template_result
@@ -366,6 +401,13 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
         else:
             result = llm_result
 
+        if not use_or_only and result.get("extractionMethod") == "stub":
+            from gst_heuristic import heuristic_extract
+
+            heuristic = heuristic_extract(combined_text, hint)
+            if heuristic:
+                result = heuristic
+
         if text_method and result.get("extractionMethod") not in ("stub",):
             result.setdefault("issues", [])
             if text_method not in str(result["issues"]):
@@ -374,9 +416,22 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
         return ExtractorResponse(**result)
     except Exception as e:
         log.error("Extraction failed: %s", e)
+        if use_or_only:
+            return ExtractorResponse(
+                docType="unknown",
+                confidence="low",
+                extractionMethod="stub",
+                issues=[f"OpenRouter extraction failed: {str(e)}"],
+            )
         if template_result:
             template_result["issues"] = [f"LLM failed: {e}", *(template_result.get("issues") or [])]
             return ExtractorResponse(**template_result)
+        from gst_heuristic import heuristic_extract
+
+        heuristic = heuristic_extract(combined_text, hint)
+        if heuristic:
+            heuristic["issues"] = [f"LLM failed: {e}", *(heuristic.get("issues") or [])]
+            return ExtractorResponse(**heuristic)
         return ExtractorResponse(
             docType="unknown",
             confidence="low",

@@ -27,10 +27,15 @@
     "db:push": "pnpm --filter @ca-suite/db push",
     "db:seed": "tsx scripts/seed-demo.ts",
     "db:clear": "tsx scripts/db-clear-demo.ts",
+    "db:wipe": "tsx scripts/db-wipe-all.ts",
     "db:reset": "pnpm db:clear && pnpm db:seed",
+    "minio:clear": "tsx scripts/clear-minio.ts",
     "queue:flush": "node scripts/flush-pipeline-queue.mjs",
     "prod:bootstrap": "node scripts/prod-bootstrap.mjs",
+    "prod:fresh": "node scripts/prod-fresh.mjs",
     "dev:prod-sim": "powershell -NoProfile -File scripts/launch-prod-sim.ps1",
+    "prod:health": "powershell -NoProfile -File scripts/production-health.ps1",
+    "prod:open": "powershell -NoProfile -File scripts/open-app.ps1",
     "typecheck": "turbo typecheck"
   },
   "devDependencies": {

@@ -1,0 +1,58 @@
+---
+description: Production availability — use Vercel MCP, GitHub, and health scripts for deploy triage
+alwaysApply: true
+---
+
+# Production ops (Vercel MCP + local health)
+
+When the user asks about production, deployments, downtime, build failures, or "is the app up":
+
+## 1. Vercel MCP (primary for frontend deploys)
+
+The project has **Vercel MCP** at `.cursor/mcp.json` (`https://mcp.vercel.com`). Use it before guessing:
+
+1. `list_teams` → `list_projects` to find the CA Suite web project
+2. `list_deployments` / `get_deployment` for latest production or preview status
+3. `get_deployment_build_logs` when a deploy failed — read the full error, then fix the code
+4. `get_runtime_logs` for 5xx / runtime errors (filter `level: ["error"]`, `since: "1h"`)
+5. `search_documentation` for Vercel-specific config questions
+
+If MCP shows **Needs login**, tell the user to click the auth prompt in Cursor (Settings → MCP → vercel → Connect).
+
+## 2. Architecture (do not deploy API to Vercel)
+
+| Layer | Host | Notes |
+|-------|------|-------|
+| **Web (Vite SPA)** | Vercel (GitHub-linked) or Docker nginx | Root dir: `apps/web` |
+| **API, worker, extractor, Postgres, Redis, MinIO** | VPS Docker (`infra/docker-compose.yml`) | See `docs/DEPLOY.md` |
+
+Vercel hosts the **frontend only**. Update `apps/web/vercel.json` rewrite destination to the real production API host, and set Vercel env `VITE_API_URL=/api` (default).
+
+## 3. Local health (non-tech friendly)
+
+Run without asking the user to open terminals manually:
+
+```powershell
+pnpm prod:health              # checks PRODUCTION_URL from .env, else local prod-sim
+pnpm prod:health --remote     # force remote URL check
+pnpm dev:prod-sim             # start full local stack if down
+```
+
+Interpret results in plain language: green = OK, red = which service failed and suggested fix.
+
+## 4. GitHub-linked deploy flow
+
+- Push to `main` → Vercel production deploy (web)
+- Pull requests → Vercel preview URLs
+- Full stack on VPS: merge → SSH/`deploy-prod.sh` or Hostinger MCP — not automatic via Vercel
+
+When a Vercel preview works but production API fails, triage **VPS/Docker** (worker, extractor, postgres), not Vercel build logs.
+
+## 5. Fix loop
+
+1. Reproduce (health script or MCP deployment URL)
+2. Pull logs (Vercel MCP build/runtime OR `docker compose logs` on VPS)
+3. Minimal fix in repo
+4. Verify (`pnpm test:regression` for code changes; redeploy for infra)
+
+Never expose secrets from `.env` in chat or commits.

@@ -88,12 +88,20 @@ export function AuditLogScreen() {
                       </div>
                     </td>
                     <td className="px-4 py-2.5 text-xs">
-                      <span
-                        title={r.user_id ?? ""}
-                        className="font-mono text-foreground"
-                      >
-                        {shortId(r.user_id)}
-                      </span>
+                      {(r as AuditLogEntry & { user_name?: string; user_email?: string }).user_name ? (
+                        <div>
+                          <p className="text-foreground font-medium">
+                            {(r as AuditLogEntry & { user_name?: string }).user_name}
+                          </p>
+                          <p className="text-muted-foreground font-mono">
+                            {(r as AuditLogEntry & { user_email?: string }).user_email}
+                          </p>
+                        </div>
+                      ) : (
+                        <span title={r.user_id ?? ""} className="font-mono text-muted-foreground">
+                          {shortId(r.user_id)}
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-2.5 text-xs text-muted-foreground font-mono">
                       {r.ip_address ?? "—"}
