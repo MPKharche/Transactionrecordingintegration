@@ -357,14 +357,24 @@ export function RecordsScreen({
                   <td className="px-4 py-3.5 font-mono text-sm font-bold text-right text-foreground whitespace-nowrap">{INR(d.total)}</td>
                   <td className="px-4 py-3.5"><StageBadge stage={d.stage} isDark={isDark} /></td>
                   <td className="px-4 py-3.5">
-                    {d.stage === "failed" && onRetry ? (
-                      <button
-                        type="button"
-                        onClick={() => onRetry(d.id)}
-                        className="flex items-center gap-1.5 text-sm text-red-500 hover:underline whitespace-nowrap font-medium"
-                      >
-                        <ExternalLink size={13} /> Retry
-                      </button>
+                    {d.stage === "failed" ? (
+                      <div className="flex flex-col gap-0.5">
+                        {d.issues && d.issues.length > 0 && (
+                          <p className="text-xs text-red-500 max-w-[180px] truncate"
+                            title={d.issues.map((i) => i.message).join(" · ")}>
+                            {d.issues[0].message}
+                          </p>
+                        )}
+                        {onRetry && (
+                          <button
+                            type="button"
+                            onClick={() => onRetry(d.id)}
+                            className="flex items-center gap-1.5 text-xs text-red-500 hover:text-red-700 hover:underline whitespace-nowrap font-medium"
+                          >
+                            <ExternalLink size={12} /> Retry extraction
+                          </button>
+                        )}
+                      </div>
                     ) : (
                       <button
                         type="button"
