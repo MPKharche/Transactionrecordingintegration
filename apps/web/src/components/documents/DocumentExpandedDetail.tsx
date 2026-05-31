@@ -141,6 +141,9 @@ export function DocumentExpandedDetail({
         <F label="Taxable" value={INR(doc.taxable_amount)} mono err={bad.has("taxable_amount")} errHint={hint("taxable_amount")} />
         <F label="IGST" value={INR(doc.igst)} mono err={bad.has("tax")} errHint={hint("tax")} />
         <F label="CGST+SGST" value={INR(doc.cgst + doc.sgst)} mono />
+        {(doc.other_charges_tcs ?? 0) !== 0 ? (
+          <F label="TCS / other" value={INR(doc.other_charges_tcs ?? 0)} mono err={bad.has("other_charges_tcs")} errHint={hint("other_charges_tcs")} />
+        ) : null}
         <F label="Total" value={INR(doc.total)} mono err={bad.has("total")} errHint={hint("total")} />
         {lineIssueCount > 0 && (
           <div className="min-w-0 flex items-end">

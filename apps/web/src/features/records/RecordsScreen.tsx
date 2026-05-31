@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { handleTabListKeyDown } from "../../lib/a11y";
 import { VersionHistoryModal } from "./VersionHistoryModal";
+import { InvoiceLineItemsTable } from "../../components/documents/InvoiceLineItemsTable";
 
 const FY_OPTIONS = listIndianFinancialYears(2016);
 
@@ -153,40 +154,7 @@ function ExpandedDetail({
             </div>
           </div>
 
-          {/* Line items */}
-          {doc.lines?.length > 0 && (
-            <div className="mb-2 overflow-x-auto">
-              <table className="w-full text-[11px]">
-                <thead>
-                  <tr className="border-b border-border/50 text-muted-foreground">
-                    {["#", "Description", "HSN/SAC", "Unit", "Qty", "Rate", "Taxable", "GST%", "Tax", "Total"].map(h => (
-                      <th key={h} className={`px-1.5 py-0.5 font-medium text-left ${["Qty","Rate","Taxable","Tax","Total"].includes(h) ? "text-right" : ""}`}>{h}</th>
-                    ))}
-                  </tr>
-                </thead>
-                <tbody>
-                  {doc.lines.map((ln, i) => {
-                    const gstRate = ln.igst_rate > 0 ? ln.igst_rate : (ln.cgst_rate + ln.sgst_rate);
-                    const tax = ln.igst + ln.cgst + ln.sgst;
-                    return (
-                      <tr key={ln.id ?? i} className="border-b border-border/30 hover:bg-muted/20">
-                        <td className="px-1.5 py-0.5 text-muted-foreground">{i + 1}</td>
-                        <td className="px-1.5 py-0.5 max-w-[160px] truncate" title={ln.description}>{ln.description || "—"}</td>
-                        <td className="px-1.5 py-0.5 font-mono">{ln.hsn_sac || "—"}</td>
-                        <td className="px-1.5 py-0.5">{ln.unit || "—"}</td>
-                        <td className="px-1.5 py-0.5 text-right tabular-nums">{ln.qty}</td>
-                        <td className="px-1.5 py-0.5 text-right tabular-nums font-mono">{INR(ln.rate)}</td>
-                        <td className="px-1.5 py-0.5 text-right tabular-nums font-mono">{INR(ln.taxable)}</td>
-                        <td className="px-1.5 py-0.5 text-right tabular-nums">{gstRate > 0 ? `${gstRate}%` : "—"}</td>
-                        <td className="px-1.5 py-0.5 text-right tabular-nums font-mono">{INR(tax)}</td>
-                        <td className="px-1.5 py-0.5 text-right tabular-nums font-mono font-semibold">{INR(ln.total)}</td>
-                      </tr>
-                    );
-                  })}
-                </tbody>
-              </table>
-            </div>
-          )}
+          <InvoiceLineItemsTable doc={doc} />
 
           {/* Audit info + FY mismatch warning + actions */}
           <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-border/30">
