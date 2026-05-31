@@ -112,7 +112,14 @@ export function AppShell() {
           <Dashboard docs={docs} clients={clients} isDark={isDark} onNav={navTo} />
         )}
         {screen === "upload" && (
-          <UploadScreen docs={docs} clients={clients} isDark={isDark} onReview={openReview} />
+          <UploadScreen
+            docs={docs}
+            clients={clients}
+            isDark={isDark}
+            onReview={openReview}
+            onDelete={deleteDocument}
+            onBulkDelete={bulkDeleteDocuments}
+          />
         )}
         {screen === "records" && (
           <RecordsScreen

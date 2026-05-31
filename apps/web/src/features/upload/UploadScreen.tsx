@@ -17,7 +17,21 @@ import {
   Plus, Search, Download, Upload, ChevronDown, FileText, X,
 } from "lucide-react";
 
-export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void }) {
+export function UploadScreen({
+  docs,
+  clients,
+  isDark,
+  onReview,
+  onDelete,
+  onBulkDelete,
+}: {
+  docs: GSTDocument[];
+  clients: Client[];
+  isDark: boolean;
+  onReview: (id: string) => void;
+  onDelete?: (id: string) => Promise<void>;
+  onBulkDelete?: (ids: string[]) => Promise<{ deleted: string[]; errors: { id: string; error: string }[] }>;
+}) {
   const { uploadFile } = useAppData();
   const clientById = (id: string) => clientByIdFrom(clients, id);
   const [dragging, setDragging] = useState(false);
@@ -216,6 +230,8 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
           clients={clients}
           isDark={isDark}
           onReview={onReview}
+          onDelete={onDelete}
+          onBulkDelete={onBulkDelete}
         />
       </div>
     </div>

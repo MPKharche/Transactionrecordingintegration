@@ -4,6 +4,8 @@ GST document intelligence for CA practices: capture invoices, AI-assisted extrac
 
 **Repo:** [github.com/MPKharche/Transactionrecordingintegration](https://github.com/MPKharche/Transactionrecordingintegration)
 
+**UI deploy:** push `apps/web` changes to `main` → [Vercel](https://ca-suite-web.vercel.app) auto-builds from GitHub (`docs/VERCEL-FRONTEND.md`). API/worker changes need a VPS deploy after pull.
+
 ## Monorepo layout
 
 | Package | Role |
