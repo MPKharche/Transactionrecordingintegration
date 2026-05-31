@@ -1,33 +1,63 @@
 # Production deploy (GitHub → remote server)
 
-## One-click (recommended)
+## One-click install (recommended)
 
-**Linux / WSL / macOS**
+Full walkthrough is in the root [README.md](../README.md#installation--one-click-on-any-new-machine). Summary:
+
+### Step 1 — Environment
+
+Generates secrets into a new `.env`; you add API keys in Step 2.
 
 ```bash
-git clone https://github.com/MPKharche/Transactionrecordingintegration.git ca-suite
-cd ca-suite
+# Linux / WSL / macOS
 ./scripts/setup-env.sh
-# Edit .env: API_PUBLIC_URL, WEB_ORIGIN, GOOGLE_*, OPENROUTER_API_KEY, DEPLOY_TARGET
-./scripts/deploy.sh
 ```
 
-**Windows (PowerShell)**
+```powershell
+# Windows
+.\scripts\setup-env.ps1
+```
+
+### Step 2 — Edit `.env`
+
+| Variable | Example |
+|----------|---------|
+| `API_PUBLIC_URL` | `https://practice.planetfinance.cloud` |
+| `WEB_ORIGIN` | `https://practice.planetfinance.cloud` |
+| `GOOGLE_CLIENT_ID` / `GOOGLE_CLIENT_SECRET` | Google Cloud OAuth client |
+| `OPENROUTER_API_KEY` | openrouter.ai key |
+| `DEPLOY_TARGET` | `vps` (shared VPS) or `standalone` (Docker owns port 80) |
+
+### Step 3 — Deploy
+
+```bash
+./scripts/deploy.sh    # or: pnpm deploy
+```
 
 ```powershell
-git clone https://github.com/MPKharche/Transactionrecordingintegration.git ca-suite
-cd ca-suite
-.\scripts\setup-env.ps1
-# Edit .env (same variables)
 .\scripts\deploy.ps1
 ```
 
-| `DEPLOY_TARGET` | When |
-|-----------------|------|
-| `standalone` | Dedicated server — Docker nginx on port **80** |
-| `vps` | Shared VPS — app on **127.0.0.1:3080**, host nginx + TLS |
+Verify: `curl -s http://127.0.0.1/api/health` (standalone) or `curl -s http://127.0.0.1:3080/api/health` (vps).
 
-VPS + domain: after deploy, `sudo ./scripts/install-host-nginx.sh your.domain` and add Google OAuth redirect `{API_PUBLIC_URL}/api/auth/google/callback`.
+### Step 4 — VPS + HTTPS (host nginx only)
+
+Skip when `DEPLOY_TARGET=standalone`.
+
+When `DEPLOY_TARGET=vps`:
+
+```bash
+sudo ./scripts/install-host-nginx.sh practice.planetfinance.cloud
+sudo certbot --nginx -d practice.planetfinance.cloud   # if TLS not issued yet
+```
+
+**Google OAuth** — Google Cloud Console → OAuth client → Authorized redirect URIs:
+
+```text
+https://<your-domain>/api/auth/google/callback
+```
+
+Example: `https://practice.planetfinance.cloud/api/auth/google/callback` (must match `API_PUBLIC_URL`).
 
 See [DEPLOYMENT_FIXES.md](DEPLOYMENT_FIXES.md) for issues fixed after the first VPS deploy.
 
