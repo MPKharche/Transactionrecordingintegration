@@ -1,0 +1,14 @@
+# VPS overlay: avoid host port clashes (nginx :80/:443, redis :6379, patternos postgres :5433).
+# Usage: docker compose -f docker-compose.yml -f docker-compose.vps.yml --env-file ../.env ...
+
+services:
+  postgres:
+    ports: !override
+      - "127.0.0.1:5434:5432"
+
+  redis:
+    ports: !override []
+
+  nginx:
+    ports: !override
+      - "127.0.0.1:3080:80"

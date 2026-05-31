@@ -16,7 +16,18 @@ GST document intelligence for CA practices: capture invoices, AI-assisted extrac
 | `packages/shared` | Types + validators |
 | `infra/` | Docker Compose (VPS) |
 
-## Quick start
+## Production deploy (one click)
+
+**Prerequisites:** Docker (Desktop on Windows/Mac, Engine on Linux)
+
+| OS | Setup | Deploy |
+|----|--------|--------|
+| Linux / WSL | `./scripts/setup-env.sh` | `./scripts/deploy.sh` |
+| Windows | `.\scripts\setup-env.ps1` | `.\scripts\deploy.ps1` |
+
+Edit `.env` after setup: `API_PUBLIC_URL`, `WEB_ORIGIN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `OPENROUTER_API_KEY`, and `DEPLOY_TARGET` (`vps` or `standalone`). Details: [docs/DEPLOY.md](docs/DEPLOY.md), [docs/DEPLOYMENT_FIXES.md](docs/DEPLOYMENT_FIXES.md).
+
+## Local dev
 
 **Prerequisites:** Docker Desktop, Node 22, pnpm
 

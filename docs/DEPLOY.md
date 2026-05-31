@@ -1,5 +1,38 @@
 # Production deploy (GitHub → remote server)
 
+## One-click (recommended)
+
+**Linux / WSL / macOS**
+
+```bash
+git clone https://github.com/MPKharche/Transactionrecordingintegration.git ca-suite
+cd ca-suite
+./scripts/setup-env.sh
+# Edit .env: API_PUBLIC_URL, WEB_ORIGIN, GOOGLE_*, OPENROUTER_API_KEY, DEPLOY_TARGET
+./scripts/deploy.sh
+```
+
+**Windows (PowerShell)**
+
+```powershell
+git clone https://github.com/MPKharche/Transactionrecordingintegration.git ca-suite
+cd ca-suite
+.\scripts\setup-env.ps1
+# Edit .env (same variables)
+.\scripts\deploy.ps1
+```
+
+| `DEPLOY_TARGET` | When |
+|-----------------|------|
+| `standalone` | Dedicated server — Docker nginx on port **80** |
+| `vps` | Shared VPS — app on **127.0.0.1:3080**, host nginx + TLS |
+
+VPS + domain: after deploy, `sudo ./scripts/install-host-nginx.sh your.domain` and add Google OAuth redirect `{API_PUBLIC_URL}/api/auth/google/callback`.
+
+See [DEPLOYMENT_FIXES.md](DEPLOYMENT_FIXES.md) for issues fixed after the first VPS deploy.
+
+---
+
 ## Architecture
 
 | Service | Role |
@@ -59,7 +92,8 @@ docker compose --env-file ../.env up -d extractor api worker web nginx
 Or one-shot from repo root (Linux):
 
 ```bash
-./scripts/deploy-prod.sh
+./scripts/deploy.sh
+# (alias: ./scripts/deploy-prod.sh)
 ```
 
 ## 4. Verify

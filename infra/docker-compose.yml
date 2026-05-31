@@ -215,6 +215,19 @@ services:
       extractor:
         condition: service_healthy
 
+  db-migrate:
+    build:
+      context: ../packages/db
+      dockerfile: Dockerfile
+    image: ca-saas-db-migrate:latest
+    profiles: ["tools"]
+    environment:
+      DATABASE_URL: postgresql://ca_user:${POSTGRES_PASSWORD:-ca_pass}@postgres:5432/ca_saas
+    networks: [ca-internal]
+    depends_on:
+      postgres:
+        condition: service_healthy
+
   bot:
     build:
       context: ..

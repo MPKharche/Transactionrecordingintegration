@@ -17,6 +17,5 @@ WORKDIR /app
 ENV NODE_ENV=production
 ENV WORKER_DEFER_IMAGE_OCR=true
 COPY --from=deps /app/node_modules ./node_modules
-COPY --from=deps /app/apps/worker/node_modules ./apps/worker/node_modules || true
 COPY . .
-CMD ["node", "--loader", "tsx/esm", "apps/worker/src/index.ts"]
+CMD ["node", "--import", "tsx", "apps/worker/src/index.ts"]

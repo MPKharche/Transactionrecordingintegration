@@ -3,6 +3,8 @@ package-lock.json
 dist/
 .env
 .env.local
+packages/db/node_modules/
+packages/db/package-lock.json
 *.log
 .DS_Store
 test-results/
