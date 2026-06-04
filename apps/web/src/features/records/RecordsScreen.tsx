@@ -6,6 +6,7 @@ import {
   currentIndianFinancialYear,
   listIndianFinancialYears,
 } from "@ca-suite/shared";
+import { useAppData } from "../../context/AppDataContext";
 import { DocTypeBadge } from "../../components/badges/DocTypeBadge";
 import { CopyBtn } from "../../components/ui/CopyBtn";
 import { INR, INR_SIGNED, getCounterParty, clientByIdFrom } from "../../lib/format";
@@ -254,7 +255,15 @@ export function RecordsScreen({
   onReview: (id: string) => void;
   onDelete?: (id: string) => Promise<void>;
 }) {
-  const [clientId, setClientId] = useState(clients[0]?.id ?? "");
+  const { session } = useAppData();
+
+  // Persist last-selected client per tenant so CAs don't re-select on every page visit
+  const storageKey = `records_client_${session?.tenantId ?? "default"}`;
+  const [clientId, setClientId] = useState(() => {
+    const saved = localStorage.getItem(storageKey);
+    const validSaved = saved && clients.find((c) => c.id === saved);
+    return validSaved ? saved : (clients[0]?.id ?? "");
+  });
   const [financialYear, setFinancialYear] = useState(currentIndianFinancialYear());
   const [docTab, setDocTab] = useState<DocType | "all">("all");
   const [search, setSearch] = useState("");
@@ -376,7 +385,7 @@ export function RecordsScreen({
           <div className="relative">
             <select
               value={clientId}
-              onChange={e => { setClientId(e.target.value); setExpandedId(null); }}
+              onChange={e => { const id = e.target.value; setClientId(id); localStorage.setItem(storageKey, id); setExpandedId(null); }}
               className="bg-card border border-border rounded-lg pl-10 pr-8 py-2.5 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer shadow-sm min-w-[220px]"
             >
               {clients.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}

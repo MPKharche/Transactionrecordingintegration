@@ -1,0 +1,25 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(pnpm *)",
+      "Bash(git *)",
+      "Bash(docker *)",
+      "Bash(curl *)",
+      "Bash(node *)",
+      "Bash(npx *)",
+      "Bash(tsx *)",
+      "Bash(vitest *)",
+      "Bash(playwright *)",
+      "Bash(ls *)",
+      "Bash(cat *)",
+      "Bash(mkdir *)",
+      "Bash(cp *)",
+      "Bash(mv *)",
+      "Bash(rm *)",
+      "Bash(echo *)",
+      "Bash(type *)",
+      "Bash(dir *)",
+      "Bash(powershell *)"
+    ]
+  }
+}

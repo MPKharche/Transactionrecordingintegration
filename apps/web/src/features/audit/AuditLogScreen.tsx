@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import type { AuditLogEntry } from "@ca-suite/shared";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { api } from "../../lib/api";
+import { Skeleton } from "../../app/components/ui/skeleton";
 
 function shortId(value?: string | null) {
   if (!value) return "—";
@@ -12,12 +13,16 @@ function shortId(value?: string | null) {
 export function AuditLogScreen() {
   const [rows, setRows] = useState<AuditLogEntry[]>([]);
   const [loading, setLoading] = useState(true);
+  const [fetchError, setFetchError] = useState<string | null>(null);
 
   useEffect(() => {
     api.auditLog
       .list()
       .then(setRows)
-      .catch(() => setRows([]))
+      .catch((err: Error) => {
+        setFetchError(err.message || "Failed to load audit log");
+        setRows([]);
+      })
       .finally(() => setLoading(false));
   }, []);
 
@@ -29,7 +34,22 @@ export function AuditLogScreen() {
       />
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
         {loading ? (
-          <p className="p-8 text-center text-muted-foreground text-sm">Loading…</p>
+          <div className="p-6 space-y-3">
+            {Array.from({ length: 6 }).map((_, i) => (
+              <div key={i} className="flex gap-4 items-center">
+                <Skeleton className="h-4 w-44 shrink-0" />
+                <Skeleton className="h-6 w-36 rounded-md" />
+                <Skeleton className="h-4 flex-1 max-w-[260px]" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-4 w-24" />
+              </div>
+            ))}
+          </div>
+        ) : fetchError ? (
+          <div className="p-8 text-center space-y-1">
+            <p className="text-red-500 text-sm font-medium">Failed to load audit log</p>
+            <p className="text-xs text-muted-foreground">{fetchError}</p>
+          </div>
         ) : rows.length === 0 ? (
           <p className="p-8 text-center text-muted-foreground text-sm">No audit entries yet.</p>
         ) : (

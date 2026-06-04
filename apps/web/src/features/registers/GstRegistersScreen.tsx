@@ -5,6 +5,7 @@ import { PageHeader } from "../../components/layout/PageHeader";
 import { INR, INR_SIGNED } from "../../lib/format";
 import { api, currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
 import { Download, AlertTriangle, ChevronDown, Building2 } from "lucide-react";
+import { Skeleton } from "../../app/components/ui/skeleton";
 
 const FY_OPTIONS = listIndianFinancialYears(2016);
 
@@ -20,19 +21,24 @@ export function GstRegistersScreen({
   const [fy, setFy] = useState(currentFinancialYear());
   const [rows, setRows] = useState<GstRegisterRow[]>([]);
   const [loading, setLoading] = useState(false);
+  const [fetchError, setFetchError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState({ kind: "", clientId: "", fy: "" });
 
   // Fetch register rows whenever filter changes
   useEffect(() => {
     if (!clientId) return;
     setLoading(true);
+    setFetchError(null);
     api.registers
       .list(kind, { client_id: clientId, financial_year: fy })
       .then((data) => {
         setRows(data);
         setLastFetched({ kind, clientId, fy });
       })
-      .catch(() => setRows([]))
+      .catch((err: Error) => {
+        setFetchError(err.message || "Failed to load register");
+        setRows([]);
+      })
       .finally(() => setLoading(false));
   }, [kind, clientId, fy]);
 
@@ -175,7 +181,24 @@ export function GstRegistersScreen({
       {/* Table */}
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
         {loading ? (
-          <p className="p-8 text-center text-muted-foreground text-sm">Loading register…</p>
+          <div className="p-6 space-y-3">
+            {Array.from({ length: 5 }).map((_, i) => (
+              <div key={i} className="flex gap-4 items-center">
+                <Skeleton className="h-4 w-8 shrink-0" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 flex-1 max-w-[140px]" />
+                <Skeleton className="h-4 w-32" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-20 ml-auto" />
+              </div>
+            ))}
+          </div>
+        ) : fetchError ? (
+          <div className="p-8 text-center space-y-2">
+            <p className="text-red-500 text-sm font-medium">Failed to load register</p>
+            <p className="text-xs text-muted-foreground">{fetchError}</p>
+          </div>
         ) : rows.length === 0 ? (
           <div className="p-8 text-center space-y-2">
             <p className="text-muted-foreground text-sm">

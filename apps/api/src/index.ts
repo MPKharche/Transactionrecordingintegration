@@ -251,9 +251,8 @@ export async function buildApp() {
   });
 
   app.get("/api/pipeline/status", async (req, reply) => {
-    try {
-      await resolveAuth(req);
-    } catch {
+    const pipelineAuth = await resolveAuth(req);
+    if (!pipelineAuth) {
       return reply.status(401).send({ error: "Unauthorized" });
     }
     const metrics = await getPipelineQueueMetrics();
@@ -1345,10 +1344,18 @@ export async function buildApp() {
         )
         .limit(1);
       if (!row) return reply.status(404).send({ error: "Not found" });
-      // Same-origin HTTPS proxy — avoids mixed content (http://minio:9000) in browser iframe
-      let url = `/api/documents/${req.params.id}/file`;
+      if (!row.storagePath) return reply.status(404).send({ error: "File not yet stored" });
+
+      // Generate a short-lived (15 min) MinIO presigned URL so the browser iframe can
+      // load the PDF directly without needing to forward the session cookie (which
+      // SameSite=Lax cookies won't send in cross-origin iframes, causing 502 on Vercel).
+      const { presignedGet } = await import("./lib/minio.js");
+      const presigned = await presignedGet(row.storagePath, 900); // 15 min TTL
+
+      // Build the final URL: for segmented docs, append a page anchor
+      let url = presigned;
       if (row.pageStart != null && row.pageStart > 0) {
-        url = `${url}#page=${row.pageStart}`;
+        url = `${presigned}#page=${row.pageStart}`;
       }
       return { url };
     }

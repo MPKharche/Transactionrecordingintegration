@@ -18,7 +18,7 @@ import {
 } from "lucide-react";
 
 export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void }) {
-  const { uploadFile } = useAppData();
+  const { uploadFile, retryDocument } = useAppData();
   const clientById = (id: string) => clientByIdFrom(clients, id);
   const [dragging, setDragging] = useState(false);
   const [selClient, setSelClient] = useState(clients[0]?.id ?? "");
@@ -216,6 +216,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
           clients={clients}
           isDark={isDark}
           onReview={onReview}
+          onRetry={retryDocument}
         />
       </div>
     </div>

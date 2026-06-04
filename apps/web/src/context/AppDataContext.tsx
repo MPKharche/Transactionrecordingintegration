@@ -8,6 +8,7 @@ import {
   useState,
   type ReactNode,
 } from "react";
+import { toast } from "sonner";
 import type { Client, GSTDocument, MastersBundle, Party } from "@ca-suite/shared";
 import { api, getAuth, trySession, type AuthHeaders } from "../lib/api";
 
@@ -164,6 +165,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const parties = await api.parties.list();
     setPartyByGstin(parties);
     await refreshMasters();
+    toast.success("Document locked successfully");
   }, [refreshMasters]);
 
   const bulkLockDocuments = useCallback(async (ids: string[]) => {
@@ -180,6 +182,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       const parties = await api.parties.list();
       setPartyByGstin(parties);
       await refreshMasters();
+      toast.success(`${res.locked.length} document${res.locked.length !== 1 ? "s" : ""} locked`);
+    }
+    if (res.errors.length > 0) {
+      toast.error(`${res.errors.length} document${res.errors.length !== 1 ? "s" : ""} could not be locked`);
     }
     return res;
   }, [refreshMasters]);
@@ -187,11 +193,13 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   const rejectDocument = useCallback(async (id: string, reason?: string) => {
     const updated = await api.documents.reject(id, reason);
     setDocs((prev) => prev.map((d) => (d.id === id ? updated : d)));
+    toast.success("Document rejected");
   }, []);
 
   const retryDocument = useCallback(async (id: string) => {
     const updated = await api.documents.retry(id);
     setDocs((prev) => prev.map((d) => (d.id === id ? updated : d)));
+    toast.success("Document queued for retry");
   }, []);
 
   const deleteDocument = useCallback(async (id: string) => {

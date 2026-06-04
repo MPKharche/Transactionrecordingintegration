@@ -29,12 +29,14 @@ export function DocumentWorklistTable({
   clients,
   isDark,
   onReview,
+  onRetry,
   emptyMessage = "No documents match your filter",
 }: {
   docs: GSTDocument[];
   clients: Client[];
   isDark: boolean;
   onReview: (id: string) => void;
+  onRetry?: (id: string) => void;
   emptyMessage?: string;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
@@ -168,9 +170,15 @@ export function DocumentWorklistTable({
                         </button>
                       )}
                       {d.stage === "failed" && (
-                        <span className="text-red-500" title="Retry from Records">
+                        <button
+                          type="button"
+                          title="Retry processing"
+                          aria-label="Retry failed document"
+                          onClick={() => onRetry?.(d.id)}
+                          className="inline-flex items-center gap-1 text-red-500 hover:text-red-400 transition-colors"
+                        >
                           <RefreshCw size={12} />
-                        </span>
+                        </button>
                       )}
                     </td>
                   </tr>

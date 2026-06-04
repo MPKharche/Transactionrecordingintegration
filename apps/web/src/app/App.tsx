@@ -1,10 +1,12 @@
 import { BrowserRouter, Routes, Route, Navigate } from "react-router";
 import { AuthenticatedApp } from "./AuthenticatedApp";
 import { LoginPage } from "../features/auth/LoginPage";
+import { Toaster } from "./components/ui/sonner";
 
 export default function App() {
   return (
     <BrowserRouter>
+      <Toaster richColors position="top-right" />
       <Routes>
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<AuthenticatedApp />} />
