@@ -10,6 +10,8 @@ import {
   dbStageToJob,
   isJobPipelineStage,
   isUploadPastStage,
+  shouldApplyReverseCharge,
+  computeITCEligibility,
 } from "@ca-suite/shared";
 import {
   WORKER_CONCURRENCY,
@@ -167,5 +169,194 @@ describe("US-GST-RULES-01: validators", () => {
     };
     const issues = validateGstDocument(bad);
     expect(issues.some((i) => i.message.includes("Intra-state"))).toBe(true);
+  });
+});
+
+describe("US-GST-RULES-02: Reverse Charge Detection (RC)", () => {
+  const basePurchase = {
+    ...baseDoc,
+    doc_type: "purchase_invoice" as const,
+  };
+
+  it("detects RC when supplier is unregistered", () => {
+    const doc = {
+      ...basePurchase,
+      supplier: { ...baseDoc.supplier, is_registered: false },
+    };
+    const result = shouldApplyReverseCharge(doc);
+    expect(result).toBe(true);
+  });
+
+  it("no RC when supplier is registered (normal B2B)", () => {
+    const doc = {
+      ...basePurchase,
+      supplier: { ...baseDoc.supplier, is_registered: true },
+    };
+    const result = shouldApplyReverseCharge(doc);
+    expect(result).toBe(false);
+  });
+
+  it("detects RC for SEZ supplies", () => {
+    const doc = {
+      ...basePurchase,
+      b2b_category: "sez" as const,
+    };
+    const result = shouldApplyReverseCharge(doc);
+    expect(result).toBe(true);
+  });
+
+  it("no RC for regular B2B supply", () => {
+    const doc = {
+      ...basePurchase,
+      b2b_category: "b2b" as const,
+    };
+    const result = shouldApplyReverseCharge(doc);
+    expect(result).toBe(false);
+  });
+
+  it("detects RC on credit note received from unregistered supplier", () => {
+    const doc = {
+      ...baseDoc,
+      doc_type: "credit_note_received" as const,
+      supplier: { ...baseDoc.supplier, is_registered: false },
+    };
+    const result = shouldApplyReverseCharge(doc);
+    expect(result).toBe(true);
+  });
+
+  it("applies RC to unregistered recipient on sales invoice (B2C)", () => {
+    const doc = {
+      ...baseDoc,
+      doc_type: "sales_invoice" as const,
+      recipient: { ...baseDoc.recipient, is_registered: false },
+    };
+    const result = shouldApplyReverseCharge(doc);
+    expect(result).toBe(true);
+  });
+
+  it("no RC when both parties registered (normal B2B sales)", () => {
+    const doc = {
+      ...baseDoc,
+      doc_type: "sales_invoice" as const,
+      recipient: { ...baseDoc.recipient, is_registered: true },
+    };
+    const result = shouldApplyReverseCharge(doc);
+    expect(result).toBe(false);
+  });
+});
+
+describe("US-GST-RULES-02: ITC Eligibility (Input Tax Credit)", () => {
+  const basePurchase = {
+    ...baseDoc,
+    doc_type: "purchase_invoice" as const,
+  };
+
+  it("allows ITC when supplier is registered (normal B2B)", () => {
+    const doc = {
+      ...basePurchase,
+      supply_type: "inter_state" as const,
+      supplier: { ...baseDoc.supplier, is_registered: true },
+      reverse_charge: false,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(true);
+  });
+
+  it("denies ITC when reverse charge applies", () => {
+    const doc = {
+      ...basePurchase,
+      reverse_charge: true,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("Reverse charge");
+  });
+
+  it("denies ITC when supplier is unregistered (bill of supply)", () => {
+    const doc = {
+      ...basePurchase,
+      supplier: { ...baseDoc.supplier, is_registered: false },
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("unregistered");
+  });
+
+  it("denies ITC on exempt supply", () => {
+    const doc = {
+      ...basePurchase,
+      supply_type: "exempt" as const,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("exempt");
+  });
+
+  it("denies ITC on nil-rated supply", () => {
+    const doc = {
+      ...basePurchase,
+      supply_type: "nil_rated" as const,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("nil-rated");
+  });
+
+  it("denies ITC when no tax charged (potential nil-rated)", () => {
+    const doc = {
+      ...basePurchase,
+      supply_type: "inter_state" as const,
+      taxable_amount: 1000,
+      igst: 0,
+      cgst: 0,
+      sgst: 0,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("No GST charged");
+  });
+
+  it("allows ITC on intra-state with CGST+SGST", () => {
+    const doc = {
+      ...basePurchase,
+      supply_type: "intra_state" as const,
+      taxable_amount: 1000,
+      cgst: 90,
+      sgst: 90,
+      igst: 0,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(true);
+  });
+
+  it("sales documents always return eligible (no ITC concept)", () => {
+    const doc = {
+      ...baseDoc,
+      doc_type: "sales_invoice" as const,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(true);
+  });
+
+  it("debit note received respects ITC rules", () => {
+    const doc = {
+      ...baseDoc,
+      doc_type: "debit_note_received" as const,
+      supplier: { ...baseDoc.supplier, is_registered: true },
+      supply_type: "inter_state" as const,
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(true);
+  });
+
+  it("debit note received from unregistered supplier denies ITC", () => {
+    const doc = {
+      ...baseDoc,
+      doc_type: "debit_note_received" as const,
+      supplier: { ...baseDoc.supplier, is_registered: false },
+    };
+    const result = computeITCEligibility(doc);
+    expect(result.eligible).toBe(false);
+    expect(result.reason).toContain("unregistered");
   });
 });
