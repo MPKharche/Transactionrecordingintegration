@@ -2101,21 +2101,19 @@ export async function buildApp() {
         .limit(1);
       if (!client) return reply.status(404).send({ error: "Client not found" });
 
-      let query = db
-        .select()
-        .from(filingDeadlines)
-        .where(
-          and(
-            eq(filingDeadlines.tenantId, ctx.tenantId),
-            eq(filingDeadlines.clientId, clientId)
-          )
-        );
-
+      const whereConditions: any[] = [
+        eq(filingDeadlines.tenantId, ctx.tenantId),
+        eq(filingDeadlines.clientId, clientId),
+      ];
       if (q.financial_year) {
-        query = query.where(eq(filingDeadlines.financialYear, q.financial_year));
+        whereConditions.push(eq(filingDeadlines.financialYear, q.financial_year));
       }
 
-      const deadlines = await query.orderBy(desc(filingDeadlines.dueDate));
+      const deadlines = await db
+        .select()
+        .from(filingDeadlines)
+        .where(and(...whereConditions))
+        .orderBy(desc(filingDeadlines.dueDate));
 
       // Compute status based on due date
       const now = new Date();
@@ -2508,25 +2506,19 @@ export async function buildApp() {
         .limit(1);
       if (!client) return reply.status(404).send({ error: "Client not found" });
 
-      let query = db
-        .select()
-        .from(itcReconciliationSnapshots)
-        .where(
-          and(
-            eq(itcReconciliationSnapshots.tenantId, ctx.tenantId),
-            eq(itcReconciliationSnapshots.clientId, clientId)
-          )
-        );
-
+      const whereConditions2: any[] = [
+        eq(itcReconciliationSnapshots.tenantId, ctx.tenantId),
+        eq(itcReconciliationSnapshots.clientId, clientId),
+      ];
       if (q.financial_year) {
-        query = query.where(
-          eq(itcReconciliationSnapshots.financialYear, q.financial_year)
-        );
+        whereConditions2.push(eq(itcReconciliationSnapshots.financialYear, q.financial_year));
       }
 
-      const snapshots = await query.orderBy(
-        desc(itcReconciliationSnapshots.createdAt)
-      );
+      const snapshots = await db
+        .select()
+        .from(itcReconciliationSnapshots)
+        .where(and(...whereConditions2))
+        .orderBy(desc(itcReconciliationSnapshots.createdAt));
 
       return {
         snapshots: snapshots.map((s) => ({
@@ -2739,21 +2731,19 @@ export async function buildApp() {
         .limit(1);
       if (!client) return reply.status(404).send({ error: "Client not found" });
 
-      let query = db
-        .select()
-        .from(amendmentDocuments)
-        .where(
-          and(
-            eq(amendmentDocuments.tenantId, ctx.tenantId),
-            eq(amendmentDocuments.clientId, clientId)
-          )
-        );
-
+      const whereConditions3: any[] = [
+        eq(amendmentDocuments.tenantId, ctx.tenantId),
+        eq(amendmentDocuments.clientId, clientId),
+      ];
       if (q.status) {
-        query = query.where(eq(amendmentDocuments.status, q.status));
+        whereConditions3.push(eq(amendmentDocuments.status, q.status as any));
       }
 
-      const amendments = await query.orderBy(desc(amendmentDocuments.createdAt));
+      const amendments = await db
+        .select()
+        .from(amendmentDocuments)
+        .where(and(...whereConditions3))
+        .orderBy(desc(amendmentDocuments.createdAt));
 
       return {
         amendments: amendments.map((a) => ({
@@ -2841,12 +2831,12 @@ export async function buildApp() {
         return reply.status(400).send({ error: "api_key and org_id required" });
       }
 
-      const result = await initializeZohoSync(ctx.tenantId, clientId, body.api_key, body.org_id);
+      const result = await initializeZohoSync(ctx.tenantId, clientId, body.api_key as string, body.org_id as string);
       if (!result.success) {
         return reply.status(400).send({ error: result.error });
       }
 
-      await audit(ctx, "zoho.connect", "integration", result.configId, { clientId });
+      await audit(ctx, "zoho.connect", "integration", result.configId as string, { clientId });
 
       return { success: true, config_id: result.configId };
     }
@@ -2934,16 +2924,15 @@ export async function buildApp() {
       const result = await initializeGstPortalSync(
         ctx.tenantId,
         clientId,
-        client.gstin,
-        body.portal_token,
-        body.refresh_token
+        client.gstin as string,
+        body.portal_token as string
       );
 
       if (!result.success) {
         return reply.status(400).send({ error: result.error });
       }
 
-      await audit(ctx, "gst-portal.connect", "integration", result.configId, { clientId });
+      await audit(ctx, "gst-portal.connect", "integration", result.configId as string, { clientId });
 
       return { success: true, config_id: result.configId };
     }
@@ -3006,12 +2995,12 @@ export async function buildApp() {
       return reply.status(400).send({ error: result.error });
     }
 
-    await audit(ctx, "email-forward.setup", "integration", result.configId, {});
+    await audit(ctx, "email-forward.setup", "integration", result.forwardAddress as string, {});
 
     return {
       configured: true,
       forward_address: result.forwardAddress,
-      config_id: result.configId,
+      config_id: result.forwardAddress,
     };
   });
 
