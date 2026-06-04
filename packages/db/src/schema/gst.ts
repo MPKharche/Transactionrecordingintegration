@@ -213,6 +213,8 @@ export const documentLines = pgTable("document_lines", {
   discountAmount: numeric("discount_amount", { precision: 12, scale: 2 }).default("0"),
   cessRate: numeric("cess_rate", { precision: 6, scale: 2 }).default("0"),
   total: numeric("total", { precision: 18, scale: 2 }),
+  // TIER 3.4: Expense category tagging
+  lineItemCategory: text("line_item_category"), // Category code from category_master
 });
 
 export const documentIssues = pgTable("document_issues", {

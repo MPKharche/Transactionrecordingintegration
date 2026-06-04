@@ -32,6 +32,9 @@ import {
   users,
   memberships,
   masterHsn,
+  filingDeadlines,
+  itcReconciliationSnapshots,
+  amendmentDocuments,
 } from "@ca-suite/db";
 import {
   canLockDocument,
@@ -743,6 +746,7 @@ export async function buildApp() {
       stage?: string;
       financial_year?: string;
       assigned_to?: string;
+      capture_source?: string;
       limit?: string;
       offset?: string;
     };
@@ -795,7 +799,9 @@ export async function buildApp() {
       .map((r) => r.uploadId)
       .filter((id): id is string => Boolean(id));
     const captureByUpload = await captureMetaByUploadIds(uploadIds);
-    return filtered.map((row) =>
+
+    // TIER 2: Apply capture_source filter if provided
+    let docs = filtered.map((row) =>
       mapDocument(
         row,
         (linesByDoc.get(row.id) ?? []).sort((a, b) => a.seq - b.seq),
@@ -803,6 +809,14 @@ export async function buildApp() {
         row.uploadId ? captureByUpload.get(row.uploadId) : undefined
       )
     );
+
+    if (q.capture_source) {
+      docs = docs.filter(
+        (d) => d.capture_source === q.capture_source
+      );
+    }
+
+    return docs;
   });
 
   app.get<{ Params: { id: string } }>("/api/documents/:id", async (req, reply) => {
@@ -1624,6 +1638,69 @@ export async function buildApp() {
     }));
   });
 
+  // TIER 2: Multi-Channel Audit Enrichment
+  app.get<{ Params: { clientId: string } }>(
+    "/api/audit/capture-sources/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      // Get all documents for this client
+      const docs = await db
+        .select()
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            eq(gstDocuments.clientId, clientId)
+          )
+        );
+
+      const uploadIds = docs
+        .map((d) => d.uploadId)
+        .filter((id): id is string => Boolean(id));
+      const captureByUpload = await captureMetaByUploadIds(uploadIds);
+
+      // Group by capture source
+      const bySource = new Map<string, any[]>();
+      for (const doc of docs) {
+        if (!doc.uploadId) continue;
+        const capture = captureByUpload.get(doc.uploadId);
+        if (!capture) continue;
+
+        const source = capture.capture_source || "unknown";
+        if (!bySource.has(source)) {
+          bySource.set(source, []);
+        }
+        bySource.get(source)!.push({
+          document_id: doc.id,
+          doc_number: doc.docNumber,
+          uploaded_by: capture.uploaded_by,
+          captured_at: capture.captured_at,
+        });
+      }
+
+      const summary: any[] = [];
+      for (const [source, items] of bySource.entries()) {
+        summary.push({
+          capture_source: source,
+          count: items.length,
+          documents: items,
+        });
+      }
+
+      return { summary };
+    }
+  );
+
   app.put<{ Params: { id: string }; Body: { user_ids?: string[] } }>(
     "/api/clients/:id/assignments",
     async (req, reply) => {
@@ -1749,6 +1826,259 @@ export async function buildApp() {
     return { locked, errors };
   });
 
+  // ─── TIER 2: Filing Deadline Tracker ──────────────────────────────────────
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/filing-deadlines/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { financial_year?: string };
+      const { clientId } = req.params;
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      let query = db
+        .select()
+        .from(filingDeadlines)
+        .where(
+          and(
+            eq(filingDeadlines.tenantId, ctx.tenantId),
+            eq(filingDeadlines.clientId, clientId)
+          )
+        );
+
+      if (q.financial_year) {
+        query = query.where(eq(filingDeadlines.financialYear, q.financial_year));
+      }
+
+      const deadlines = await query.orderBy(desc(filingDeadlines.dueDate));
+
+      // Compute status based on due date
+      const now = new Date();
+      const enriched = deadlines.map((d) => ({
+        ...d,
+        daysUntilDue: Math.ceil(
+          (d.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+        ),
+        isOverdue: d.status === "overdue" || (d.dueDate < now && d.status === "pending"),
+      }));
+
+      return { deadlines: enriched };
+    }
+  );
+
+  app.post<{
+    Params: { clientId: string };
+    Body: {
+      financial_year: string;
+      filing_type: "GSTR1" | "GSTR2B" | "GSTR3B";
+      due_date: string; // ISO date or timestamp
+      notes?: string;
+    };
+  }>(
+    "/api/filing-deadlines/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const body = req.body ?? {};
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      // Validate input
+      if (
+        !body.financial_year ||
+        !body.filing_type ||
+        !body.due_date
+      ) {
+        return reply.status(400).send({
+          error: "financial_year, filing_type, and due_date required",
+        });
+      }
+
+      if (!["GSTR1", "GSTR2B", "GSTR3B"].includes(body.filing_type)) {
+        return reply
+          .status(400)
+          .send({ error: "filing_type must be GSTR1, GSTR2B, or GSTR3B" });
+      }
+
+      const dueDate = new Date(body.due_date);
+      if (isNaN(dueDate.getTime())) {
+        return reply.status(400).send({ error: "Invalid due_date format" });
+      }
+
+      // Check if deadline already exists
+      const [existing] = await db
+        .select()
+        .from(filingDeadlines)
+        .where(
+          and(
+            eq(filingDeadlines.tenantId, ctx.tenantId),
+            eq(filingDeadlines.clientId, clientId),
+            eq(filingDeadlines.financialYear, body.financial_year),
+            eq(filingDeadlines.filingType, body.filing_type as any)
+          )
+        )
+        .limit(1);
+
+      if (existing) {
+        // Update existing
+        const [updated] = await db
+          .update(filingDeadlines)
+          .set({
+            dueDate,
+            notes: body.notes ?? existing.notes,
+            updatedAt: new Date(),
+          })
+          .where(eq(filingDeadlines.id, existing.id))
+          .returning();
+
+        await audit(
+          ctx,
+          "filing_deadline.update",
+          "filing_deadline",
+          updated.id,
+          { clientId, filingType: body.filing_type, fy: body.financial_year }
+        );
+
+        return updated;
+      }
+
+      // Create new
+      const [row] = await db
+        .insert(filingDeadlines)
+        .values({
+          tenantId: ctx.tenantId,
+          clientId,
+          financialYear: body.financial_year,
+          filingType: body.filing_type as any,
+          dueDate,
+          status: "pending",
+          notes: body.notes ?? "",
+        })
+        .returning();
+
+      await audit(
+        ctx,
+        "filing_deadline.create",
+        "filing_deadline",
+        row.id,
+        { clientId, filingType: body.filing_type, fy: body.financial_year }
+      );
+
+      return row;
+    }
+  );
+
+  app.patch<{
+    Params: { id: string };
+    Body: { status?: "pending" | "filed" | "overdue"; notes?: string };
+  }>(
+    "/api/filing-deadlines/:id",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { id } = req.params;
+      const body = req.body ?? {};
+
+      // Verify deadline exists and user has access
+      const [deadline] = await db
+        .select()
+        .from(filingDeadlines)
+        .where(eq(filingDeadlines.id, id))
+        .limit(1);
+      if (!deadline) return reply.status(404).send({ error: "Not found" });
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(
+            eq(clients.id, deadline.clientId),
+            eq(clients.tenantId, ctx.tenantId)
+          )
+        )
+        .limit(1);
+      if (!client) return reply.status(403).send({ error: "Access denied" });
+
+      const updateObj: Record<string, any> = { updatedAt: new Date() };
+      if (body.status) {
+        updateObj.status = body.status;
+        if (body.status === "filed") {
+          updateObj.filedDate = new Date();
+        }
+      }
+      if (body.notes !== undefined) {
+        updateObj.notes = body.notes;
+      }
+
+      const [updated] = await db
+        .update(filingDeadlines)
+        .set(updateObj)
+        .where(eq(filingDeadlines.id, id))
+        .returning();
+
+      await audit(
+        ctx,
+        "filing_deadline.update",
+        "filing_deadline",
+        id,
+        body
+      );
+
+      return updated;
+    }
+  );
+
+  app.delete<{ Params: { id: string } }>(
+    "/api/filing-deadlines/:id",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { id } = req.params;
+
+      // Verify deadline exists and user has access
+      const [deadline] = await db
+        .select()
+        .from(filingDeadlines)
+        .where(eq(filingDeadlines.id, id))
+        .limit(1);
+      if (!deadline) return reply.status(404).send({ error: "Not found" });
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(
+            eq(clients.id, deadline.clientId),
+            eq(clients.tenantId, ctx.tenantId)
+          )
+        )
+        .limit(1);
+      if (!client) return reply.status(403).send({ error: "Access denied" });
+
+      await db.delete(filingDeadlines).where(eq(filingDeadlines.id, id));
+
+      await audit(
+        ctx,
+        "filing_deadline.delete",
+        "filing_deadline",
+        id
+      );
+
+      return { ok: true };
+    }
+  );
+
   app.get("/api/compliance/calendar", async () => {
     const now = new Date();
     const y = now.getFullYear();
@@ -1763,6 +2093,473 @@ export async function buildApp() {
       ],
     };
   });
+
+  // ─── TIER 2: ITC Reconciliation Alerts ────────────────────────────────────
+
+  app.post<{
+    Params: { clientId: string };
+    Body: { financial_year: string; gstr2b_json: string };
+  }>(
+    "/api/reconciliation/compare/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const body = req.body ?? {};
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      if (!body.financial_year || !body.gstr2b_json) {
+        return reply.status(400).send({
+          error: "financial_year and gstr2b_json required",
+        });
+      }
+
+      // Parse GSTR-2B JSON
+      let gstr2bData: any;
+      try {
+        gstr2bData =
+          typeof body.gstr2b_json === "string"
+            ? JSON.parse(body.gstr2b_json)
+            : body.gstr2b_json;
+      } catch {
+        return reply.status(400).send({ error: "Invalid gstr2b_json format" });
+      }
+
+      // Get all locked purchase invoices for the client and FY
+      const purchInvoices = await db
+        .select()
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            eq(gstDocuments.clientId, clientId),
+            eq(gstDocuments.stage, "locked"),
+            inArray(gstDocuments.docType, [
+              "purchase_invoice",
+              "debit_note_received",
+              "credit_note_received",
+            ])
+          )
+        );
+
+      // Simple reconciliation: match invoice numbers
+      const registerInvoices = new Map<string, typeof purchInvoices[0]>();
+      for (const inv of purchInvoices) {
+        if (inv.docNumber) {
+          registerInvoices.set(inv.docNumber.toUpperCase(), inv);
+        }
+      }
+
+      const gstr2bInvoices = gstr2bData.invoices || [];
+      const mismatches: any[] = [];
+      let matchedCount = 0;
+      let mismatchedCount = 0;
+
+      for (const gstr of gstr2bInvoices) {
+        const key = (gstr.invoice_number || gstr.inv_num || "").toUpperCase();
+        if (!key) continue;
+
+        if (registerInvoices.has(key)) {
+          matchedCount++;
+        } else {
+          mismatchedCount++;
+          mismatches.push({
+            gstr_invoice_number: key,
+            party_name: gstr.supplier_name || gstr.party_name,
+            party_gstin: gstr.supplier_gstin || gstr.party_gstin,
+            gstr_taxable: gstr.taxable_value || 0,
+            gstr_tax: gstr.total_tax || 0,
+            reason: "Invoice in GSTR-2B but not in register",
+          });
+        }
+      }
+
+      // Check for invoices in register but not in GSTR-2B
+      for (const [invNum, regInv] of registerInvoices.entries()) {
+        const found = gstr2bInvoices.some(
+          (g: any) =>
+            (g.invoice_number || g.inv_num || "").toUpperCase() === invNum
+        );
+        if (!found) {
+          mismatchedCount++;
+          mismatches.push({
+            register_invoice_number: invNum,
+            party_name: (regInv.supplier as any)?.name || "",
+            party_gstin: (regInv.supplier as any)?.gstin || "",
+            register_taxable: parseFloat(regInv.taxableAmount ?? "0"),
+            register_tax: parseFloat(regInv.igst ?? "0") +
+              parseFloat(regInv.cgst ?? "0") +
+              parseFloat(regInv.sgst ?? "0"),
+            reason: "Invoice in register but not in GSTR-2B",
+          });
+        }
+      }
+
+      // Save snapshot
+      const [snapshot] = await db
+        .insert(itcReconciliationSnapshots)
+        .values({
+          tenantId: ctx.tenantId,
+          clientId,
+          financialYear: body.financial_year,
+          gstr2bJson: body.gstr2b_json,
+          matchedCount,
+          mismatchedCount,
+          reconciliationData: JSON.stringify({
+            mismatches,
+            summary: { matched: matchedCount, mismatched: mismatchedCount },
+          }),
+        })
+        .returning();
+
+      await audit(
+        ctx,
+        "reconciliation.compare",
+        "reconciliation",
+        snapshot.id,
+        { clientId, fy: body.financial_year, mismatches: mismatchedCount }
+      );
+
+      return {
+        id: snapshot.id,
+        matched_count: matchedCount,
+        mismatched_count: mismatchedCount,
+        mismatches,
+      };
+    }
+  );
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/reconciliation/snapshots/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { financial_year?: string };
+      const { clientId } = req.params;
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      let query = db
+        .select()
+        .from(itcReconciliationSnapshots)
+        .where(
+          and(
+            eq(itcReconciliationSnapshots.tenantId, ctx.tenantId),
+            eq(itcReconciliationSnapshots.clientId, clientId)
+          )
+        );
+
+      if (q.financial_year) {
+        query = query.where(
+          eq(itcReconciliationSnapshots.financialYear, q.financial_year)
+        );
+      }
+
+      const snapshots = await query.orderBy(
+        desc(itcReconciliationSnapshots.createdAt)
+      );
+
+      return {
+        snapshots: snapshots.map((s) => ({
+          id: s.id,
+          financial_year: s.financialYear,
+          matched_count: s.matchedCount,
+          mismatched_count: s.mismatchedCount,
+          reconciliation_data: s.reconciliationData
+            ? JSON.parse(s.reconciliationData)
+            : null,
+          created_at: s.createdAt.toISOString(),
+        })),
+      };
+    }
+  );
+
+  // ─── TIER 2: Tax Liability Dashboard ──────────────────────────────────────
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/tax-liability/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { financial_year?: string };
+      const { clientId } = req.params;
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      // Get all locked documents for the client
+      const docs = await db
+        .select()
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            eq(gstDocuments.clientId, clientId),
+            eq(gstDocuments.stage, "locked")
+          )
+        );
+
+      // Filter by FY if provided
+      const targetFy = q.financial_year || currentIndianFinancialYear();
+      const filtered = q.financial_year
+        ? docs.filter((d) => d.financialYear === targetFy)
+        : docs;
+
+      // Compute tax liability
+      let totalPayable = 0;
+      let totalItcAvailable = 0;
+
+      for (const doc of filtered) {
+        const isSales = ["sales_invoice", "debit_note_issued"].includes(
+          doc.docType
+        );
+
+        if (isSales) {
+          // Sales: add up tax
+          totalPayable += parseFloat(doc.igst ?? "0");
+          totalPayable += parseFloat(doc.cgst ?? "0");
+          totalPayable += parseFloat(doc.sgst ?? "0");
+        } else {
+          // Purchase: ITC eligible invoices
+          if (doc.itcEligible && !doc.reverseCharge) {
+            totalItcAvailable += parseFloat(doc.igst ?? "0");
+            totalItcAvailable += parseFloat(doc.cgst ?? "0");
+            totalItcAvailable += parseFloat(doc.sgst ?? "0");
+          }
+        }
+      }
+
+      const taxDue = Math.max(0, totalPayable - totalItcAvailable);
+
+      // Compute trends for past 5 FYs
+      const trends: any[] = [];
+      for (let i = 0; i < 5; i++) {
+        const year = new Date().getFullYear() - i;
+        const fy = `${year - 1}-${String(year).slice(-2)}`;
+        const fyDocs = docs.filter((d) => d.financialYear === fy);
+
+        let fyPayable = 0;
+        let fyItc = 0;
+        for (const doc of fyDocs) {
+          const isSales = ["sales_invoice", "debit_note_issued"].includes(
+            doc.docType
+          );
+          if (isSales) {
+            fyPayable += parseFloat(doc.igst ?? "0");
+            fyPayable += parseFloat(doc.cgst ?? "0");
+            fyPayable += parseFloat(doc.sgst ?? "0");
+          } else if (doc.itcEligible && !doc.reverseCharge) {
+            fyItc += parseFloat(doc.igst ?? "0");
+            fyItc += parseFloat(doc.cgst ?? "0");
+            fyItc += parseFloat(doc.sgst ?? "0");
+          }
+        }
+
+        trends.push({
+          financial_year: fy,
+          payable: fyPayable,
+          itc_available: fyItc,
+          tax_due: Math.max(0, fyPayable - fyItc),
+        });
+      }
+
+      return {
+        financial_year: targetFy,
+        payable: totalPayable,
+        itc_available: totalItcAvailable,
+        tax_due: taxDue,
+        is_refund_case: totalItcAvailable > totalPayable,
+        trends: trends.reverse(),
+      };
+    }
+  );
+
+  // ─── TIER 2: Amendment Return Workflow ────────────────────────────────────
+
+  app.post<{
+    Params: { clientId: string };
+    Body: {
+      original_document_id: string;
+      reason_code: string;
+      changes_summary?: string;
+      amendment_data: Record<string, unknown>;
+    };
+  }>(
+    "/api/amendments/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const body = req.body ?? {};
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      if (!body.original_document_id || !body.reason_code || !body.amendment_data) {
+        return reply.status(400).send({
+          error: "original_document_id, reason_code, and amendment_data required",
+        });
+      }
+
+      // Verify original document exists
+      const [origDoc] = await db
+        .select()
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.id, body.original_document_id),
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            eq(gstDocuments.clientId, clientId)
+          )
+        )
+        .limit(1);
+
+      if (!origDoc) {
+        return reply.status(404).send({ error: "Original document not found" });
+      }
+
+      const [amendment] = await db
+        .insert(amendmentDocuments)
+        .values({
+          tenantId: ctx.tenantId,
+          clientId,
+          originalDocumentId: body.original_document_id,
+          reasonCode: body.reason_code,
+          changesSummary: body.changes_summary ?? "",
+          amendmentData: JSON.stringify(body.amendment_data),
+          status: "draft",
+        })
+        .returning();
+
+      await audit(
+        ctx,
+        "amendment.create",
+        "amendment",
+        amendment.id,
+        {
+          clientId,
+          originalDocId: body.original_document_id,
+          reasonCode: body.reason_code,
+        }
+      );
+
+      return amendment;
+    }
+  );
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/amendments/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { status?: string };
+      const { clientId } = req.params;
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      let query = db
+        .select()
+        .from(amendmentDocuments)
+        .where(
+          and(
+            eq(amendmentDocuments.tenantId, ctx.tenantId),
+            eq(amendmentDocuments.clientId, clientId)
+          )
+        );
+
+      if (q.status) {
+        query = query.where(eq(amendmentDocuments.status, q.status));
+      }
+
+      const amendments = await query.orderBy(desc(amendmentDocuments.createdAt));
+
+      return {
+        amendments: amendments.map((a) => ({
+          ...a,
+          amendment_data: JSON.parse(a.amendmentData),
+        })),
+      };
+    }
+  );
+
+  app.patch<{
+    Params: { id: string };
+    Body: { status?: "draft" | "filed"; changes_summary?: string };
+  }>(
+    "/api/amendments/:id",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { id } = req.params;
+      const body = req.body ?? {};
+
+      // Verify amendment exists and user has access
+      const [amendment] = await db
+        .select()
+        .from(amendmentDocuments)
+        .where(eq(amendmentDocuments.id, id))
+        .limit(1);
+      if (!amendment) return reply.status(404).send({ error: "Not found" });
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(
+            eq(clients.id, amendment.clientId),
+            eq(clients.tenantId, ctx.tenantId)
+          )
+        )
+        .limit(1);
+      if (!client) return reply.status(403).send({ error: "Access denied" });
+
+      const updateObj: Record<string, any> = { updatedAt: new Date() };
+      if (body.status) {
+        updateObj.status = body.status;
+        if (body.status === "filed") {
+          updateObj.filedDate = new Date();
+        }
+      }
+      if (body.changes_summary !== undefined) {
+        updateObj.changesSummary = body.changes_summary;
+      }
+
+      const [updated] = await db
+        .update(amendmentDocuments)
+        .set(updateObj)
+        .where(eq(amendmentDocuments.id, id))
+        .returning();
+
+      await audit(ctx, "amendment.update", "amendment", id, body);
+
+      return updated;
+    }
+  );
+
+  app.get("/api/compliance/calendar", async () => {
 
   return app;
 }
