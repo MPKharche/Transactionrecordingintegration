@@ -9,4 +9,3 @@ export * from "./invoice-totals.js";
 export * from "./masters.js";
 export * from "./gstr-schema.js";
 export * from "./hsn-master.js";
-export * from "./tier2-utilities.js";

@@ -31,6 +31,16 @@ function parseNumeric(value: unknown): number | null {
 }
 
 /**
+ * Convert Date or string to Date object
+ */
+function toDate(value: string | Date | undefined): Date | null {
+  if (!value) return null;
+  if (value instanceof Date) return value;
+  const parsed = new Date(value);
+  return isNaN(parsed.getTime()) ? null : parsed;
+}
+
+/**
  * Insert or update HSN/SAC master record
  */
 export async function upsertHsnSacMaster(
@@ -58,6 +68,10 @@ export async function upsertHsnSacMaster(
     throw new Error(`Invalid ${data.type} code format: ${data.code}`);
   }
 
+  const now = new Date();
+  const validFromDate = toDate(data.validFrom) || now;
+  const validToDate = toDate(data.validTo);
+
   // Use insert with onConflict for upsert
   const result = await db
     .insert(hsnSacMaster)
@@ -69,12 +83,12 @@ export async function upsertHsnSacMaster(
       gstRate: gstRate.toString(),
       cgstRate: cgstRate ? cgstRate.toString() : null,
       sgstRate: sgstRate ? sgstRate.toString() : null,
-      validFrom: data.validFrom || new Date(),
-      validTo: data.validTo || null,
+      validFrom: validFromDate,
+      validTo: validToDate,
       source,
       verified: false,
-      createdAt: new Date(),
-      updatedAt: new Date(),
+      createdAt: now,
+      updatedAt: now,
     })
     .onConflictDoUpdate({
       target: [hsnSacMaster.tenantId, hsnSacMaster.code, hsnSacMaster.type],
@@ -83,9 +97,9 @@ export async function upsertHsnSacMaster(
         gstRate: gstRate.toString(),
         cgstRate: cgstRate ? cgstRate.toString() : null,
         sgstRate: sgstRate ? sgstRate.toString() : null,
-        validTo: data.validTo || null,
+        validTo: validToDate,
         source,
-        updatedAt: new Date(),
+        updatedAt: now,
       },
     })
     .returning({
@@ -112,8 +126,7 @@ export async function getHsnSacMaster(
   const result = await db
     .select()
     .from(hsnSacMaster)
-    .where(and(eq(hsnSacMaster.tenantId, tenantId), eq(hsnSacMaster.code, code), eq(hsnSacMaster.type, type)))
-    .limit(1);
+    .where(and(eq(hsnSacMaster.tenantId, tenantId), eq(hsnSacMaster.code, code), eq(hsnSacMaster.type, type)));
 
   if (!result[0]) return null;
 
@@ -146,18 +159,18 @@ export async function listHsnSacMasters(
     code?: string; // Prefix search
   }
 ): Promise<Array<HSNCode | SACCode>> {
-  let query = db.select().from(hsnSacMaster).where(eq(hsnSacMaster.tenantId, tenantId));
+  let query = db.select().from(hsnSacMaster).where(eq(hsnSacMaster.tenantId, tenantId)) as any;
 
   if (filters?.type) {
-    query = query.where(eq(hsnSacMaster.type, filters.type)) as any;
+    query = query.where(eq(hsnSacMaster.type, filters.type));
   }
 
   if (filters?.verified !== undefined) {
-    query = query.where(eq(hsnSacMaster.verified, filters.verified)) as any;
+    query = query.where(eq(hsnSacMaster.verified, filters.verified));
   }
 
   if (filters?.source) {
-    query = query.where(eq(hsnSacMaster.source, filters.source)) as any;
+    query = query.where(eq(hsnSacMaster.source, filters.source));
   }
 
   const results = await query;
@@ -339,7 +352,7 @@ export async function deleteHsnSacMaster(
   code: string,
   type: "HSN" | "SAC"
 ): Promise<boolean> {
-  const result = await db
+  await db
     .delete(hsnSacMaster)
     .where(and(eq(hsnSacMaster.tenantId, tenantId), eq(hsnSacMaster.code, code), eq(hsnSacMaster.type, type)));
 
@@ -357,7 +370,7 @@ export async function markHsnSacAsVerified(
   let updated = 0;
 
   for (const { code, type } of codes) {
-    const result = await db
+    await db
       .update(hsnSacMaster)
       .set({
         verified,
@@ -387,7 +400,7 @@ export async function exportHsnSacToCsv(
   const headers = ["code", "type", "description", "gstRate", "cgstRate", "sgstRate", "validFrom", "validTo", "verified"];
   const rows = masters.map((m) => [
     m.code,
-    "type" in m ? m.type : "HSN",
+    (m as any).type || "HSN",
     m.description,
     m.gstRate,
     m.cgstRate || "",
@@ -401,3 +414,4 @@ export async function exportHsnSacToCsv(
 
   return csvContent;
 }
+
