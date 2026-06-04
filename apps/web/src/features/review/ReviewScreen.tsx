@@ -477,6 +477,70 @@ export function ReviewScreen({
     }));
   }
 
+  function handleLineItemQuickFix(lineId: string, issueType: LineItemIssue["type"], suggestion?: string) {
+    const line = lines.find((l) => l.id === lineId);
+    if (!line) return;
+
+    switch (issueType) {
+      case "rate_mismatch": {
+        // Apply HSN default rate
+        const hsn = masters.hsn.find((h) => h.code === line.hsn_sac);
+        if (hsn && hsn.default_gst_rate !== undefined) {
+          const slab = hsn.default_gst_rate;
+          const isInter = supplier.state_code !== recipient.state_code;
+          const half = slab / 2;
+          setLines((prev) =>
+            prev.map((li) => {
+              if (li.id !== lineId) return li;
+              return recalcLineItem({
+                ...li,
+                igst_rate: isInter ? slab : 0,
+                cgst_rate: isInter ? 0 : half,
+                sgst_rate: isInter ? 0 : half,
+              });
+            })
+          );
+          setIsDirty(true);
+        }
+        break;
+      }
+      case "missing_hsn": {
+        // Prompt user to select HSN — navigate focus to HSN cell
+        const idx = lines.indexOf(line);
+        const hsnCell = document.querySelector(`[data-hsn-cell-${idx}]`) as HTMLElement;
+        if (hsnCell) hsnCell.focus();
+        break;
+      }
+      case "missing_tax": {
+        // Apply default GST rate for HSN
+        const hsn = masters.hsn.find((h) => h.code === line.hsn_sac);
+        if (hsn && hsn.default_gst_rate !== undefined) {
+          const slab = hsn.default_gst_rate;
+          const isInter = supplier.state_code !== recipient.state_code;
+          const half = slab / 2;
+          setLines((prev) =>
+            prev.map((li) => {
+              if (li.id !== lineId) return li;
+              return recalcLineItem({
+                ...li,
+                igst_rate: isInter ? slab : 0,
+                cgst_rate: isInter ? 0 : half,
+                sgst_rate: isInter ? 0 : half,
+              });
+            })
+          );
+          setIsDirty(true);
+        }
+        break;
+      }
+      case "zero_qty": {
+        // Set qty to 1 as default
+        updateLine(lineId, "qty", "1");
+        break;
+      }
+    }
+  }
+
 
   if (rejected) return (
     <div className="flex flex-col items-center justify-center h-80 gap-5">
@@ -832,7 +896,10 @@ export function ReviewScreen({
                           )}
                           {lineFlags.length > 0 && (
                             <div className="mt-2">
-                              <LineItemFlagBadge flags={lineFlags} />
+                              <LineItemFlagBadge
+                                flags={lineFlags}
+                                onQuickFix={(type) => handleLineItemQuickFix(l.id, type)}
+                              />
                             </div>
                           )}
                         </td>

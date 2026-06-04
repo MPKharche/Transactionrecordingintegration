@@ -9,6 +9,7 @@ import { RecordsScreen } from "../apps/web/src/features/records/RecordsScreen";
 import { ClientsScreen } from "../apps/web/src/features/clients/ClientsScreen";
 import { LoginPage } from "../apps/web/src/features/auth/LoginPage";
 import { AppDataProvider } from "../apps/web/src/context/AppDataContext";
+import { EInvoiceBadge } from "../apps/web/src/components/badges/EInvoiceBadge";
 
 vi.mock("../apps/web/src/lib/api", async (importOriginal) => {
   const actual = await importOriginal<typeof import("../apps/web/src/lib/api")>();
@@ -105,5 +106,39 @@ describe("US-UI-01: Web smoke — screens render without ReferenceError", () => 
     );
     expect(screen.getByRole("heading", { name: "Clients" })).toBeTruthy();
     expect(screen.getAllByText("Reliance Retail Ltd").length).toBeGreaterThan(0);
+  });
+});
+
+describe("US-UI-BADGE-01: E-Invoice Badge component", () => {
+  it("shows valid badge when IRN is provided and valid", () => {
+    render(<EInvoiceBadge isValid={true} />);
+    expect(screen.getByText(/Valid E-Invoice/i)).toBeTruthy();
+  });
+
+  it("shows invalid badge when IRN is provided but malformed", () => {
+    render(<EInvoiceBadge isValid={false} />);
+    expect(screen.getByText(/Invalid IRN/i)).toBeTruthy();
+  });
+
+  it("renders nothing when no IRN is present", () => {
+    const { container } = render(<EInvoiceBadge isValid={null} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("renders nothing when IRN is undefined", () => {
+    const { container } = render(<EInvoiceBadge isValid={undefined} />);
+    expect(container.firstChild).toBeNull();
+  });
+
+  it("valid badge has green background color", () => {
+    render(<EInvoiceBadge isValid={true} />);
+    const badge = screen.getByText(/Valid E-Invoice/i).closest("span");
+    expect(badge?.className).toContain("bg-green");
+  });
+
+  it("invalid badge has orange background color", () => {
+    render(<EInvoiceBadge isValid={false} />);
+    const badge = screen.getByText(/Invalid IRN/i).closest("span");
+    expect(badge?.className).toContain("bg-orange");
   });
 });

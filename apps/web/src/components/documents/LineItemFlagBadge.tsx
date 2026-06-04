@@ -1,12 +1,13 @@
 import type { LineItemIssue } from "@ca-suite/shared";
-import { AlertCircle, AlertTriangle, Lightbulb, Info, X } from "lucide-react";
+import { AlertCircle, AlertTriangle, Lightbulb, X, CheckCircle2 } from "lucide-react";
 
 interface LineItemFlagBadgeProps {
   flags: LineItemIssue[];
   onDismiss?: (type: LineItemIssue["type"]) => void;
+  onQuickFix?: (type: LineItemIssue["type"], suggestion?: string) => void;
 }
 
-export function LineItemFlagBadge({ flags, onDismiss }: LineItemFlagBadgeProps) {
+export function LineItemFlagBadge({ flags, onDismiss, onQuickFix }: LineItemFlagBadgeProps) {
   if (!flags || flags.length === 0) return null;
 
   const getIcon = (severity: LineItemIssue["severity"]) => {
@@ -46,27 +47,45 @@ export function LineItemFlagBadge({ flags, onDismiss }: LineItemFlagBadgeProps) 
           key={`${flag.type}-${idx}`}
           className={`
             inline-flex items-center gap-2 px-2.5 py-1.5 rounded-md text-sm
-            border transition-colors cursor-pointer group relative
+            border transition-colors group relative
             ${getBgColor(flag.severity)}
           `}
           title={flag.message}
         >
           <div className="flex items-center gap-1.5">
             {getIcon(flag.severity)}
-            <span className="font-medium max-w-xs truncate">{flag.message}</span>
+            <span className="font-medium max-w-xs truncate text-sm">{flag.message}</span>
           </div>
 
-          {onDismiss && (
-            <button
-              className="ml-1 opacity-0 group-hover:opacity-100 transition-opacity"
-              onClick={(e) => {
-                e.stopPropagation();
-                onDismiss(flag.type);
-              }}
-            >
-              <X className="w-3 h-3" />
-            </button>
-          )}
+          <div className="flex items-center gap-1 ml-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            {/* Quick-fix button if applicable */}
+            {flag.suggestion && onQuickFix && (
+              <button
+                className="p-0.5 hover:bg-current/10 rounded transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onQuickFix(flag.type, flag.suggestion);
+                }}
+                title={`Apply suggestion: ${flag.suggestion}`}
+              >
+                <CheckCircle2 className="w-3 h-3" />
+              </button>
+            )}
+
+            {/* Dismiss button */}
+            {onDismiss && (
+              <button
+                className="p-0.5 hover:bg-current/10 rounded transition-colors"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  onDismiss(flag.type);
+                }}
+                title="Dismiss flag"
+              >
+                <X className="w-3 h-3" />
+              </button>
+            )}
+          </div>
 
           {/* Tooltip for suggestion */}
           {flag.suggestion && (

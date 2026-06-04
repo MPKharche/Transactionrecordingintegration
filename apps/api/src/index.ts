@@ -633,6 +633,8 @@ export async function buildApp() {
       return { ok: true };
     }
   );
+
+  app.get("/api/parties", async (req) => {
     const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
     const rows = await db
       .select()

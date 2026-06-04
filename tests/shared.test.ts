@@ -12,6 +12,7 @@ import {
   isUploadPastStage,
   shouldApplyReverseCharge,
   computeITCEligibility,
+  isValidEInvoiceIRN,
 } from "@ca-suite/shared";
 import {
   WORKER_CONCURRENCY,
@@ -358,5 +359,93 @@ describe("US-GST-RULES-02: ITC Eligibility (Input Tax Credit)", () => {
     const result = computeITCEligibility(doc);
     expect(result.eligible).toBe(false);
     expect(result.reason).toContain("unregistered");
+  });
+});
+
+describe("isValidEInvoiceIRN", () => {
+  describe("valid IRN cases", () => {
+    it("accepts valid 64-character hexadecimal IRN", () => {
+      const validIRN = "d72699a6bec11111111111111111111111111111111111111111111111aabbcc";
+      expect(isValidEInvoiceIRN(validIRN)).toBe(true);
+    });
+
+    it("accepts IRN with leading/trailing whitespace", () => {
+      const validIRN = "  d72699a6bec11111111111111111111111111111111111111111111111aabbcc  ";
+      expect(isValidEInvoiceIRN(validIRN)).toBe(true);
+    });
+
+    it("accepts IRN with mixed case (uppercase and lowercase)", () => {
+      const validIRN = "D72699a6BEC11111111111111111111111111111111111111111111111aabbcc";
+      expect(isValidEInvoiceIRN(validIRN)).toBe(true);
+    });
+
+    it("accepts empty/null IRN (no IRN present)", () => {
+      expect(isValidEInvoiceIRN("")).toBe(true);
+      expect(isValidEInvoiceIRN(null)).toBe(true);
+      expect(isValidEInvoiceIRN(undefined)).toBe(true);
+    });
+
+    it("accepts lowercase 64-character hex", () => {
+      const validIRN = "abcdef0123456789abcdef0123456789abcdef0123456789abcdef0123456789";
+      expect(isValidEInvoiceIRN(validIRN)).toBe(true);
+    });
+
+    it("accepts all zeros as valid 64-char hex", () => {
+      const validIRN = "0000000000000000000000000000000000000000000000000000000000000000";
+      expect(isValidEInvoiceIRN(validIRN)).toBe(true);
+    });
+
+    it("accepts all 'f' characters as valid hex", () => {
+      const validIRN = "ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff";
+      expect(isValidEInvoiceIRN(validIRN)).toBe(true);
+    });
+
+    it("accepts real GST e-invoice IRN format", () => {
+      // Real IRN from GST system would look like this (64 chars)
+      const realIRN = "9b5e4c7a1d8f2e3b6c9a4f7d0e5b8c1a3f6e9d2c5a8b1e4f7a0d3c6b9e2f5a00";
+      expect(isValidEInvoiceIRN(realIRN)).toBe(true);
+    });
+  });
+
+  describe("invalid IRN cases", () => {
+    it("rejects IRN with non-hex characters", () => {
+      const invalidIRN = "d72699a6bec11111111111111111111111111111111111111111111111aabbgg"; // 'g' is not hex
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
+
+    it("rejects IRN that is too short (less than 64 chars)", () => {
+      const invalidIRN = "d72699a6bec1111111111111111111111111111111111111111111111aabbcd"; // only 63 chars
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
+
+    it("rejects IRN that is too long (more than 64 chars)", () => {
+      const invalidIRN = "d72699a6bec11111111111111111111111111111111111111111111111aabbccdd"; // 65 chars
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
+
+    it("rejects IRN with spaces in the middle", () => {
+      const invalidIRN = "d72699a6bec 1111111111111111111111111111111111111111111111111aabbcc";
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
+
+    it("rejects IRN with special characters", () => {
+      const invalidIRN = "d72699a6bec@1111111111111111111111111111111111111111111111111aabbcc";
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
+
+    it("rejects IRN with plus sign", () => {
+      const invalidIRN = "d72699a6bec+1111111111111111111111111111111111111111111111111aabbcc";
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
+
+    it("rejects IRN with hyphen", () => {
+      const invalidIRN = "d72699a6bec-1111111111111111111111111111111111111111111111111aabbcc";
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
+
+    it("rejects IRN with parentheses", () => {
+      const invalidIRN = "d72699a6bec(1111111111111111111111111111111111111111111111111aabbcc";
+      expect(isValidEInvoiceIRN(invalidIRN)).toBe(false);
+    });
   });
 });
