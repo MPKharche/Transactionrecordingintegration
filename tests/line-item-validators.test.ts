@@ -211,4 +211,97 @@ describe("Line Item Validators", () => {
       expect(resultInfo).toBe(true);
     });
   });
+
+  // Integration tests
+  describe("Real-world scenarios", () => {
+    it("Scenario 1: Standard import with all fields correct", () => {
+      const item: LineItem = {
+        id: "line-1",
+        description: "Printer Cartridge",
+        hsn_sac: "8443",
+        unit: "NOS",
+        qty: 5,
+        rate: 2000,
+        taxable: 10000,
+        igst_rate: 18,
+        igst: 1800,
+        cgst_rate: 0,
+        cgst: 0,
+        sgst_rate: 0,
+        sgst: 0,
+        cess: 0,
+        cess_rate: 0,
+        total: 11800,
+      };
+      const issues = computeLineItemIssues(item, item.hsn_sac, mockHsnMasters);
+      expect(issues).toHaveLength(0);
+    });
+
+    it("Scenario 2: Missing HSN with other issues", () => {
+      const item: LineItem = {
+        ...mockLineItem,
+        hsn_sac: "",
+        igst: 0,
+        cgst: 0,
+        sgst: 0,
+      };
+      const issues = computeLineItemIssues(item, "", mockHsnMasters);
+      expect(issues.length).toBeGreaterThan(1);
+      expect(issues.map((i) => i.type)).toContain("missing_hsn");
+      expect(issues.map((i) => i.type)).toContain("missing_tax");
+    });
+
+    it("Scenario 3: Zero quantity", () => {
+      const item: LineItem = {
+        ...mockLineItem,
+        qty: 0,
+      };
+      const issues = computeLineItemIssues(item, item.hsn_sac, mockHsnMasters);
+      expect(issues).toContainEqual(expect.objectContaining({ severity: "error" }));
+    });
+
+    it("Scenario 4: Intra-state with CGST+SGST rate mismatch", () => {
+      const item: LineItem = {
+        ...mockLineItem,
+        igst_rate: 0,
+        igst: 0,
+        cgst_rate: 6,
+        cgst: 60,
+        sgst_rate: 6,
+        sgst: 60,
+      };
+      const issues = computeLineItemIssues(item, item.hsn_sac, mockHsnMasters);
+      // Total rate is 12%, but HSN default is 5% — should flag as mismatch
+      expect(issues.length).toBeGreaterThan(0);
+    });
+
+    it("Scenario 5: Multiple flags on single item", () => {
+      const item: LineItem = {
+        id: "line-multi",
+        description: "Multi-issue item",
+        hsn_sac: "",
+        unit: "",
+        qty: 0,
+        rate: 0,
+        taxable: 0,
+        igst_rate: 0,
+        igst: 0,
+        cgst_rate: 0,
+        cgst: 0,
+        sgst_rate: 0,
+        sgst: 0,
+        cess: 0,
+        cess_rate: 0,
+        total: 0,
+      };
+      const issues = computeLineItemIssues(item, "", mockHsnMasters);
+      expect(issues.length).toBeGreaterThanOrEqual(2);
+      // Verify severity sorting: error > warning > info
+      const severities = issues.map((i) => i.severity);
+      for (let i = 1; i < severities.length; i++) {
+        const order = { error: 0, warning: 1, info: 2 };
+        expect(order[severities[i - 1]]).toBeLessThanOrEqual(order[severities[i]]);
+      }
+    });
+  });
 });
