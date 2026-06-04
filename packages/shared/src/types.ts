@@ -129,6 +129,14 @@ export interface GSTDocument {
   other_charges_tcs?: number;
   completeness_score?: number;
   field_confidence?: DocumentCompleteness;
+  /** Computed: whether reverse charge mechanism applies to this document */
+  reverseChargeApplicable?: boolean;
+  /** Computed: whether ITC can be claimed on this document (purchase invoices only) */
+  itcEligible?: boolean;
+  /** Computed: human-readable reason if ITC is ineligible */
+  itcIneligibleReason?: string;
+  /** Whether the e-invoice IRN (irn_hash) is valid (64-char hex if present) */
+  isValidEInvoice?: boolean;
 }
 
 /** GST portal snapshot stored on client master (from lookup at create/edit). */

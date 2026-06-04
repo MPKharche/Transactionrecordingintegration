@@ -6,8 +6,10 @@ import {
   text,
   timestamp,
   uuid,
+  index,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
+import { clients } from "./gst";
 
 export const masterHsn = pgTable(
   "master_hsn",
@@ -16,6 +18,7 @@ export const masterHsn = pgTable(
       .notNull()
       .references(() => tenants.id, { onDelete: "cascade" }),
     code: text("code").notNull(),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "cascade" }),
     description: text("description").default(""),
     defaultGstRate: numeric("default_gst_rate", { precision: 5, scale: 2 }),
     useCount: integer("use_count").default(0).notNull(),
@@ -23,6 +26,7 @@ export const masterHsn = pgTable(
   },
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.code] }),
+    clientIdx: index("idx_hsn_client").on(t.tenantId, t.clientId, t.code),
   })
 );
 

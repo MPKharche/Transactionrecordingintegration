@@ -7,3 +7,4 @@ export * from "./field-confidence.js";
 export * from "./gstr-readiness.js";
 export * from "./invoice-totals.js";
 export * from "./masters.js";
+export * from "./gstr-schema.js";

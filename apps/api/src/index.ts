@@ -15,7 +15,7 @@ import {
   getPipelineQueueMetrics,
 } from "./lib/pipeline-queue.js";
 import { MAX_UPLOAD_BYTES } from "@ca-suite/shared/server";
-import { eq, and, desc, inArray, max, sql } from "drizzle-orm";
+import { eq, and, desc, inArray, max, sql, or } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
 import {
@@ -31,6 +31,7 @@ import {
   tenants,
   users,
   memberships,
+  masterHsn,
 } from "@ca-suite/db";
 import {
   canLockDocument,
@@ -51,6 +52,8 @@ import {
   upsertItemMaster,
   upsertPartyMaster,
   upsertUnitMaster,
+  loadClientHsnMaster,
+  upsertClientHsnMaster,
 } from "./lib/sync-masters.js";
 import { lockedDocsToZohoPurchaseCsv, lockedDocsToZohoSalesCsv } from "./lib/zoho-export.js";
 import { putObject, sha256, storagePath } from "./lib/minio.js";
@@ -496,7 +499,140 @@ export async function buildApp() {
     }
   );
 
-  app.get("/api/parties", async (req) => {
+  // ─── CLIENT HSN MASTER ────────────────────────────────────────────────────
+  app.get<{ Params: { id: string } }>(
+    "/api/clients/:id/masters/hsn",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const clientId = req.params.id;
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId))
+        )
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const hsnList = await loadClientHsnMaster(ctx.tenantId, clientId);
+      return { hsn: hsnList };
+    }
+  );
+
+  app.post<{
+    Params: { id: string };
+    Body: { code: string; description?: string; default_gst_rate?: number };
+  }>(
+    "/api/clients/:id/masters/hsn",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const clientId = req.params.id;
+      const body = req.body ?? {};
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId))
+        )
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      // Validation: code required
+      if (!body.code || !body.code.trim()) {
+        return reply.status(400).send({ error: "HSN code required" });
+      }
+
+      // Validation: code format (4-8 digits)
+      const code = body.code.trim();
+      if (!/^\d{4,8}$/.test(code)) {
+        return reply.status(400).send({
+          error: "Invalid HSN code format. Must be 4-8 digits.",
+        });
+      }
+
+      // Validation: rate in [0-100]
+      if (body.default_gst_rate != null) {
+        if (body.default_gst_rate < 0 || body.default_gst_rate > 100) {
+          return reply.status(400).send({
+            error: "GST rate must be between 0 and 100",
+          });
+        }
+      }
+
+      const result = await upsertClientHsnMaster(ctx.tenantId, clientId, body);
+      if (!result) {
+        return reply.status(400).send({ error: "Failed to save HSN" });
+      }
+
+      await audit(ctx, "client.hsn.upsert", "hsn_master", code, {
+        clientId,
+        rate: body.default_gst_rate,
+      });
+
+      return result;
+    }
+  );
+
+  app.delete<{ Params: { id: string; code: string } }>(
+    "/api/clients/:id/masters/hsn/:code",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const clientId = req.params.id;
+      const code = req.params.code.trim();
+
+      // Verify client exists and user has access
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(
+          and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId))
+        )
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      // Only delete if use_count = 0
+      const [hsn] = await db
+        .select()
+        .from(masterHsn)
+        .where(
+          and(
+            eq(masterHsn.tenantId, ctx.tenantId),
+            eq(masterHsn.code, code),
+            eq(masterHsn.clientId, clientId)
+          )
+        )
+        .limit(1);
+
+      if (!hsn) return reply.status(404).send({ error: "HSN not found" });
+
+      if (hsn.useCount > 0) {
+        return reply.status(400).send({
+          error: "Cannot delete HSN with usage count > 0",
+          useCount: hsn.useCount,
+        });
+      }
+
+      await db
+        .delete(masterHsn)
+        .where(
+          and(
+            eq(masterHsn.tenantId, ctx.tenantId),
+            eq(masterHsn.code, code),
+            eq(masterHsn.clientId, clientId)
+          )
+        );
+
+      await audit(ctx, "client.hsn.delete", "hsn_master", code, {
+        clientId,
+      });
+
+      return { ok: true };
+    }
+  );
     const { tenantId } = (req as unknown as { auth: AuthContext }).auth;
     const rows = await db
       .select()

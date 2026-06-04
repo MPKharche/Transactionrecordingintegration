@@ -12,7 +12,7 @@ import {
   clients,
 } from "@ca-suite/db";
 import { eq, and } from "drizzle-orm";
-import { isValidGSTIN, validateGstDocument } from "@ca-suite/shared";
+import { isValidGSTIN, validateGstDocument, shouldApplyReverseCharge, computeITCEligibility } from "@ca-suite/shared";
 import { isUploadPastStage } from "@ca-suite/shared";
 import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import type { PipelineJobData } from "../lib/pipeline-queue.js";
@@ -102,6 +102,20 @@ export async function validateStage(uploadId: string, tenantId: string, job: Job
       .limit(1);
     const doc = mapGstRowToDocument(gstRow, lines);
     gstFieldIssues = validateGstDocument(doc, { clientGstin: client?.gstin });
+
+    // Compute RC/ITC flags
+    const rcApplicable = shouldApplyReverseCharge(doc);
+    const itcResult = computeITCEligibility(doc);
+
+    // Update gstRow with computed flags
+    await db
+      .update(gstDocuments)
+      .set({
+        reverseChargeApplicable: rcApplicable,
+        itcEligible: itcResult.eligible,
+        itcIneligibleReason: itcResult.reason || null,
+      })
+      .where(eq(gstDocuments.id, gstRow.id));
   }
 
   const allMessages = [
@@ -145,3 +159,4 @@ export async function validateStage(uploadId: string, tenantId: string, job: Job
   );
   return null;
 }
+

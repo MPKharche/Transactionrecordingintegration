@@ -86,6 +86,116 @@ export function applyDocumentTaxFromPos(
   return { supply_type, lines };
 }
 
+/**
+ * Determine if reverse charge mechanism applies to this document.
+ * RC applies in these scenarios (purchase invoices only):
+ * 1. Supplier is unregistered (is_registered = false)
+ * 2. Supplier is composite taxpayer
+ * 3. B2B supply of specified services (Sec 9(1) rules)
+ * 4. Supply from special economic zones (SEZ)
+ *
+ * For sales invoices: only applies if recipient is unregistered (bill of supply)
+ */
+export function shouldApplyReverseCharge(
+  doc: Pick<GSTDocument, "doc_type" | "supplier" | "recipient" | "b2b_category">
+): boolean {
+  const isPurchase =
+    doc.doc_type === "purchase_invoice" ||
+    doc.doc_type === "debit_note_received" ||
+    doc.doc_type === "credit_note_received";
+
+  if (!isPurchase) {
+    // Sales docs: RC applies to unregistered recipient (B2C becomes bill of supply)
+    return doc.recipient.is_registered === false;
+  }
+
+  // Purchase documents: check supplier registration status
+  if (doc.supplier.is_registered === false) {
+    return true;
+  }
+
+  // Check if supplier is composite taxpayer (would be in party master or cached)
+  // For now, we rely on extraction setting this flag if detected
+  // TODO: Could query party master for composite status if available at validation time
+
+  // SEZ supplies marked in b2b_category
+  if (doc.b2b_category === "sez") {
+    return true;
+  }
+
+  return false;
+}
+
+/**
+ * Determine if ITC (Input Tax Credit) is eligible for this purchase document.
+ * ITC is ineligible in these scenarios:
+ * 1. Document marked as reverse charge applicable
+ * 2. Supplier is unregistered or composition scheme taxpayer
+ * 3. Supply is exempt from GST
+ * 4. Supply is nil-rated (0% tax)
+ * 5. Reverse charge mechanism applies
+ * 6. Bill of supply (unregistered supplier)
+ *
+ * For sales documents: always returns true (sales don't have ITC)
+ */
+export function computeITCEligibility(
+  doc: Pick<
+    GSTDocument,
+    | "doc_type"
+    | "supply_type"
+    | "supplier"
+    | "reverse_charge"
+    | "taxable_amount"
+    | "igst"
+    | "cgst"
+    | "sgst"
+  >
+): { eligible: boolean; reason?: string } {
+  const isPurchase =
+    doc.doc_type === "purchase_invoice" ||
+    doc.doc_type === "debit_note_received" ||
+    doc.doc_type === "credit_note_received";
+
+  // Sales documents don't have ITC eligibility concept
+  if (!isPurchase) {
+    return { eligible: true };
+  }
+
+  // Reverse charge explicitly applies
+  if (doc.reverse_charge) {
+    return {
+      eligible: false,
+      reason: "Reverse charge mechanism applies; ITC claimed under RCM provisions",
+    };
+  }
+
+  // Unregistered supplier = bill of supply, no ITC
+  if (doc.supplier.is_registered === false) {
+    return { eligible: false, reason: "Supplier is unregistered; bill of supply issued" };
+  }
+
+  // Exempt supply
+  if (doc.supply_type === "exempt") {
+    return { eligible: false, reason: "Supply is exempt from GST" };
+  }
+
+  // Nil-rated (0% tax)
+  if (doc.supply_type === "nil_rated") {
+    return { eligible: false, reason: "Supply is nil-rated (0% tax)" };
+  }
+
+  // No tax on the invoice
+  const totalTax = (doc.igst || 0) + (doc.cgst || 0) + (doc.sgst || 0);
+  if (doc.taxable_amount > 0 && totalTax === 0) {
+    return {
+      eligible: false,
+      reason: "No GST charged on this invoice; may be nil-rated or exempt supply",
+    };
+  }
+
+  return { eligible: true };
+}
+
 const NOTE_TYPES: GSTDocument["doc_type"][] = [
   "debit_note_issued",
   "debit_note_received",

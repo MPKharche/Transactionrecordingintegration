@@ -275,3 +275,96 @@ export async function upsertItemMaster(
     unit_code: row.unitCode ?? undefined,
   };
 }
+
+/* ============ CLIENT-SCOPED HSN MASTER ============ */
+
+/**
+ * Load HSN master for a specific client, with fallback to tenant-global HSN.
+ * Returns: client-specific HSN codes with rates, merged with global fallback.
+ */
+export async function loadClientHsnMaster(tenantId: string, clientId: string) {
+  const rows = await db
+    .select()
+    .from(masterHsn)
+    .where(
+      and(
+        eq(masterHsn.tenantId, tenantId),
+        // Client-specific HSN OR global (client_id IS NULL)
+        sql`(${masterHsn.clientId} = ${clientId} OR ${masterHsn.clientId} IS NULL)`
+      )
+    );
+
+  // De-duplicate: client-specific rows override global rows with same code
+  const byCode = new Map<string, typeof rows[0]>();
+  for (const row of rows) {
+    const existing = byCode.get(row.code);
+    // Prefer client-specific (non-null clientId)
+    if (!existing || (row.clientId && !existing.clientId)) {
+      byCode.set(row.code, row);
+    }
+  }
+
+  return Array.from(byCode.values())
+    .map((r) => ({
+      code: r.code,
+      description: r.description ?? "",
+      default_gst_rate: r.defaultGstRate ? parseFloat(r.defaultGstRate) : undefined,
+      use_count: r.useCount ?? 0,
+      is_client_specific: !!r.clientId,
+    }))
+    .sort((a, b) => b.use_count - a.use_count || a.code.localeCompare(b.code));
+}
+
+/**
+ * Upsert client-scoped HSN master.
+ * If code doesn't exist for this client, create it.
+ * If it exists as global, convert to client-specific (or keep both).
+ */
+export async function upsertClientHsnMaster(
+  tenantId: string,
+  clientId: string,
+  body: { code: string; description?: string; default_gst_rate?: number }
+) {
+  const code = body.code.trim();
+  if (!code) return null;
+
+  // Validation: code format (4-8 digits for HSN)
+  if (!/^\d{4,8}$/.test(code)) {
+    return null; // Invalid format
+  }
+
+  // Validation: rate in [0-100]
+  const rate = body.default_gst_rate;
+  if (rate != null && (rate < 0 || rate > 100)) {
+    return null; // Invalid rate
+  }
+
+  await db
+    .insert(masterHsn)
+    .values({
+      tenantId,
+      clientId,
+      code,
+      description: body.description ?? "",
+      defaultGstRate: rate != null ? String(rate) : null,
+      useCount: 1,
+    })
+    .onConflictDoUpdate({
+      target: [masterHsn.tenantId, masterHsn.code],
+      set: {
+        clientId: clientId,
+        description: body.description ?? sql`${masterHsn.description}`,
+        defaultGstRate: rate != null ? String(rate) : sql`${masterHsn.defaultGstRate}`,
+        useCount: sql`${masterHsn.useCount} + 1`,
+        updatedAt: new Date(),
+      },
+    });
+
+  return {
+    code,
+    description: body.description ?? "",
+    default_gst_rate: rate,
+    is_client_specific: true,
+  };
+}
+

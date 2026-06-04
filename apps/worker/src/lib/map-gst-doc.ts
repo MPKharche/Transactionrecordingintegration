@@ -75,5 +75,8 @@ export function mapGstRowToDocument(row: DocRow, lines: LineRow[]): GSTDocument 
     financial_year: row.financialYear ?? undefined,
     itc_eligible: row.itcEligible ?? true,
     b2b_category: (row.b2bCategory as GSTDocument["b2b_category"]) ?? "b2b",
+    reverseChargeApplicable: row.reverseChargeApplicable ?? undefined,
+    itcEligible: row.itcEligible ?? undefined,
+    itcIneligibleReason: row.itcIneligibleReason ?? undefined,
   };
 }

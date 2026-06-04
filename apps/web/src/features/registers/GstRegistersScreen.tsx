@@ -4,7 +4,8 @@ import { financialYearFromIsoDate } from "@ca-suite/shared";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { INR, INR_SIGNED } from "../../lib/format";
 import { api, currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
-import { Download, AlertTriangle, ChevronDown, Building2 } from "lucide-react";
+import { exportRegistersAsJSON, downloadGSTRJSON } from "../../lib/gstr-export";
+import { Download, AlertTriangle, ChevronDown, Building2, FileJson } from "lucide-react";
 import { Skeleton } from "../../app/components/ui/skeleton";
 
 const FY_OPTIONS = listIndianFinancialYears(2016);
@@ -23,6 +24,7 @@ export function GstRegistersScreen({
   const [loading, setLoading] = useState(false);
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState({ kind: "", clientId: "", fy: "" });
+  const [exporting, setExporting] = useState(false);
 
   // Fetch register rows whenever filter changes
   useEffect(() => {
@@ -74,6 +76,17 @@ export function GstRegistersScreen({
 
   const client = clients.find((c) => c.id === clientId);
 
+  const handleExportGSTRJSON = async () => {
+    if (!client || !rows.length) return;
+    try {
+      setExporting(true);
+      const json = exportRegistersAsJSON(rows, client, kind, fy);
+      downloadGSTRJSON(json, client, fy, kind);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   return (
     <div className="space-y-5">
       {/* Header */}
@@ -84,13 +97,23 @@ export function GstRegistersScreen({
             Locked {kind === "sales" ? "outward" : "inward"} supplies · FY {fy}
           </p>
         </div>
-        <button
-          type="button"
-          onClick={() => api.export.zoho(kind, { client_id: clientId, financial_year: fy })}
-          className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
-        >
-          <Download size={15} /> Zoho CSV
-        </button>
+        <div className="flex gap-2">
+          <button
+            type="button"
+            onClick={handleExportGSTRJSON}
+            disabled={!rows.length || exporting}
+            className="flex items-center gap-2 px-4 py-2.5 bg-blue-600 text-white text-sm font-medium rounded-lg hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed transition-colors"
+          >
+            <FileJson size={15} /> {exporting ? "Exporting..." : "Export as GSTR JSON"}
+          </button>
+          <button
+            type="button"
+            onClick={() => api.export.zoho(kind, { client_id: clientId, financial_year: fy })}
+            className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
+          >
+            <Download size={15} /> Zoho CSV
+          </button>
+        </div>
       </div>
 
       {/* Filters */}

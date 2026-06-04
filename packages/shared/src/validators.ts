@@ -7,6 +7,19 @@ export const isValidGSTIN = (g: string) =>
 export const isValidPAN = (p: string) =>
   /^[A-Z]{5}[0-9]{4}[A-Z]{1}$/.test(p.toUpperCase());
 
+/**
+ * Validate e-invoice IRN hash format.
+ * IRN should be 64 hex characters (0-9a-f) if present.
+ * Returns true if:
+ * - IRN is not present (null/undefined/empty), or
+ * - IRN matches 64-character hex pattern
+ */
+export const isValidEInvoiceIRN = (irnHash?: string | null): boolean => {
+  if (!irnHash) return true;
+  const cleaned = irnHash.replace(/\s/g, "");
+  return /^[a-f0-9]{64}$/i.test(cleaned);
+};
+
 export function canLockDocument(
   doc: Pick<
     GSTDocument,
