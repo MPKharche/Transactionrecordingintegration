@@ -866,7 +866,7 @@ export async function buildApp() {
       const ctx = (req as unknown as { auth: AuthContext }).auth;
 
       try {
-        const parts = req.file();
+        const parts = await req.file();
         if (!parts) {
           return reply.status(400).send({ error: "No file uploaded" });
         }

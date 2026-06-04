@@ -175,7 +175,7 @@ export async function listHsnSacMasters(
 
   const results = await query;
 
-  return results.map((row) => ({
+  return results.map((row: any) => ({
     code: row.code,
     description: row.description,
     gstRate: parseNumeric(row.gstRate) || 0,
