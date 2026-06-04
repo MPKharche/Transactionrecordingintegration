@@ -50,3 +50,33 @@ export interface MasterOption<T = unknown> {
   sublabel?: string;
   meta?: T;
 }
+
+/**
+ * Lookup HSN rate, preferring client-specific over global.
+ * Used when populating line item rates.
+ * Returns: Client-specific rate if exists, else global rate, else undefined.
+ */
+export function lookupHsnRate(
+  code: string,
+  clientHsns: MasterHsn[] | undefined,
+  globalHsns: MasterHsn[] | undefined
+): number | undefined {
+  // First, check client-specific HSN
+  if (clientHsns) {
+    const clientHsn = clientHsns.find((h) => h.code === code);
+    if (clientHsn?.default_gst_rate !== undefined) {
+      return clientHsn.default_gst_rate;
+    }
+  }
+
+  // Fallback to global HSN
+  if (globalHsns) {
+    const globalHsn = globalHsns.find((h) => h.code === code);
+    if (globalHsn?.default_gst_rate !== undefined) {
+      return globalHsn.default_gst_rate;
+    }
+  }
+
+  // No rate found
+  return undefined;
+}

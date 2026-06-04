@@ -8,10 +8,11 @@ import { INR } from "../../lib/format";
 import { lineGrossQtyRate, recalcLineItem } from "../../lib/line-items";
 import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
 import { isValidGSTIN } from "../../lib/validators-local";
-import { validateGstDocument, applyDocumentTaxFromPos, computeDocumentCompleteness, computeGstrReadiness, reconcileOtherCharges, invoiceTotalsMatch } from "@ca-suite/shared";
+import { validateGstDocument, applyDocumentTaxFromPos, computeDocumentCompleteness, computeGstrReadiness, reconcileOtherCharges, invoiceTotalsMatch, isValidEInvoiceIRN } from "@ca-suite/shared";
 import { useAppData } from "../../context/AppDataContext";
 import { MasterCombobox } from "../../components/ui/MasterCombobox";
 import { EnumSelect } from "../../components/ui/EnumSelect";
+import { EInvoiceBadge } from "../../components/badges/EInvoiceBadge";
 import {
   buildHsnOptions,
   buildItemOptions,
@@ -649,9 +650,12 @@ export function ReviewScreen({
           </div>
           <div className="col-span-2 sm:col-span-2 lg:col-span-3">
             <label className="block text-[11px] font-medium text-muted-foreground mb-0.5">IRN (e-Invoice hash)</label>
-            <input disabled={locked && !lockedEditMode} value={docMeta.irn_hash}
-              onChange={(e) => { setDocMeta((p) => ({ ...p, irn_hash: e.target.value.replace(/\s/g, "") })); setIsDirty(true); }}
-              className={inpCls("irn_hash")} placeholder="64-character IRN if present" />
+            <div className="flex items-center gap-2 mb-1">
+              <input disabled={locked && !lockedEditMode} value={docMeta.irn_hash}
+                onChange={(e) => { setDocMeta((p) => ({ ...p, irn_hash: e.target.value.replace(/\s/g, "") })); setIsDirty(true); }}
+                className={inpCls("irn_hash")} placeholder="64-character IRN if present" />
+              <EInvoiceBadge isValid={docMeta.irn_hash ? isValidEInvoiceIRN(docMeta.irn_hash) : null} />
+            </div>
             <FieldHint fieldKey="irn_hash" completeness={fieldMap} />
           </div>
           <div>
@@ -752,7 +756,38 @@ export function ReviewScreen({
         {lines.length === 0 ? (
           <p className="text-sm text-muted-foreground italic">Line items will appear after extraction completes.</p>
         ) : (
-          <div className="overflow-x-auto -mx-1">
+          <>
+            {/* Flag summary section */}
+            {(() => {
+              const allIssues = lines.flatMap((l) => {
+                const issues = computeLineItemIssues(l, l.hsn_sac, masters.hsn);
+                return issues.map((issue) => ({ ...issue, lineId: l.id, lineSeq: lines.indexOf(l) + 1 }));
+              });
+              const errorCount = allIssues.filter((i) => i.severity === "error").length;
+              const warningCount = allIssues.filter((i) => i.severity === "warning").length;
+              const infoCount = allIssues.filter((i) => i.severity === "info").length;
+              const totalIssues = allIssues.length;
+
+              return totalIssues > 0 ? (
+                <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="text-sm">
+                      <p className="font-medium text-amber-900">
+                        {totalIssues} issue{totalIssues !== 1 ? "s" : ""} found across {lines.filter((l) => computeLineItemIssues(l, l.hsn_sac, masters.hsn).length > 0).length} item{lines.filter((l) => computeLineItemIssues(l, l.hsn_sac, masters.hsn).length > 0).length !== 1 ? "s" : ""}
+                      </p>
+                      <p className="text-xs text-amber-700 mt-1">
+                        {errorCount > 0 && <span>{errorCount} error{errorCount !== 1 ? "s" : ""} · </span>}
+                        {warningCount > 0 && <span>{warningCount} warning{warningCount !== 1 ? "s" : ""} · </span>}
+                        {infoCount > 0 && <span>{infoCount} info{infoCount !== 1 ? "s" : ""}</span>}
+                      </p>
+                    </div>
+                  </div>
+                </div>
+              ) : null;
+            })()}
+
+            {/* Line items table */}
+            <div className="overflow-x-auto -mx-1">
             <table className="w-full min-w-[920px] text-xs border-collapse">
               <thead>
                 <tr className="border-b border-border bg-muted/50">
@@ -770,29 +805,37 @@ export function ReviewScreen({
                   const lineInput = `w-full min-w-[3.5rem] text-xs border rounded-md px-2 py-1.5 text-right font-mono tabular-nums leading-normal focus:outline-none focus:ring-1 focus:ring-primary/40`;
                   const numCell = "px-3 py-2 font-mono text-right tabular-nums whitespace-nowrap align-middle";
                   const gross = lineGrossQtyRate(l);
+                  const lineFlags = computeLineItemIssues(l, l.hsn_sac, masters.hsn);
+                  const hasErrors = lineFlags.some((f) => f.severity === "error");
                   return (
-                    <tr key={l.id} className="hover:bg-muted/15 align-middle">
-                      <td className="px-2.5 py-2 text-muted-foreground w-8 text-center align-middle">{seq}</td>
-                      <td className="px-2.5 py-2 min-w-[200px] align-middle">
-                        {locked ? (
-                          <span>{l.description || "—"}</span>
-                        ) : (
-                          <MasterCombobox
-                            value={l.description}
-                            options={itemOpts}
-                            placeholder="Item from master…"
-                            inputClassName={lineCellCls(seq, "description")}
-                            onChange={(v) => updateLine(l.id, "description", v)}
-                            onSelectOption={(opt) => {
-                              updateLine(l.id, "description", opt.value);
-                              if (opt.meta?.hsn_code) updateLine(l.id, "hsn_sac", opt.meta.hsn_code);
-                              if (opt.meta?.unit_code) updateLine(l.id, "unit", opt.meta.unit_code);
-                            }}
-                            onCreate={(desc) => masterAddItem(desc, l.hsn_sac, l.unit)}
-                            createLabel={(d) => `Save item "${d}" to master`}
-                          />
-                        )}
-                      </td>
+                    <>
+                      <tr key={l.id} className={`hover:bg-muted/15 align-top ${hasErrors ? "bg-red-50" : ""}`}>
+                        <td className="px-2.5 py-2 text-muted-foreground w-8 text-center align-top">{seq}</td>
+                        <td className="px-2.5 py-2 min-w-[200px] align-top">
+                          {locked ? (
+                            <span>{l.description || "—"}</span>
+                          ) : (
+                            <MasterCombobox
+                              value={l.description}
+                              options={itemOpts}
+                              placeholder="Item from master…"
+                              inputClassName={lineCellCls(seq, "description")}
+                              onChange={(v) => updateLine(l.id, "description", v)}
+                              onSelectOption={(opt) => {
+                                updateLine(l.id, "description", opt.value);
+                                if (opt.meta?.hsn_code) updateLine(l.id, "hsn_sac", opt.meta.hsn_code);
+                                if (opt.meta?.unit_code) updateLine(l.id, "unit", opt.meta.unit_code);
+                              }}
+                              onCreate={(desc) => masterAddItem(desc, l.hsn_sac, l.unit)}
+                              createLabel={(d) => `Save item "${d}" to master`}
+                            />
+                          )}
+                          {lineFlags.length > 0 && (
+                            <div className="mt-2">
+                              <LineItemFlagBadge flags={lineFlags} />
+                            </div>
+                          )}
+                        </td>
                       <td className="px-2.5 py-2 min-w-[80px] align-middle">
                         {locked ? (
                           <span className="font-mono">{l.hsn_sac || "—"}</span>
@@ -900,11 +943,13 @@ export function ReviewScreen({
                       </td>
                       <td className={`${numCell} font-semibold min-w-[5.5rem]`}>{INR(l.total)}</td>
                     </tr>
+                    </>
                   );
                 })}
               </tbody>
             </table>
-          </div>
+            </div>
+          </>
         )}
       </ReviewSection>
 

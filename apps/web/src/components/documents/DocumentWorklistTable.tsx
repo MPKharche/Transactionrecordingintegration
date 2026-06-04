@@ -1,7 +1,8 @@
 import { useMemo, useState, Fragment } from "react";
 import type { Client, GSTDocument } from "@ca-suite/shared";
-import { computeGstrReadiness } from "@ca-suite/shared";
+import { computeGstrReadiness, isValidEInvoiceIRN } from "@ca-suite/shared";
 import { DocTypeBadge, StageBadge } from "../badges/DocTypeBadge";
+import { EInvoiceBadge } from "../badges/EInvoiceBadge";
 import { clientByIdFrom, INR } from "../../lib/format";
 import { GstrKpiCell, GstrSummaryBar } from "./GstrKpiCell";
 import { DocumentExpandedDetail } from "./DocumentExpandedDetail";
@@ -73,6 +74,7 @@ export function DocumentWorklistTable({
               <th className={HEAD}>Filename</th>
               <th className={HEAD}>Client</th>
               <th className={HEAD}>Doc #</th>
+              <th className={HEAD}>E-Invoice</th>
               <th className={HEAD}>Date</th>
               <th className={`${HEAD} text-right`}>Amount</th>
               <th className={HEAD}>Type</th>
@@ -127,6 +129,9 @@ export function DocumentWorklistTable({
                       {clientById(d.client_id)?.name ?? "—"}
                     </td>
                     <td className={`${CELL} font-mono whitespace-nowrap`}>{d.doc_number || "—"}</td>
+                    <td className={CELL}>
+                      <EInvoiceBadge isValid={d.irn_hash ? isValidEInvoiceIRN(d.irn_hash) : null} />
+                    </td>
                     <td className={`${CELL} font-mono whitespace-nowrap`}>{d.doc_date || "—"}</td>
                     <td className={`${CELL} font-mono text-right whitespace-nowrap tabular-nums`}>
                       {INR(d.total)}
@@ -184,7 +189,7 @@ export function DocumentWorklistTable({
                   </tr>
                   {open && (
                     <tr className="border-b border-border/60">
-                      <td colSpan={11} className="p-0">
+                      <td colSpan={12} className="p-0">
                         <DocumentExpandedDetail
                           doc={d}
                           client={clientById(d.client_id)}
