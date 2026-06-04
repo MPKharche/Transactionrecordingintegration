@@ -66,8 +66,8 @@ export interface HSNSACImportRow {
   gstRate: number; // GST rate percentage (0-100)
   cgstRate?: number; // Optional CGST
   sgstRate?: number; // Optional SGST
-  validFrom?: string; // ISO date string, defaults to today
-  validTo?: string; // ISO date string, optional
+  validFrom?: string | Date; // ISO date string or Date object
+  validTo?: string | Date; // ISO date string or Date object
 }
 
 /**

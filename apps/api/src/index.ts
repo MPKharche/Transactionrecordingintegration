@@ -3213,6 +3213,9 @@ export async function buildApp() {
   );
 
   app.get("/api/compliance/calendar", async () => {
+    // TODO: Implement compliance calendar endpoint
+    return { calendars: [] };
+  });
 
   return app;
 }
