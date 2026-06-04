@@ -17,6 +17,15 @@ export default function App() {
         <Route path="/clients/:clientId" element={<AuthenticatedApp />} />
         <Route path="/registers" element={<AuthenticatedApp />} />
         <Route path="/audit" element={<AuthenticatedApp />} />
+        {/* TIER 2 Routes */}
+        <Route path="/deadlines" element={<AuthenticatedApp />} />
+        <Route path="/reconciliation" element={<AuthenticatedApp />} />
+        <Route path="/tax-liability" element={<AuthenticatedApp />} />
+        <Route path="/amendments" element={<AuthenticatedApp />} />
+        {/* TIER 3 Integration Routes */}
+        <Route path="/integrations/zoho" element={<AuthenticatedApp />} />
+        <Route path="/integrations/gst-portal" element={<AuthenticatedApp />} />
+        <Route path="/integrations/email" element={<AuthenticatedApp />} />
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
     </BrowserRouter>

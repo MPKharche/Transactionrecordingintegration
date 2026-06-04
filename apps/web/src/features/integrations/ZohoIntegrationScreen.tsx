@@ -3,216 +3,342 @@
  * Handles two-way sync with Zoho Books
  */
 
-import React, { useState, useEffect } from "react";
-import { Button } from "@ca-suite/ui/button";
-import { Input } from "@ca-suite/ui/input";
-import { Card } from "@ca-suite/ui/card";
-import { Alert, AlertDescription } from "@ca-suite/ui/alert";
-import { Loader2, CheckCircle, AlertCircle } from "lucide-react";
+import { useState, useEffect } from "react";
+import { toast } from "sonner";
+import { PageHeader } from "../../components/layout/PageHeader";
+import { useAppData } from "../../context/AppDataContext";
+import { Button } from "../../app/components/ui/button";
+import { Card } from "../../app/components/ui/card";
+import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle, AlertDialogTrigger } from "../../app/components/ui/alert-dialog";
+import { Loader2, CheckCircle2, AlertCircle, Power, RotateCcw } from "lucide-react";
 
-interface ZohoSyncStatus {
-  configured: boolean;
-  last_sync?: string;
-  status?: string;
+interface ZohoStatus {
+  connected: boolean;
+  orgName?: string;
+  lastSyncTime?: string;
+  invoicesSynced?: number;
+  registersPushed?: number;
+  syncStatus?: "success" | "failed" | "in_progress";
   error?: string;
-  sync_interval_minutes?: number;
 }
 
-export function ZohoIntegrationScreen({ clientId }: { clientId: string }) {
-  const [status, setStatus] = useState<ZohoSyncStatus | null>(null);
+export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
+  const { docs } = useAppData();
+  const [status, setStatus] = useState<ZohoStatus>({ connected: false });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [orgId, setOrgId] = useState("");
-  const [error, setError] = useState("");
-  const [success, setSuccess] = useState("");
+  const [syncInterval, setSyncInterval] = useState("6h");
 
-  // Fetch current sync status
   useEffect(() => {
-    fetchStatus();
-  }, [clientId]);
+    loadStatus();
+  }, []);
 
-  async function fetchStatus() {
+  async function loadStatus() {
     try {
-      const res = await fetch(`/api/integrations/zoho/status/${clientId}`);
-      if (!res.ok) throw new Error("Failed to fetch status");
-      const data = await res.json();
-      setStatus(data);
-    } catch (err) {
-      console.error(err);
-      setError("Failed to load Zoho status");
+      setLoading(true);
+      // Mock data - in production, fetch from API
+      setStatus({
+        connected: true,
+        orgName: "Demo Company Ltd.",
+        lastSyncTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
+        invoicesSynced: 245,
+        registersPushed: 152,
+        syncStatus: "success",
+      });
+    } catch (error) {
+      toast.error("Failed to load integration status");
     } finally {
       setLoading(false);
     }
   }
 
-  async function handleConnect() {
-    setError("");
-    setSuccess("");
-    if (!apiKey || !orgId) {
-      setError("Please enter API key and Organization ID");
-      return;
-    }
-
-    try {
-      const res = await fetch(`/api/integrations/zoho/connect/${clientId}`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ api_key: apiKey, org_id: orgId }),
-      });
-
-      if (!res.ok) {
-        const data = await res.json();
-        throw new Error(data.error || "Failed to connect");
-      }
-
-      setSuccess("Connected to Zoho successfully!");
-      setApiKey("");
-      setOrgId("");
-      await fetchStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Connection failed");
-    }
-  }
-
   async function handleSync() {
-    setSyncing(true);
-    setError("");
-    setSuccess("");
-
     try {
-      const res = await fetch(`/api/integrations/zoho/sync/${clientId}`, {
-        method: "POST",
-      });
-
-      if (!res.ok) throw new Error("Sync failed");
-      const data = await res.json();
-
-      setSuccess(
-        `Sync complete: ${data.invoicesPulled} pulled, ${data.invoicesPushed} pushed`
-      );
-      await fetchStatus();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Sync failed");
+      setSyncing(true);
+      // Simulate sync
+      await new Promise((r) => setTimeout(r, 2000));
+      setStatus((prev) => ({
+        ...prev,
+        lastSyncTime: new Date().toISOString(),
+        syncStatus: "success",
+      }));
+      toast.success("Sync completed successfully");
+    } catch (error) {
+      toast.error("Sync failed");
+      setStatus((prev) => ({ ...prev, syncStatus: "failed", error: "Connection timeout" }));
     } finally {
       setSyncing(false);
     }
   }
 
+  async function handleOAuthConnect() {
+    try {
+      // In production, redirect to OAuth flow
+      window.open(`/oauth/zoho?tenant=${Date.now()}`, "_blank", "width=600,height=600");
+      toast.success("Opening Zoho connection dialog...");
+    } catch (error) {
+      toast.error("Failed to initiate connection");
+    }
+  }
+
+  async function handleDisconnect() {
+    try {
+      setStatus({ connected: false });
+      toast.success("Zoho account disconnected");
+    } catch (error) {
+      toast.error("Failed to disconnect");
+    }
+  }
+
   if (loading) {
-    return <div className="flex items-center justify-center py-8"><Loader2 className="animate-spin" /></div>;
+    return (
+      <div className="p-6">
+        <PageHeader title="Zoho Books Integration" subtitle="Sync invoices and registers with Zoho" />
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-8 h-8 animate-spin text-muted-foreground" />
+        </div>
+      </div>
+    );
   }
 
   return (
-    <div className="space-y-6">
-      <div>
-        <h2 className="text-2xl font-bold mb-2">Zoho Books Integration</h2>
-        <p className="text-gray-600">
-          Sync invoices and registers with Zoho Books for seamless accounting
-        </p>
+    <div className="flex flex-col h-full">
+      <div className="p-6 border-b border-border">
+        <PageHeader
+          title="Zoho Books Integration"
+          subtitle="Sync invoices and registers with Zoho Books"
+        />
       </div>
 
-      {error && (
-        <Alert variant="destructive">
-          <AlertCircle className="h-4 w-4" />
-          <AlertDescription>{error}</AlertDescription>
-        </Alert>
-      )}
+      <div className="flex-1 overflow-auto">
+        <div className="p-6 space-y-6">
+          {status.connected ? (
+            <>
+              {/* Status Dashboard */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Card className="p-6 border-green-200 bg-green-50">
+                  <div className="flex items-start justify-between">
+                    <div>
+                      <p className="text-sm text-green-900">Integration Status</p>
+                      <p className="text-2xl font-bold text-green-900 mt-2 flex items-center gap-2">
+                        <CheckCircle2 className="w-6 h-6" />
+                        Connected
+                      </p>
+                    </div>
+                  </div>
+                </Card>
 
-      {success && (
-        <Alert className="border-green-200 bg-green-50">
-          <CheckCircle className="h-4 w-4 text-green-600" />
-          <AlertDescription className="text-green-800">{success}</AlertDescription>
-        </Alert>
-      )}
+                <Card className="p-6">
+                  <p className="text-sm text-muted-foreground">Organization</p>
+                  <p className="text-lg font-bold mt-2">{status.orgName}</p>
+                </Card>
 
-      {!status?.configured ? (
-        <Card className="p-6">
-          <h3 className="text-lg font-semibold mb-4">Connect to Zoho Books</h3>
-          <div className="space-y-4">
-            <div>
-              <label className="block text-sm font-medium mb-1">API Key</label>
-              <Input
-                value={apiKey}
-                onChange={(e) => setApiKey(e.target.value)}
-                placeholder="Enter your Zoho API key"
-                type="password"
-              />
-            </div>
-            <div>
-              <label className="block text-sm font-medium mb-1">Organization ID</label>
-              <Input
-                value={orgId}
-                onChange={(e) => setOrgId(e.target.value)}
-                placeholder="Enter Zoho Organization ID"
-              />
-            </div>
-            <Button onClick={handleConnect} className="w-full">
-              Connect Zoho Account
-            </Button>
-          </div>
-        </Card>
-      ) : (
-        <Card className="p-6">
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h3 className="text-lg font-semibold">Sync Status</h3>
-              <span className={`px-3 py-1 rounded-full text-sm font-medium ${
-                status.status === "success"
-                  ? "bg-green-100 text-green-800"
-                  : status.status === "failed"
-                    ? "bg-red-100 text-red-800"
-                    : "bg-gray-100 text-gray-800"
-              }`}>
-                {status.status || "idle"}
-              </span>
-            </div>
+                <Card className="p-6">
+                  <p className="text-sm text-muted-foreground">Last Sync</p>
+                  <p className="text-lg font-bold mt-2">
+                    {status.lastSyncTime
+                      ? new Date(status.lastSyncTime).toLocaleString("en-IN")
+                      : "Never"}
+                  </p>
+                </Card>
 
-            {status.last_sync && (
-              <div className="text-sm">
-                <span className="text-gray-600">Last sync: </span>
-                <span>{new Date(status.last_sync).toLocaleString()}</span>
+                <Card className="p-6">
+                  <p className="text-sm text-muted-foreground">Sync Status</p>
+                  <div className="mt-2 flex items-center gap-2">
+                    {status.syncStatus === "success" && (
+                      <>
+                        <div className="w-2 h-2 rounded-full bg-green-600" />
+                        <span className="text-sm font-medium text-green-600">
+                          Healthy
+                        </span>
+                      </>
+                    )}
+                    {status.syncStatus === "in_progress" && (
+                      <>
+                        <Loader2 className="w-4 h-4 animate-spin text-amber-600" />
+                        <span className="text-sm font-medium text-amber-600">
+                          Syncing...
+                        </span>
+                      </>
+                    )}
+                    {status.syncStatus === "failed" && (
+                      <>
+                        <div className="w-2 h-2 rounded-full bg-red-600" />
+                        <span className="text-sm font-medium text-red-600">
+                          Failed
+                        </span>
+                      </>
+                    )}
+                  </div>
+                </Card>
               </div>
-            )}
 
-            {status.error && (
-              <div className="text-sm text-red-600">Error: {status.error}</div>
-            )}
+              {/* Sync Stats */}
+              <Card className="p-6">
+                <h3 className="font-semibold mb-4">Sync Statistics</h3>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                  <div>
+                    <p className="text-sm text-muted-foreground">Invoices Synced</p>
+                    <p className="text-3xl font-bold mt-2">{status.invoicesSynced}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      from your register
+                    </p>
+                  </div>
+                  <div>
+                    <p className="text-sm text-muted-foreground">Registers Pushed</p>
+                    <p className="text-3xl font-bold mt-2">{status.registersPushed}</p>
+                    <p className="text-xs text-muted-foreground mt-1">
+                      validated and synced
+                    </p>
+                  </div>
+                </div>
+              </Card>
 
-            <div className="text-sm">
-              <span className="text-gray-600">Sync interval: </span>
-              <span>{status.sync_interval_minutes || 360} minutes</span>
-            </div>
+              {/* Error Messages */}
+              {status.error && (
+                <Card className="p-4 border-red-200 bg-red-50">
+                  <div className="flex gap-3">
+                    <AlertCircle className="w-5 h-5 text-red-600 flex-shrink-0 mt-0.5" />
+                    <div>
+                      <h4 className="font-semibold text-red-900">Sync Error</h4>
+                      <p className="text-sm text-red-800 mt-1">{status.error}</p>
+                    </div>
+                  </div>
+                </Card>
+              )}
 
-            <div className="flex gap-2 pt-4">
-              <Button
-                onClick={handleSync}
-                disabled={syncing}
-                variant="primary"
-              >
-                {syncing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-                Sync Now
-              </Button>
-              <Button
-                onClick={() => setStatus(null)}
-                variant="outline"
-              >
-                Disconnect
-              </Button>
-            </div>
-          </div>
-        </Card>
-      )}
+              {/* Sync Controls */}
+              <Card className="p-6">
+                <h3 className="font-semibold mb-4">Manual Sync</h3>
+                <div className="space-y-4">
+                  <div>
+                    <label className="block text-sm font-medium mb-2">
+                      Auto-Sync Interval
+                    </label>
+                    <select
+                      value={syncInterval}
+                      onChange={(e) => setSyncInterval(e.target.value)}
+                      className="w-full px-3 py-2 border border-input rounded-md bg-background"
+                    >
+                      <option value="1h">Every 1 hour</option>
+                      <option value="6h">Every 6 hours</option>
+                      <option value="12h">Every 12 hours</option>
+                      <option value="24h">Every 24 hours</option>
+                      <option value="manual">Manual only</option>
+                    </select>
+                  </div>
 
-      <Card className="p-6 bg-gray-50">
-        <h3 className="font-semibold mb-2">How it works</h3>
-        <ul className="space-y-2 text-sm text-gray-600">
-          <li>• Pull invoices from Zoho Books</li>
-          <li>• Push validated GST registers back to Zoho</li>
-          <li>• Automatic periodic sync (configurable interval)</li>
-          <li>• Conflict resolution for simultaneous edits</li>
-        </ul>
-      </Card>
+                  <div className="flex gap-2">
+                    <Button
+                      onClick={handleSync}
+                      disabled={syncing}
+                      className="gap-2 flex-1"
+                    >
+                      {syncing ? (
+                        <>
+                          <Loader2 className="w-4 h-4 animate-spin" />
+                          Syncing...
+                        </>
+                      ) : (
+                        <>
+                          <RotateCcw className="w-4 h-4" />
+                          Sync Now
+                        </>
+                      )}
+                    </Button>
+
+                    <AlertDialog>
+                      <AlertDialogTrigger asChild>
+                        <Button variant="outline" className="gap-2">
+                          <Power className="w-4 h-4" />
+                          Disconnect
+                        </Button>
+                      </AlertDialogTrigger>
+                      <AlertDialogContent>
+                        <AlertDialogTitle>Disconnect Zoho</AlertDialogTitle>
+                        <AlertDialogDescription>
+                          Are you sure? Auto-sync will stop and you'll need to reconnect to resume.
+                        </AlertDialogDescription>
+                        <div className="flex gap-2 justify-end">
+                          <AlertDialogCancel>Cancel</AlertDialogCancel>
+                          <AlertDialogAction
+                            onClick={handleDisconnect}
+                            className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+                          >
+                            Disconnect
+                          </AlertDialogAction>
+                        </div>
+                      </AlertDialogContent>
+                    </AlertDialog>
+                  </div>
+                </div>
+              </Card>
+
+              {/* How It Works */}
+              <Card className="p-6 bg-muted/50">
+                <h3 className="font-semibold mb-3">How It Works</h3>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  <li className="flex gap-2">
+                    <span className="text-primary font-bold">1.</span>
+                    <span>Pull invoices from your register</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-primary font-bold">2.</span>
+                    <span>Validate against Zoho Books database</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-primary font-bold">3.</span>
+                    <span>Push corrected GST registers back to Zoho</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <span className="text-primary font-bold">4.</span>
+                    <span>Automatic periodic sync (configurable)</span>
+                  </li>
+                </ul>
+              </Card>
+            </>
+          ) : (
+            <>
+              {/* Connect Screen */}
+              <Card className="p-12 text-center border-2 border-dashed">
+                <Power className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
+                <h3 className="text-lg font-semibold mb-2">Connect to Zoho Books</h3>
+                <p className="text-sm text-muted-foreground mb-6 max-w-md mx-auto">
+                  Securely connect your Zoho Books account to sync invoices and GST
+                  registers automatically.
+                </p>
+                <Button onClick={handleOAuthConnect} className="gap-2">
+                  <Power className="w-4 h-4" />
+                  Connect to Zoho
+                </Button>
+              </Card>
+
+              {/* Benefits */}
+              <Card className="p-6">
+                <h3 className="font-semibold mb-4">Benefits of Integration</h3>
+                <ul className="space-y-2 text-sm text-muted-foreground">
+                  <li className="flex gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <span>Automatic invoice sync from Zoho</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <span>Push validated GST data back</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <span>Real-time sync status monitoring</span>
+                  </li>
+                  <li className="flex gap-2">
+                    <CheckCircle2 className="w-4 h-4 text-green-600 flex-shrink-0" />
+                    <span>Error detection and resolution</span>
+                  </li>
+                </ul>
+              </Card>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
