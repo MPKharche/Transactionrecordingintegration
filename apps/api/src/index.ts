@@ -32,9 +32,14 @@ import {
   users,
   memberships,
   masterHsn,
+  hsnSacMaster,
   filingDeadlines,
   itcReconciliationSnapshots,
   amendmentDocuments,
+  zohoSyncConfig,
+  gstPortalConfig,
+  emailForwardConfig,
+  categoryMaster,
 } from "@ca-suite/db";
 import {
   canLockDocument,
@@ -58,10 +63,32 @@ import {
   loadClientHsnMaster,
   upsertClientHsnMaster,
 } from "./lib/sync-masters.js";
+import {
+  upsertHsnSacMaster,
+  getHsnSacMaster,
+  listHsnSacMasters,
+  validateHsnRate,
+  importHsnSacFromFile,
+  verifyHsnSacAgainstSource,
+  deleteHsnSacMaster,
+  markHsnSacAsVerified,
+  exportHsnSacToCsv,
+} from "./lib/hsn-sync.js";
 import { lockedDocsToZohoPurchaseCsv, lockedDocsToZohoSalesCsv } from "./lib/zoho-export.js";
 import { putObject, sha256, storagePath } from "./lib/minio.js";
 import { deleteGstDocument } from "./lib/delete-document.js";
 import { lookupGstin } from "./lib/gstin-lookup.js";
+import {
+  initializeZohoSync,
+  syncZohoBooks,
+  initializeGstPortalSync,
+  fetchGstr1FromPortal,
+  fetchGstr2bFromPortal,
+  initializeEmailForwarding,
+  initializeCategoryMaster,
+  assignCategoryToLineItem,
+  autoSuggestCategory,
+} from "./lib/integrations.js";
 import type { GSTDocument, CaptureSource, Client } from "@ca-suite/shared";
 import {
   resolveAuth,
@@ -736,6 +763,237 @@ export async function buildApp() {
       const row = await upsertItemMaster(ctx.tenantId, req.body ?? { description: "" });
       if (!row) return reply.status(400).send({ error: "description required" });
       return row;
+    }
+  );
+
+  // ============ HSN/SAC MASTER ENDPOINTS ============
+
+  // Get all HSN/SAC codes with filters
+  app.get<{ Querystring: { type?: string; verified?: string; source?: string } }>(
+    "/api/masters/hsn-sac",
+    async (req) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { type?: string; verified?: string; source?: string };
+
+      const filters: Parameters<typeof listHsnSacMasters>[1] = {};
+      if (q.type === "HSN" || q.type === "SAC") filters.type = q.type;
+      if (q.verified === "true") filters.verified = true;
+      if (q.verified === "false") filters.verified = false;
+      if (q.source) filters.source = q.source;
+
+      const codes = await listHsnSacMasters(ctx.tenantId, filters);
+      return { codes };
+    }
+  );
+
+  // Get single HSN/SAC code details
+  app.get<{ Params: { code: string }; Querystring: { type?: string } }>(
+    "/api/masters/hsn-sac/:code",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { code } = req.params;
+      const type = (req.query as { type?: string }).type as "HSN" | "SAC" | undefined;
+
+      if (!type || !["HSN", "SAC"].includes(type)) {
+        return reply.status(400).send({ error: "type parameter required (HSN or SAC)" });
+      }
+
+      const master = await getHsnSacMaster(ctx.tenantId, code, type);
+      if (!master) {
+        return reply.status(404).send({ error: "Code not found" });
+      }
+
+      return master;
+    }
+  );
+
+  // Create or update HSN/SAC code
+  app.post<{
+    Body: {
+      code: string;
+      type: "HSN" | "SAC";
+      description: string;
+      gstRate: number;
+      cgstRate?: number;
+      sgstRate?: number;
+      validFrom?: string;
+      validTo?: string;
+    };
+  }>(
+    "/api/masters/hsn-sac",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const body = req.body;
+
+      if (!body || !body.code || !body.type || !body.description || body.gstRate === undefined) {
+        return reply.status(400).send({
+          error: "code, type, description, and gstRate are required",
+        });
+      }
+
+      try {
+        const result = await upsertHsnSacMaster(
+          ctx.tenantId,
+          {
+            code: body.code,
+            type: body.type,
+            description: body.description,
+            gstRate: body.gstRate,
+            cgstRate: body.cgstRate,
+            sgstRate: body.sgstRate,
+            validFrom: body.validFrom ? new Date(body.validFrom) : undefined,
+            validTo: body.validTo ? new Date(body.validTo) : undefined,
+          },
+          "MANUAL"
+        );
+
+        await audit(ctx, "hsn_sac.upsert", "hsn_sac_master", result.id, body);
+
+        const master = await getHsnSacMaster(ctx.tenantId, result.code, result.type as any);
+        return master;
+      } catch (e) {
+        return reply.status(400).send({
+          error: e instanceof Error ? e.message : "Failed to save HSN/SAC code",
+        });
+      }
+    }
+  );
+
+  // Bulk import HSN/SAC from file
+  app.post<{ Body: { format?: "json" | "csv" } }>(
+    "/api/masters/hsn-sac/bulk",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+
+      try {
+        const parts = req.file();
+        if (!parts) {
+          return reply.status(400).send({ error: "No file uploaded" });
+        }
+
+        const buffer = await parts.toBuffer();
+        const format = ((req.body as any)?.format || "csv") as "json" | "csv";
+
+        const result = await importHsnSacFromFile(ctx.tenantId, buffer, format, "IMPORTED");
+
+        await audit(ctx, "hsn_sac.bulk_import", "hsn_sac_master", ctx.tenantId, {
+          imported: result.imported,
+          failed: result.failed,
+        });
+
+        return result;
+      } catch (e) {
+        return reply.status(400).send({
+          error: e instanceof Error ? e.message : "Failed to import HSN/SAC codes",
+        });
+      }
+    }
+  );
+
+  // Validate HSN/SAC code and rate
+  app.post<{
+    Body: {
+      code: string;
+      type: "HSN" | "SAC";
+      gstRate: number;
+    };
+  }>(
+    "/api/masters/hsn-sac/validate",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { code, type, gstRate } = req.body;
+
+      if (!code || !type || gstRate === undefined) {
+        return reply.status(400).send({
+          error: "code, type, and gstRate are required",
+        });
+      }
+
+      const result = await validateHsnRate(ctx.tenantId, code, gstRate, type);
+      return result;
+    }
+  );
+
+  // Verify all HSN/SAC codes against source
+  app.post<{ Body: { type?: "HSN" | "SAC" } }>(
+    "/api/masters/hsn-sac/verify-all",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const type = ((req.body as any)?.type || "HSN") as "HSN" | "SAC";
+
+      const result = await verifyHsnSacAgainstSource(ctx.tenantId, type);
+
+      await audit(ctx, "hsn_sac.verify_all", "hsn_sac_master", ctx.tenantId, {
+        verified: result.verified,
+        failed: result.failed,
+      });
+
+      return result;
+    }
+  );
+
+  // Mark codes as verified
+  app.post<{
+    Body: {
+      codes: Array<{ code: string; type: "HSN" | "SAC" }>;
+      verified?: boolean;
+    };
+  }>(
+    "/api/masters/hsn-sac/mark-verified",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { codes, verified = true } = req.body;
+
+      if (!codes || codes.length === 0) {
+        return reply.status(400).send({ error: "codes array is required" });
+      }
+
+      const updated = await markHsnSacAsVerified(ctx.tenantId, codes, verified);
+
+      await audit(ctx, "hsn_sac.mark_verified", "hsn_sac_master", ctx.tenantId, {
+        count: updated,
+        verified,
+      });
+
+      return { updated };
+    }
+  );
+
+  // Delete HSN/SAC code
+  app.delete<{ Params: { code: string }; Querystring: { type?: string } }>(
+    "/api/masters/hsn-sac/:code",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { code } = req.params;
+      const type = (req.query as { type?: string }).type as "HSN" | "SAC" | undefined;
+
+      if (!type || !["HSN", "SAC"].includes(type)) {
+        return reply.status(400).send({ error: "type parameter required (HSN or SAC)" });
+      }
+
+      await deleteHsnSacMaster(ctx.tenantId, code, type);
+
+      await audit(ctx, "hsn_sac.delete", "hsn_sac_master", code, { type });
+
+      return { deleted: true };
+    }
+  );
+
+  // Export HSN/SAC masters to CSV
+  app.get<{ Querystring: { type?: string; verified?: string } }>(
+    "/api/masters/hsn-sac/export/csv",
+    async (req) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { type?: string; verified?: string };
+
+      const filters: Parameters<typeof exportHsnSacToCsv>[1] = {};
+      if (q.type === "HSN" || q.type === "SAC") filters.type = q.type;
+      if (q.verified === "true") filters.verified = true;
+      if (q.verified === "false") filters.verified = false;
+
+      const csv = await exportHsnSacToCsv(ctx.tenantId, filters);
+
+      return { csv, filename: `hsn-sac-masters-${new Date().toISOString().split("T")[0]}.csv` };
     }
   );
 
@@ -2556,6 +2814,401 @@ export async function buildApp() {
       await audit(ctx, "amendment.update", "amendment", id, body);
 
       return updated;
+    }
+  );
+
+  // ─── TIER 3: Zoho Books Integration ───────────────────────────────────────
+
+  app.post<{
+    Params: { clientId: string };
+    Body: { api_key: string; org_id: string };
+  }>(
+    "/api/integrations/zoho/connect/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const body = req.body ?? {};
+
+      // Verify client exists
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      if (!body.api_key || !body.org_id) {
+        return reply.status(400).send({ error: "api_key and org_id required" });
+      }
+
+      const result = await initializeZohoSync(ctx.tenantId, clientId, body.api_key, body.org_id);
+      if (!result.success) {
+        return reply.status(400).send({ error: result.error });
+      }
+
+      await audit(ctx, "zoho.connect", "integration", result.configId, { clientId });
+
+      return { success: true, config_id: result.configId };
+    }
+  );
+
+  app.post<{ Params: { clientId: string } }>(
+    "/api/integrations/zoho/sync/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+
+      // Verify client exists
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const result = await syncZohoBooks(ctx.tenantId, clientId);
+
+      await audit(ctx, "zoho.sync", "integration", clientId, {
+        invoicesPulled: result.invoicesPulled,
+        invoicesPushed: result.invoicesPushed,
+        errors: result.errors.length,
+      });
+
+      return result;
+    }
+  );
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/integrations/zoho/status/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const [config] = await db
+        .select()
+        .from(zohoSyncConfig)
+        .where(and(eq(zohoSyncConfig.tenantId, ctx.tenantId), eq(zohoSyncConfig.clientId, clientId)))
+        .limit(1);
+
+      return {
+        configured: !!config,
+        last_sync: config?.lastSyncAt?.toISOString(),
+        status: config?.syncStatus,
+        error: config?.syncErrorMessage,
+        sync_interval_minutes: config?.syncIntervalMinutes,
+      };
+    }
+  );
+
+  // ─── TIER 3: GST Portal Integration ───────────────────────────────────────
+
+  app.post<{
+    Params: { clientId: string };
+    Body: { portal_token: string; refresh_token?: string };
+  }>(
+    "/api/integrations/gst-portal/connect/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const body = req.body ?? {};
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+      if (!client.gstin) return reply.status(400).send({ error: "Client GSTIN not set" });
+
+      if (!body.portal_token) {
+        return reply.status(400).send({ error: "portal_token required" });
+      }
+
+      const result = await initializeGstPortalSync(
+        ctx.tenantId,
+        clientId,
+        client.gstin,
+        body.portal_token,
+        body.refresh_token
+      );
+
+      if (!result.success) {
+        return reply.status(400).send({ error: result.error });
+      }
+
+      await audit(ctx, "gst-portal.connect", "integration", result.configId, { clientId });
+
+      return { success: true, config_id: result.configId };
+    }
+  );
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/integrations/gst-portal/gstr/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { type?: "gstr1" | "gstr2b"; fy?: string };
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const fy = q.fy || currentIndianFinancialYear();
+      const gstrType = q.type || "gstr2b";
+
+      const result =
+        gstrType === "gstr1"
+          ? await fetchGstr1FromPortal(ctx.tenantId, clientId, fy)
+          : await fetchGstr2bFromPortal(ctx.tenantId, clientId, fy);
+
+      if (!result.success) {
+        return reply.status(400).send({ error: result.error });
+      }
+
+      await audit(ctx, `gst-portal.fetch-${gstrType}`, "integration", clientId, { fy });
+
+      return { success: true, data: result.data };
+    }
+  );
+
+  // ─── TIER 3: Email Forwarding Integration ────────────────────────────────
+
+  app.post("/api/integrations/email/setup", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+
+    // Check if already configured
+    const [existing] = await db
+      .select()
+      .from(emailForwardConfig)
+      .where(eq(emailForwardConfig.tenantId, ctx.tenantId))
+      .limit(1);
+
+    if (existing) {
+      return {
+        configured: true,
+        forward_address: existing.uniqueForwardAddress,
+        config_id: existing.id,
+      };
+    }
+
+    const result = await initializeEmailForwarding(ctx.tenantId);
+    if (!result.success) {
+      return reply.status(400).send({ error: result.error });
+    }
+
+    await audit(ctx, "email-forward.setup", "integration", result.configId, {});
+
+    return {
+      configured: true,
+      forward_address: result.forwardAddress,
+      config_id: result.configId,
+    };
+  });
+
+  app.get("/api/integrations/email/config", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+
+    const [config] = await db
+      .select()
+      .from(emailForwardConfig)
+      .where(eq(emailForwardConfig.tenantId, ctx.tenantId))
+      .limit(1);
+
+    if (!config) {
+      return reply.status(404).send({ error: "Email forwarding not configured" });
+    }
+
+    return {
+      forward_address: config.uniqueForwardAddress,
+      parse_rules: config.parseRules,
+      client_mappings: config.clientMappings,
+      is_active: config.isActive,
+    };
+  });
+
+  // ─── TIER 3: Expense Category Tagging ────────────────────────────────────
+
+  app.get("/api/categories", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+
+    const categories = await db
+      .select()
+      .from(categoryMaster)
+      .where(eq(categoryMaster.tenantId, ctx.tenantId));
+
+    return {
+      categories: categories.map((c) => ({
+        code: c.code,
+        name: c.name,
+        account_code: c.accountCode,
+        is_system: c.isSystemCategory,
+      })),
+    };
+  });
+
+  app.post<{ Body: { code: string; name: string; account_code?: string } }>(
+    "/api/categories",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const body = req.body ?? {};
+
+      if (!body.code || !body.name) {
+        return reply.status(400).send({ error: "code and name required" });
+      }
+
+      try {
+        const [category] = await db
+          .insert(categoryMaster)
+          .values({
+            tenantId: ctx.tenantId,
+            code: body.code,
+            name: body.name,
+            accountCode: body.account_code,
+            isSystemCategory: false,
+          })
+          .returning();
+
+        await audit(ctx, "category.create", "category", category.code, body);
+
+        return category;
+      } catch (error) {
+        return reply.status(400).send({ error: "Failed to create category" });
+      }
+    }
+  );
+
+  app.post<{
+    Body: { document_id: string; line_seq: number; category_code: string };
+  }>(
+    "/api/line-items/assign-category",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const body = req.body ?? {};
+
+      if (!body.document_id || !body.line_seq || !body.category_code) {
+        return reply.status(400).send({ error: "document_id, line_seq, and category_code required" });
+      }
+
+      const result = await assignCategoryToLineItem(
+        body.document_id,
+        body.line_seq,
+        body.category_code
+      );
+
+      if (!result.success) {
+        return reply.status(400).send({ error: result.error });
+      }
+
+      await audit(ctx, "line-item.assign-category", "line-item", body.document_id, body);
+
+      return { success: true };
+    }
+  );
+
+  app.get<{ Querystring: { hsn_code?: string; description?: string } }>(
+    "/api/categories/suggest",
+    async (req, reply) => {
+      const q = req.query as { hsn_code?: string; description?: string };
+
+      const suggestion = await autoSuggestCategory(q.hsn_code || "", q.description || "");
+
+      return {
+        suggested_code: suggestion.suggestedCode,
+        suggested_name: suggestion.suggestedName,
+      };
+    }
+  );
+
+  // ─── TIER 3: TallyPrime Export ────────────────────────────────────────────
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/export/tally-prime/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { kind?: "sales" | "purchase"; fy?: string };
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const fy = q.fy || currentIndianFinancialYear();
+      const kind = q.kind || "purchase";
+
+      // Get all locked documents
+      const docs = await db
+        .select()
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            eq(gstDocuments.clientId, clientId),
+            eq(gstDocuments.stage, "locked"),
+            eq(gstDocuments.financialYear, fy)
+          )
+        );
+
+      // Filter by document type
+      const filtered =
+        kind === "sales"
+          ? docs.filter((d) => ["sales_invoice", "debit_note_issued"].includes(d.docType))
+          : docs.filter((d) => ["purchase_invoice", "debit_note_received"].includes(d.docType));
+
+      // Generate CSV for TallyPrime
+      const csvLines: string[] = [
+        "Date,Reference,Account,Debit,Credit,Narration",
+      ];
+
+      for (const doc of filtered) {
+        // Map GST accounts from client config or defaults
+        const gstAccounts = {
+          sgst: "SGST Payable",
+          cgst: "CGST Payable",
+          igst: "IGST Payable",
+        };
+
+        csvLines.push(
+          `${doc.docDate},"${doc.docNumber}","${gstAccounts.sgst}",${doc.sgst || 0},,SGST on ${doc.docNumber}`
+        );
+        csvLines.push(
+          `${doc.docDate},"${doc.docNumber}","${gstAccounts.cgst}",${doc.cgst || 0},,CGST on ${doc.docNumber}`
+        );
+        csvLines.push(
+          `${doc.docDate},"${doc.docNumber}","${gstAccounts.igst}",${doc.igst || 0},,IGST on ${doc.docNumber}`
+        );
+
+        // Reverse charge handling
+        if (doc.reverseCharge) {
+          csvLines.push(
+            `${doc.docDate},"${doc.docNumber}","Reverse Charge Payable",${parseFloat(doc.igst || "0") + parseFloat(doc.cgst || "0") + parseFloat(doc.sgst || "0")},,RC on ${doc.docNumber}`
+          );
+        }
+      }
+
+      const csv = csvLines.join("\n");
+
+      reply.header("Content-Type", "text/csv");
+      reply.header(
+        "Content-Disposition",
+        `attachment; filename="tally_prime_${kind}_${client.gstin}_${fy}.csv"`
+      );
+
+      await audit(ctx, "export.tally-prime", "export", clientId, { kind, fy, count: filtered.length });
+
+      return csv;
     }
   );
 
