@@ -242,11 +242,32 @@ export const api = {
   },
   versions: {
     list: (docId: string) =>
-      request<{ id: string; versionNo: number; changeSummary: string | null; changedBy: string; changedAt: string }[]>(
-        `/documents/${docId}/versions`
-      ),
+      request<
+        {
+          id: string;
+          versionNo: number;
+          changeSummary: string | null;
+          changedBy: string;
+          changedAt: string;
+          modificationChannel: string;
+          captureSource?: string;
+          capturedAt?: string;
+          uploadedBy?: string;
+          changes: { field: string; label: string; before: string; after: string }[];
+        }[]
+      >(`/documents/${docId}/versions`),
     load: (docId: string, versionId: string) =>
-      request<GSTDocument>(`/documents/${docId}/versions/${versionId}`),
+      request<
+        | GSTDocument
+        | {
+            snapshot: GSTDocument;
+            versionNo: number;
+            changedBy: string;
+            changedAt: string;
+            changeSummary: string | null;
+            captureSource?: string;
+          }
+      >(`/documents/${docId}/versions/${versionId}`),
     save: (
       docId: string,
       doc: Partial<GSTDocument> & { changeSummary?: string }
@@ -283,7 +304,9 @@ export const api = {
       }>(`/gstin/lookup/${encodeURIComponent(gstin)}`),
   },
   authConfig: () =>
-    request<{ googleEnabled: boolean; devLoginEnabled: boolean }>("/auth/config"),
+    request<{ googleEnabled: boolean; devLoginEnabled: boolean; accessRestricted?: boolean }>(
+      "/auth/config"
+    ),
 };
 
 export { currentIndianFinancialYear as currentFinancialYear, listIndianFinancialYears } from "@ca-suite/shared";

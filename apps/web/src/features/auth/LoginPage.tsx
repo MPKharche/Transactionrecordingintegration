@@ -11,6 +11,8 @@ const ERROR_MESSAGES: Record<string, string> = {
   oauth_state: "Sign-in session expired. Please try again.",
   oauth_failed: "Google sign-in failed. Check server OAuth credentials and redirect URI.",
   no_membership: "Your Google account is not invited to this practice. Contact your admin.",
+  access_denied:
+    "This application is in private testing. Only approved accounts can sign in. Contact your administrator.",
 };
 
 export function LoginPage() {
@@ -24,6 +26,7 @@ export function LoginPage() {
   const [devLoginEnabled, setDevLoginEnabled] = useState(
     import.meta.env.VITE_ALLOW_DEV_LOGIN === "true"
   );
+  const [accessRestricted, setAccessRestricted] = useState(false);
 
   useEffect(() => {
     trySession().then((s) => {
@@ -32,6 +35,7 @@ export function LoginPage() {
     api.authConfig().then((cfg) => {
       setGoogleEnabled(cfg.googleEnabled);
       setDevLoginEnabled(cfg.devLoginEnabled || import.meta.env.VITE_ALLOW_DEV_LOGIN === "true");
+      setAccessRestricted(cfg.accessRestricted ?? false);
     }).catch(() => {
       /* API unreachable — keep defaults */
     });
@@ -62,6 +66,12 @@ export function LoginPage() {
             <p className="text-sm text-muted-foreground">Sign in to continue</p>
           </div>
         </div>
+
+        {accessRestricted && !error && (
+          <p className="text-sm text-amber-600 dark:text-amber-400 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
+            Private testing — only approved Google accounts can access the app.
+          </p>
+        )}
 
         {error && (
           <p className="text-sm text-red-500 bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2">

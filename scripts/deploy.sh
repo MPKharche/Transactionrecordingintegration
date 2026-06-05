@@ -35,8 +35,14 @@ echo "==> Flushing stale queue keys (optional)"
 "${COMPOSE_CMD[@]}" run --rm worker node scripts/flush-pipeline-queue.mjs 2>/dev/null \
   || pnpm queue:flush 2>/dev/null || true
 
-echo "==> Starting application stack"
-"${COMPOSE_CMD[@]}" up -d extractor api worker web nginx
+if [[ "${DEPLOY_TARGET}" == "vps" || "${DEPLOY_TARGET}" == "VPS" ]]; then
+  echo "==> Starting API stack (Vercel serves UI — no web/nginx containers)"
+  "${COMPOSE_CMD[@]}" up -d extractor api worker
+  "${COMPOSE_CMD[@]}" stop web nginx 2>/dev/null || true
+else
+  echo "==> Starting application stack (API + web + nginx)"
+  "${COMPOSE_CMD[@]}" up -d extractor api worker web nginx
+fi
 
 echo "==> Health check"
 OK=0
@@ -50,9 +56,12 @@ for i in $(seq 1 15); do
 done
 [[ "$OK" -eq 1 ]] || echo "WARNING: API health failed — check: ${COMPOSE_CMD[*]} logs api"
 
-curl -sf "${APP_HTTP_URL}/" >/dev/null 2>&1 && echo "    Web OK — ${APP_HTTP_URL}/" || true
+if [[ "${DEPLOY_TARGET}" != "vps" && "${DEPLOY_TARGET}" != "VPS" ]]; then
+  curl -sf "${APP_HTTP_URL}/" >/dev/null 2>&1 && echo "    Web OK — ${APP_HTTP_URL}/" || true
+fi
 
 echo ""
 echo "==> Deploy complete"
-echo "    URL: $(grep -E '^API_PUBLIC_URL=' .env | cut -d= -f2-)"
+echo "    API: $(grep -E '^API_PUBLIC_URL=' .env | cut -d= -f2-)"
+echo "    UI:  $(grep -E '^WEB_ORIGIN=' .env | cut -d= -f2-)"
 echo "    Logs: ${COMPOSE_CMD[*]} logs -f --tail=50"

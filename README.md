@@ -4,6 +4,10 @@ GST document intelligence for CA practices: capture invoices, AI-assisted extrac
 
 **Repo:** [github.com/MPKharche/Transactionrecordingintegration](https://github.com/MPKharche/Transactionrecordingintegration)
 
+**UI deploy:** push `apps/web` changes to `main` → [Vercel](https://ca-suite-web.vercel.app) auto-builds from GitHub (`docs/VERCEL-FRONTEND.md`). API/worker changes need a VPS deploy after pull.
+
+**Roadmap:** [docs/EVOLUTION-PLAN.md](docs/EVOLUTION-PLAN.md) — user management, observability, LLM cost, and differentiation after private testing.
+
 ## Monorepo layout
 
 | Package | Role |
@@ -125,6 +129,8 @@ https://practice.planetfinance.cloud/api/auth/google/callback
 Must match `API_PUBLIC_URL` (same scheme and host).
 
 ---
+
+**Vercel UI + VPS API:** [`docs/VERCEL-FRONTEND.md`](docs/VERCEL-FRONTEND.md) — use when frontend is only on Vercel.
 
 **More:** [`docs/DEPLOY.md`](docs/DEPLOY.md) · [`docs/DEPLOYMENT_FIXES.md`](docs/DEPLOYMENT_FIXES.md) · **Updates:** `git pull` then `./scripts/deploy.sh`
 

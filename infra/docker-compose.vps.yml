@@ -1,4 +1,4 @@
-# VPS overlay: avoid host port clashes (nginx :80/:443, redis :6379, patternos postgres :5433).
+# VPS overlay: API-only host (Vercel serves UI). No Docker nginx/web on :3080.
 # Usage: docker compose -f docker-compose.yml -f docker-compose.vps.yml --env-file ../.env ...
 
 services:
@@ -9,6 +9,13 @@ services:
   redis:
     ports: !override []
 
-  nginx:
+  api:
     ports: !override
-      - "127.0.0.1:3080:80"
+      - "127.0.0.1:4000:4000"
+
+  # SPA runs on Vercel only — do not start on VPS
+  web:
+    profiles: ["docker-spa"]
+
+  nginx:
+    profiles: ["docker-spa"]

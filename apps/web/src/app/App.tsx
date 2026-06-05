@@ -11,6 +11,7 @@ export default function App() {
         <Route path="/login" element={<LoginPage />} />
         <Route path="/" element={<AuthenticatedApp />} />
         <Route path="/upload" element={<AuthenticatedApp />} />
+        <Route path="/upload/:docId" element={<AuthenticatedApp />} />
         <Route path="/records" element={<AuthenticatedApp />} />
         <Route path="/records/:docId" element={<AuthenticatedApp />} />
         <Route path="/clients" element={<AuthenticatedApp />} />
