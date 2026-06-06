@@ -5,6 +5,9 @@ import {
   financialYearFromIsoDate,
   effectiveDocumentFinancialYear,
   documentInRecordsScope,
+  isAllFinancialYears,
+  formatFinancialYearLabel,
+  ALL_FINANCIAL_YEARS,
 } from "../packages/shared/src/gst-rules.js";
 
 describe("listIndianFinancialYears", () => {
@@ -33,6 +36,14 @@ describe("listIndianFinancialYears", () => {
       effectiveDocumentFinancialYear({ financial_year: "2024-25", doc_date: "2026-04-30" })
     ).toBe("2026-27");
   });
+
+  it("formats all-FY sentinel for UI labels", () => {
+    expect(ALL_FINANCIAL_YEARS).toBe("all");
+    expect(isAllFinancialYears("all")).toBe(true);
+    expect(isAllFinancialYears("2026-27")).toBe(false);
+    expect(formatFinancialYearLabel("all")).toBe("All FY");
+    expect(formatFinancialYearLabel("2026-27")).toBe("FY 2026-27");
+  });
 });
 
 describe("documentInRecordsScope", () => {
@@ -47,5 +58,23 @@ describe("documentInRecordsScope", () => {
     expect(documentInRecordsScope(locked, "c1", "2026-27")).toBe(true);
     expect(documentInRecordsScope(review, "c1", "2026-27")).toBe(false);
     expect(documentInRecordsScope(locked, "c2", "2026-27")).toBe(false);
+  });
+
+  it("includes all locked documents for client when FY is all", () => {
+    const locked2026 = {
+      client_id: "c1",
+      stage: "locked",
+      doc_date: "2026-04-30",
+      financial_year: "2026-27",
+    };
+    const locked2024 = {
+      client_id: "c1",
+      stage: "locked",
+      doc_date: "2024-08-01",
+      financial_year: "2024-25",
+    };
+    expect(documentInRecordsScope(locked2026, "c1", "all")).toBe(true);
+    expect(documentInRecordsScope(locked2024, "c1", "all")).toBe(true);
+    expect(documentInRecordsScope(locked2024, "c2", "all")).toBe(false);
   });
 });

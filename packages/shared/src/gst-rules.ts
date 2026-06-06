@@ -421,9 +421,21 @@ export function documentInRecordsScope(
 ): boolean {
   if (doc.client_id !== clientId) return false;
   if (doc.stage !== "locked") return false;
+  if (isAllFinancialYears(financialYear)) return true;
   const eff = effectiveDocumentFinancialYear(doc);
   if (!eff) return true;
   return eff === financialYear;
+}
+
+/** Sentinel value for FY filters that include every financial year. */
+export const ALL_FINANCIAL_YEARS = "all";
+
+export function isAllFinancialYears(fy: string | undefined | null): boolean {
+  return !fy || fy === ALL_FINANCIAL_YEARS;
+}
+
+export function formatFinancialYearLabel(fy: string): string {
+  return isAllFinancialYears(fy) ? "All FY" : `FY ${fy}`;
 }
 
 /** Indian FY labels from `fromStartYear` (e.g. 2016 → 2016-17) through current, latest first. */

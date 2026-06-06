@@ -11,6 +11,7 @@ test.describe("User stories — GST Registers", () => {
     await expect(page.getByRole("heading", { name: "GST Registers" })).toBeVisible();
     const fySelect = page.locator("select").filter({ has: page.locator('option[value="2016-17"]') });
     await expect(fySelect).toBeVisible();
+    await expect(fySelect.locator('option[value="all"]')).toHaveCount(1);
     await expect(fySelect.locator('option[value="2026-27"]')).toHaveCount(1);
     const kindSelect = page.locator("select").filter({ has: page.locator('option[value="debit_notes"]') });
     await expect(kindSelect).toBeVisible();

@@ -1,15 +1,20 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
 import type { Client, GSTDocument, GstRegisterRow, RegisterKind } from "@ca-suite/shared";
-import { financialYearFromIsoDate, REGISTER_KINDS, registerExportType, registerKindMeta } from "@ca-suite/shared";
+import { financialYearFromIsoDate, REGISTER_KINDS, registerExportType, registerKindMeta, isAllFinancialYears, formatFinancialYearLabel } from "@ca-suite/shared";
 import { DocTypeBadge } from "../../components/badges/DocTypeBadge";
 import { InvoiceDetailModal } from "../../components/documents/InvoiceDetailModal";
+import { FinancialYearSelect } from "../../components/ui/FinancialYearSelect";
 import { INR, INR_SIGNED } from "../../lib/format";
-import { api, currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
+import { api, currentFinancialYear } from "../../lib/api";
 import { exportRegistersAsJSON, downloadGSTRJSON } from "../../lib/gstr-export";
 import { Download, AlertTriangle, ChevronDown, Building2, FileJson } from "lucide-react";
 import { Skeleton } from "../../app/components/ui/skeleton";
 
-const FY_OPTIONS = listIndianFinancialYears(2016);
+function registerListParams(clientId: string, fy: string) {
+  const params: { client_id: string; financial_year?: string } = { client_id: clientId };
+  if (!isAllFinancialYears(fy)) params.financial_year = fy;
+  return params;
+}
 
 export function GstRegistersScreen({
   clients,
@@ -58,7 +63,7 @@ export function GstRegistersScreen({
     setLoading(true);
     setFetchError(null);
     api.registers
-      .list(kind, { client_id: clientId, financial_year: fy })
+      .list(kind, registerListParams(clientId, fy))
       .then((data) => {
         setRows(data);
         setLastFetched({ kind, clientId, fy });
@@ -72,6 +77,7 @@ export function GstRegistersScreen({
 
   // Auto-switch FY: when current FY is empty, probe all FYs to find the one with data
   useEffect(() => {
+    if (isAllFinancialYears(fy)) return;
     if (loading || rows.length > 0) return;
     if (lastFetched.kind !== kind || lastFetched.clientId !== clientId || lastFetched.fy !== fy) return;
 
@@ -130,7 +136,7 @@ export function GstRegistersScreen({
         <div>
           <h1 className="text-xl font-bold text-foreground">GST Registers</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            {kindMeta.label} · FY {fy}
+            {kindMeta.label} · {formatFinancialYearLabel(fy)}
           </p>
         </div>
         <div className="flex gap-2">
@@ -147,7 +153,7 @@ export function GstRegistersScreen({
             onClick={() =>
               api.export.zoho(registerExportType(kind), {
                 client_id: clientId,
-                financial_year: fy,
+                ...(isAllFinancialYears(fy) ? {} : { financial_year: fy }),
                 register_kind: kind,
               })
             }
@@ -191,15 +197,11 @@ export function GstRegistersScreen({
 
         {/* FY */}
         <div className="relative">
-          <select
+          <FinancialYearSelect
             value={fy}
-            onChange={(e) => setFy(e.target.value)}
+            onChange={setFy}
             className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer"
-          >
-            {FY_OPTIONS.map((y) => (
-              <option key={y} value={y}>FY {y}</option>
-            ))}
-          </select>
+          />
           <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         </div>
       </div>
@@ -268,14 +270,16 @@ export function GstRegistersScreen({
         ) : rows.length === 0 ? (
           <div className="p-8 text-center space-y-2">
             <p className="text-muted-foreground text-sm">
-              No locked documents in {kindMeta.label} for FY {fy}.
+              No locked documents in {kindMeta.label} for {formatFinancialYearLabel(fy)}.
             </p>
             <p className="text-xs text-muted-foreground">
               Lock reviewed invoices from Upload → they'll appear here automatically.
             </p>
-            <p className="text-xs text-muted-foreground">
-              If documents exist in Records, try a different FY — the auto-switch should kick in shortly.
-            </p>
+            {!isAllFinancialYears(fy) && (
+              <p className="text-xs text-muted-foreground">
+                If documents exist in Records, try All FY or a different year — the auto-switch should kick in shortly.
+              </p>
+            )}
           </div>
         ) : (
           <div className="overflow-x-auto">
@@ -295,7 +299,7 @@ export function GstRegistersScreen({
                 {rows.map((r, idx) => {
                   // Show FY mismatch warning if doc's effective FY differs from selected
                   const effectiveFy = (r.doc_date ? financialYearFromIsoDate(r.doc_date) : null) ?? r.financial_year;
-                  const fyMismatch = effectiveFy && effectiveFy !== fy;
+                  const fyMismatch = !isAllFinancialYears(fy) && effectiveFy && effectiveFy !== fy;
                   return (
                     <tr
                       key={r.document_id}

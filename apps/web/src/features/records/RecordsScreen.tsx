@@ -4,7 +4,8 @@ import {
   documentInRecordsScope,
   effectiveDocumentFinancialYear,
   currentIndianFinancialYear,
-  listIndianFinancialYears,
+  isAllFinancialYears,
+  formatFinancialYearLabel,
   reconcileOtherCharges,
   sumLineTotals,
 } from "@ca-suite/shared";
@@ -25,8 +26,7 @@ import { handleTabListKeyDown } from "../../lib/a11y";
 import { VersionHistoryModal } from "./VersionHistoryModal";
 import { InvoiceLineItemsTable } from "../../components/documents/InvoiceLineItemsTable";
 import { InvoiceDetailModal } from "../../components/documents/InvoiceDetailModal";
-
-const FY_OPTIONS = listIndianFinancialYears(2016);
+import { FinancialYearSelect } from "../../components/ui/FinancialYearSelect";
 
 const RECORD_TABS: { id: DocType | "all"; label: string }[] = [
   { id: "all", label: "All" },
@@ -123,7 +123,7 @@ function ExpandedDetail({
   const buyer    = isOutward ? doc.supplier  : doc.recipient;
 
   const effectiveFy = effectiveDocumentFinancialYear(doc);
-  const fyMismatch = effectiveFy && effectiveFy !== selectedFy;
+  const fyMismatch = effectiveFy && !isAllFinancialYears(selectedFy) && effectiveFy !== selectedFy;
 
   const P = ({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) => (
     <div className="min-w-0">
@@ -363,16 +363,11 @@ export function RecordsScreen({
         <div className="ml-auto flex items-center gap-2">
           <label className="text-xs text-muted-foreground">FY</label>
           <div className="relative">
-            <select
+            <FinancialYearSelect
               value={financialYear}
-              onChange={(e) => { setFinancialYear(e.target.value); setExpandedId(null); }}
-              aria-label="Financial year"
+              onChange={(fy) => { setFinancialYear(fy); setExpandedId(null); }}
               className="bg-input border border-border rounded-lg pl-3 pr-8 py-1.5 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer min-w-[7rem]"
-            >
-              {FY_OPTIONS.map((fy) => (
-                <option key={fy} value={fy}>FY {fy}</option>
-              ))}
-            </select>
+            />
             <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
           </div>
         </div>
@@ -477,7 +472,7 @@ export function RecordsScreen({
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={TABLE_COLS} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                  No locked records for FY {financialYear} on this tab. Try another FY or document type.
+                  No locked records for {formatFinancialYearLabel(financialYear)} on this tab. Try another FY or document type.
                 </td>
               </tr>
             )}
@@ -485,7 +480,7 @@ export function RecordsScreen({
               const cp = getCounterParty(d);
               const isExpanded = expandedId === d.id;
               const effectiveFy = effectiveDocumentFinancialYear(d);
-              const fyMismatch = effectiveFy && effectiveFy !== financialYear;
+              const fyMismatch = effectiveFy && !isAllFinancialYears(financialYear) && effectiveFy !== financialYear;
 
               return (
                 <>
