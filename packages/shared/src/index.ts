@@ -7,6 +7,7 @@ export * from "./field-confidence.js";
 export * from "./gstr-readiness.js";
 export * from "./invoice-totals.js";
 export * from "./gst-registers.js";
+export * from "./user-preferences.js";
 export * from "./version-diff.js";
 export * from "./masters.js";
 export * from "./gstr-schema.js";

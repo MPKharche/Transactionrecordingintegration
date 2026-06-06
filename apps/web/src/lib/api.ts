@@ -1,6 +1,16 @@
-import type { AuditLogEntry, Client, GSTDocument, GstRegisterRow, MastersBundle, Party, UserRole, RegisterKind } from "@ca-suite/shared";
+import type { AuditLogEntry, Client, GSTDocument, GstRegisterRow, MastersBundle, Party, UserRole, RegisterKind, UserPreferences } from "@ca-suite/shared";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
+
+export type UserProfile = {
+  id: string;
+  email: string;
+  name: string | null;
+  image: string | null;
+  role: UserRole;
+  preferences: UserPreferences;
+  authProvider: "google" | "dev";
+};
 
 export type AuthHeaders = {
   tenantId: string;
@@ -86,6 +96,14 @@ export const api = {
     return s;
   },
   logout: () => request<{ ok: boolean }>("/auth/logout", { method: "POST", body: "{}" }),
+  users: {
+    me: () => request<UserProfile>("/users/me"),
+    updatePreferences: (preferences: UserPreferences) =>
+      request<{ preferences: UserPreferences }>("/users/me/preferences", {
+        method: "PATCH",
+        body: JSON.stringify(preferences),
+      }),
+  },
   health: () => request<{ ok: boolean }>("/health"),
   clients: {
     list: () => request<Client[]>("/clients"),

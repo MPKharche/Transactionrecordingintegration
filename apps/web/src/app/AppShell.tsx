@@ -1,7 +1,7 @@
 import { useNavigate, useParams, useLocation } from "react-router";
 import { useEffect, useRef } from "react";
 import { useAppData } from "../context/AppDataContext";
-import { useTheme } from "../hooks/useTheme";
+import { usePreferences } from "../context/PreferencesContext";
 import { useAppKeyboardShortcuts } from "../hooks/useAppKeyboardShortcuts";
 import { Sidebar } from "../components/layout/Sidebar";
 import { StatusBanner } from "../components/ui/StatusBanner";
@@ -23,6 +23,7 @@ import { AmendmentWorkflowScreen } from "../features/amendments/AmendmentWorkflo
 import { ZohoIntegrationScreen } from "../features/integrations/ZohoIntegrationScreen";
 import { GstPortalIntegrationScreen } from "../features/integrations/GstPortalIntegrationScreen";
 import { EmailForwardingScreen } from "../features/integrations/EmailForwardingScreen";
+import { PreferencesScreen } from "../features/settings/PreferencesScreen";
 
 export function AppShell() {
   const {
@@ -41,7 +42,7 @@ export function AppShell() {
     deleteDocument,
     bulkDeleteDocuments,
   } = useAppData();
-  const { mode, setMode, isDark } = useTheme();
+  const { mode, setMode, isDark } = usePreferences();
   const navigate = useNavigate();
   const location = useLocation();
   const { clientId: routeClientId, docId: routeDocId } = useParams();
@@ -70,7 +71,9 @@ export function AppShell() {
                       ? "registers"
                       : location.pathname.startsWith("/audit")
                         ? "audit"
-                        : location.pathname.startsWith("/clients")
+                        : location.pathname.startsWith("/settings")
+                          ? "settings"
+                          : location.pathname.startsWith("/clients")
                           ? routeClientId
                             ? "client_detail"
                             : "clients"
@@ -108,12 +111,14 @@ export function AppShell() {
       | "zoho_integration"
       | "gst_portal_integration"
       | "email_forwarding"
+      | "settings"
   ) {
     if (s === "dashboard") navigate("/");
     else if (s === "upload") navigate("/upload");
     else if (s === "records") navigate("/records");
     else if (s === "registers") navigate("/registers");
     else if (s === "audit") navigate("/audit");
+    else if (s === "settings") navigate("/settings");
     else if (s === "clients") navigate("/clients");
     else if (s === "deadlines") navigate("/deadlines");
     else if (s === "reconciliation") navigate("/reconciliation");
@@ -206,6 +211,7 @@ export function AppShell() {
           <GstRegistersScreen clients={clients} isDark={isDark} />
         )}
         {screen === "audit" && <AuditLogScreen />}
+        {screen === "settings" && <PreferencesScreen />}
         {/* TIER 2 Screens */}
         {screen === "deadlines" && <FilingDeadlineScreen isDark={isDark} />}
         {screen === "reconciliation" && <ITCReconciliationScreen isDark={isDark} />}
@@ -219,13 +225,7 @@ export function AppShell() {
     );
 
   return (
-    <div
-      className={isDark ? "dark" : ""}
-      style={{
-        fontFamily: "'Inter', system-ui, sans-serif",
-        colorScheme: isDark ? "dark" : "light",
-      }}
-    >
+    <div className="min-h-screen bg-background text-foreground">
       <a href="#main-content" className="skip-link">
         Skip to main content
       </a>
@@ -242,6 +242,7 @@ export function AppShell() {
           isDark={isDark}
           userName={session?.name ?? session?.email}
           userRole={session?.role ?? "operator"}
+          onOpenSettings={() => navigate("/settings")}
         />
         <main
           id="main-content"

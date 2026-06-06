@@ -1,5 +1,5 @@
 import { Sun, Moon, Monitor } from "lucide-react";
-import type { ThemeMode } from "../../hooks/useTheme";
+import type { ThemeMode } from "../../context/PreferencesContext";
 
 export function ThemeToggle({ mode, setMode }: { mode: ThemeMode; setMode: (m: ThemeMode) => void }) {
   return (

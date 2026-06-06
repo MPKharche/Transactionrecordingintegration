@@ -18,6 +18,7 @@ export default function App() {
         <Route path="/clients/:clientId" element={<AuthenticatedApp />} />
         <Route path="/registers" element={<AuthenticatedApp />} />
         <Route path="/audit" element={<AuthenticatedApp />} />
+        <Route path="/settings" element={<AuthenticatedApp />} />
         {/* TIER 2 Routes */}
         <Route path="/deadlines" element={<AuthenticatedApp />} />
         <Route path="/reconciliation" element={<AuthenticatedApp />} />

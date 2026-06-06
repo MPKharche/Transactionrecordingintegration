@@ -4,6 +4,7 @@ import {
   timestamp,
   uuid,
   boolean,
+  jsonb,
 } from "drizzle-orm/pg-core";
 
 export const tenants = pgTable("tenants", {
@@ -31,6 +32,7 @@ export const users = pgTable("users", {
   name: text("name"),
   image: text("image"),
   emailVerified: timestamp("email_verified"),
+  preferences: jsonb("preferences").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
 

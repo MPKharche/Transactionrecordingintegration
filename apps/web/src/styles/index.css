@@ -25,6 +25,10 @@
 }
 
 @layer base {
+  html {
+    font-family: var(--app-font-family, "Inter", system-ui, sans-serif);
+  }
+
   /* Visible focus ring for keyboard users; mouse clicks stay clean on inputs */
   button:focus-visible,
   a:focus-visible,

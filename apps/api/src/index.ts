@@ -53,6 +53,8 @@ import {
   docTypesForRegisterKind,
   registerKindOrNull,
   isOutwardRegisterDocType,
+  parseUserPreferences,
+  mergeUserPreferences,
   type GstRegisterRow,
 } from "@ca-suite/shared";
 import { mapClient, mapDocument, lineToDb } from "./lib/mappers.js";
@@ -322,6 +324,30 @@ export async function buildApp() {
       req.log.error(err);
       return reply.status(503).send({ error: "Auth unavailable — check database connection" });
     }
+  });
+
+  app.get("/api/users/me", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const [user] = await db.select().from(users).where(eq(users.id, ctx.userId)).limit(1);
+    if (!user) return reply.status(404).send({ error: "User not found" });
+    return {
+      id: user.id,
+      email: user.email,
+      name: user.name,
+      image: user.image,
+      role: ctx.role,
+      preferences: parseUserPreferences(user.preferences),
+      authProvider: googleOAuthConfigured() ? "google" : "dev",
+    };
+  });
+
+  app.patch<{ Body: Record<string, unknown> }>("/api/users/me/preferences", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const [user] = await db.select().from(users).where(eq(users.id, ctx.userId)).limit(1);
+    if (!user) return reply.status(404).send({ error: "User not found" });
+    const next = mergeUserPreferences(parseUserPreferences(user.preferences), req.body ?? {});
+    await db.update(users).set({ preferences: next }).where(eq(users.id, ctx.userId));
+    return { preferences: next };
   });
 
   app.get("/api/auth/google", async (req, reply) => {

@@ -9,9 +9,10 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Settings,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
-import type { ThemeMode } from "../../hooks/useTheme";
+import type { ThemeMode } from "../../context/PreferencesContext";
 import { ThemeToggle } from "./ThemeToggle";
 import { api } from "../../lib/api";
 import { handleVerticalListKeyDown } from "../../lib/a11y";
@@ -24,7 +25,8 @@ export type Screen =
   | "clients"
   | "client_detail"
   | "registers"
-  | "audit";
+  | "audit"
+  | "settings";
 
 export function Sidebar({
   screen,
@@ -36,6 +38,7 @@ export function Sidebar({
   isDark,
   userName,
   userRole,
+  onOpenSettings,
 }: {
   screen: Screen;
   /** When on review, which nav item to highlight (upload vs records). */
@@ -47,6 +50,7 @@ export function Sidebar({
   isDark: boolean;
   userName?: string;
   userRole?: string;
+  onOpenSettings?: () => void;
 }) {
   const navigate = useNavigate();
   const isReview = screen === "review";
@@ -176,15 +180,35 @@ export function Sidebar({
             <span className="text-xs">{mode === "dark" ? "🌙" : mode === "light" ? "☀️" : "◐"}</span>
           </button>
         )}
-        <div className={`flex items-center ${collapsed ? "justify-center" : "gap-2.5"}`}>
-          <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
-            {initials}
-          </div>
-          {!collapsed && (
-            <div className="min-w-0 flex-1">
-              <p className="text-sm font-semibold text-sidebar-foreground truncate">{displayName}</p>
-              <p className="text-xs text-muted-foreground">{userRole ?? "Practitioner"}</p>
+        <div className={`flex items-center ${collapsed ? "justify-center flex-col gap-1" : "gap-2.5"}`}>
+          <button
+            type="button"
+            onClick={onOpenSettings}
+            title="Profile & preferences"
+            className={`flex items-center rounded-lg hover:bg-sidebar-accent transition-colors ${
+              collapsed ? "p-1" : "gap-2.5 flex-1 min-w-0 text-left"
+            } ${screen === "settings" ? "ring-1 ring-primary/40" : ""}`}
+          >
+            <div className="w-8 h-8 rounded-full bg-primary/15 flex items-center justify-center shrink-0 text-xs font-bold text-primary">
+              {initials}
             </div>
+            {!collapsed && (
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-sidebar-foreground truncate">{displayName}</p>
+                <p className="text-xs text-muted-foreground capitalize">{userRole ?? "operator"}</p>
+              </div>
+            )}
+          </button>
+          {!collapsed && onOpenSettings && (
+            <button
+              type="button"
+              onClick={onOpenSettings}
+              title="Profile & preferences"
+              aria-label="Profile and preferences"
+              className="p-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-sidebar-accent transition-colors shrink-0"
+            >
+              <Settings size={15} />
+            </button>
           )}
         </div>
         <button
