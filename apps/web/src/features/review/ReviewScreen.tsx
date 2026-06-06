@@ -13,6 +13,7 @@ import { useAppData } from "../../context/AppDataContext";
 import { MasterCombobox } from "../../components/ui/MasterCombobox";
 import { EnumSelect } from "../../components/ui/EnumSelect";
 import { EInvoiceBadge } from "../../components/badges/EInvoiceBadge";
+import { LlmCostBadge } from "../../components/documents/LlmCostBadge";
 import {
   buildHsnOptions,
   buildItemOptions,
@@ -45,6 +46,7 @@ export function ReviewScreen({
   onPatch,
   onLock,
   onReject,
+  isAdmin = false,
 }: {
   docId: string;
   docs: GSTDocument[];
@@ -1178,6 +1180,7 @@ export function ReviewScreen({
           </span>
           <DocTypeBadge type={doc.doc_type} isDark={isDark} />
           <StageBadge stage={locked ? "locked" : doc.stage} isDark={isDark} />
+          {isAdmin ? <LlmCostBadge costUsd={doc.llm_cost_usd} /> : null}
           {!locked && gstrReadiness.overall_score >= 0 && (
             <span className="px-2 py-0.5 rounded-full text-xs font-bold tabular-nums border border-border text-foreground">
               {gstrReadiness.overall_score}% GST ready

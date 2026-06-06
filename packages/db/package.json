@@ -13,9 +13,12 @@
   "exports": {
     ".": "./src/index.ts",
     "./schema": "./src/schema/index.ts",
-    "./client": "./src/client.ts"
+    "./client": "./src/client.ts",
+    "./llm-budget-service": "./src/llm-budget-service.ts"
   },
   "dependencies": {
+    "@ca-suite/shared": "workspace:*",
+    "decimal.js": "^10.6.0",
     "dotenv": "^16.4.7",
     "drizzle-orm": "^0.38.3",
     "postgres": "^3.4.5"

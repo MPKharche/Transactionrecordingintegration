@@ -9,6 +9,7 @@ import {
   LogOut,
   ChevronLeft,
   ChevronRight,
+  Gauge,
   Settings,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
@@ -26,6 +27,7 @@ export type Screen =
   | "client_detail"
   | "registers"
   | "audit"
+  | "observe"
   | "settings";
 
 export function Sidebar({
@@ -69,6 +71,7 @@ export function Sidebar({
     { id: "registers", label: "GST Registers", icon: FileText },
     { id: "clients", label: "Clients", icon: Users },
     { id: "audit", label: "Activity log", icon: Shield },
+    ...(userRole === "admin" ? [{ id: "observe" as const, label: "Observe", icon: Gauge }] : []),
   ];
 
   const displayName = userName ?? "Signed in";

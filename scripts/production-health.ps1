@@ -79,6 +79,15 @@ $checks += Test-Endpoint -Name "API health" -Uri "$apiBase/api/health" -Validate
   param($body) try { ($body | ConvertFrom-Json).ok -eq $true } catch { $body -match '"ok"\s*:\s*true' }
 }
 
+if (-not $localMode) {
+  $vpsApi = if ($envVars["VPS_HEALTH_URL"]) { $envVars["VPS_HEALTH_URL"] } else { "https://practice.planetfinance.cloud/api/health" }
+  if ($vpsApi -ne "$apiBase/api/health") {
+    $checks += Test-Endpoint -Name "VPS API (direct)" -Uri $vpsApi -Validate {
+      param($body) try { ($body | ConvertFrom-Json).ok -eq $true } catch { $body -match '"ok"\s*:\s*true' }
+    }
+  }
+}
+
 if ($extractorBase) {
   $checks += Test-Endpoint -Name "Extractor health" -Uri "$extractorBase/health" -Validate {
     param($body) try { ($body | ConvertFrom-Json).PSObject.Properties.Name -contains "invoice2data" } catch { $false }

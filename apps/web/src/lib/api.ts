@@ -20,6 +20,32 @@ export type AuthHeaders = {
   role?: UserRole;
 };
 
+export type AdminObserveSnapshot = {
+  budget_day: string;
+  daily_budget_usd: number;
+  spent_today_usd: number;
+  remaining_today_usd: number;
+  can_spend: boolean;
+  deferred_count: number;
+  deferred_uploads: {
+    id: string;
+    filename: string;
+    current_stage: string | null;
+    resume_stage: string | null;
+    created_at: string;
+  }[];
+  recent_usage: {
+    id: string;
+    document_id: string | null;
+    filename: string | null;
+    upload_id: string | null;
+    stage: string;
+    model: string;
+    cost_usd: number;
+    created_at: string;
+  }[];
+};
+
 let auth: AuthHeaders | null = null;
 
 export function setAuth(a: AuthHeaders) {
@@ -326,6 +352,16 @@ export const api = {
     request<{ googleEnabled: boolean; devLoginEnabled: boolean; accessRestricted?: boolean }>(
       "/auth/config"
     ),
+  admin: {
+    observe: {
+      get: () => request<AdminObserveSnapshot>("/admin/observe"),
+      setBudget: (daily_budget_usd: number) =>
+        request<AdminObserveSnapshot>("/admin/observe", {
+          method: "PATCH",
+          body: JSON.stringify({ daily_budget_usd }),
+        }),
+    },
+  },
 };
 
 export { currentIndianFinancialYear as currentFinancialYear, listIndianFinancialYears } from "@ca-suite/shared";

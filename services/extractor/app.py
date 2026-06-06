@@ -91,6 +91,7 @@ class InvoiceSegment(BaseModel):
 
 class DetectInvoicesResponse(BaseModel):
     segments: list[InvoiceSegment] = []
+    llmUsage: Optional[dict] = None
 
 class SalesLineItem(BaseModel):
     """Zoho sales invoice line columns (subset + extras)."""
@@ -253,6 +254,7 @@ class ExtractorResponse(BaseModel):
     issues: list[str] = []
     salesInvoice: Optional[SalesInvoice] = None
     purchaseBill: Optional[PurchaseBill] = None
+    llmUsage: Optional[dict] = None
 
 from extractor_core import (
     MIN_TEXT_LEN,
@@ -302,6 +304,7 @@ async def detect_invoices(req: DetectInvoicesRequest):
     split_heuristic_threshold = int(os.environ.get("SPLIT_HEURISTIC_PAGE_THRESHOLD", "6"))
 
     segments: list[dict] = []
+    llm_usage: Optional[dict] = None
 
     if req.prefer_heuristic and pages:
         segments = detect_invoice_segments_heuristic(pages)
@@ -313,7 +316,8 @@ async def detect_invoices(req: DetectInvoicesRequest):
 
     if not segments and openrouter_only() and OPENROUTER_API_KEY and not req.prefer_heuristic:
         try:
-            segments = await llm_detect_segments(pages)
+            segments, usage = await llm_detect_segments(pages)
+            llm_usage = usage
             log.info("LLM split: %d segment(s)", len(segments))
         except Exception as e:
             log.error("LLM split failed: %s", e)
@@ -335,7 +339,8 @@ async def detect_invoices(req: DetectInvoicesRequest):
         ]
 
     return DetectInvoicesResponse(
-        segments=[InvoiceSegment(**s) for s in segments]
+        segments=[InvoiceSegment(**s) for s in segments],
+        llmUsage=llm_usage,
     )
 
 
@@ -394,7 +399,7 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
                 issues=["OPENROUTER_API_KEY not set — AI extraction required"],
             )
 
-        llm_result = await llm_extract_document(
+        llm_result, llm_usage = await llm_extract_document(
             combined_text,
             doc_type_hint=hint,
             client_gstin=(req.client_gstin or "").strip().upper(),
@@ -414,6 +419,9 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
             )
         else:
             result = llm_result
+
+        if llm_usage:
+            result["llmUsage"] = llm_usage
 
         if not use_or_only and result.get("extractionMethod") == "stub":
             from gst_heuristic import heuristic_extract

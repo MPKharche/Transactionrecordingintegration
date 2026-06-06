@@ -8,7 +8,7 @@ import json
 import logging
 import os
 import re
-from typing import Any
+from typing import Any, TypedDict
 
 import httpx
 
@@ -17,6 +17,45 @@ log = logging.getLogger(__name__)
 OPENROUTER_API_KEY = os.environ.get("OPENROUTER_API_KEY", "")
 MODEL = os.environ.get("OPENROUTER_MODEL", "deepseek/deepseek-v4-flash")
 MODEL_FALLBACK = os.environ.get("OPENROUTER_MODEL_FALLBACK", "google/gemini-2.5-flash-lite")
+
+# Rough USD per 1M tokens (prompt, completion) when OpenRouter omits usage.cost
+_MODEL_COST_PER_M: dict[str, tuple[float, float]] = {
+    "deepseek/deepseek-v4-flash": (0.14, 0.28),
+    "google/gemini-2.5-flash-lite": (0.075, 0.30),
+    "google/gemini-2.5-flash": (0.15, 0.60),
+}
+
+
+class LlmUsageMeta(TypedDict):
+    model: str
+    prompt_tokens: int
+    completion_tokens: int
+    cost_usd: float
+
+
+def _estimate_cost_usd(model: str, prompt_tokens: int, completion_tokens: int) -> float:
+    prompt_rate, completion_rate = _MODEL_COST_PER_M.get(model, (0.20, 0.40))
+    return (prompt_tokens * prompt_rate + completion_tokens * completion_rate) / 1_000_000
+
+
+def _usage_from_body(body: dict[str, Any], active_model: str) -> LlmUsageMeta:
+    usage = body.get("usage") or {}
+    prompt_tokens = int(usage.get("prompt_tokens") or 0)
+    completion_tokens = int(usage.get("completion_tokens") or 0)
+    raw_cost = usage.get("cost")
+    if raw_cost is None:
+        raw_cost = usage.get("total_cost")
+    if raw_cost is None:
+        cost_usd = _estimate_cost_usd(active_model, prompt_tokens, completion_tokens)
+    else:
+        cost_usd = float(raw_cost)
+    return {
+        "model": active_model,
+        "prompt_tokens": prompt_tokens,
+        "completion_tokens": completion_tokens,
+        "cost_usd": cost_usd,
+    }
+
 
 # Default: OpenRouter-only when a key is configured (override with EXTRACT_USE_OPENROUTER_ONLY=false)
 def openrouter_only() -> bool:
@@ -113,7 +152,7 @@ MAX_SPLIT_PAGE_CHARS = int(os.environ.get("OPENROUTER_SPLIT_PAGE_CHARS", "1800")
 
 async def openrouter_chat(
     system: str, user: str, *, temperature: float = 0.05, model: str | None = None
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], LlmUsageMeta]:
     if not OPENROUTER_API_KEY:
         raise RuntimeError("OPENROUTER_API_KEY not configured")
 
@@ -141,22 +180,24 @@ async def openrouter_chat(
             json=payload,
         )
         resp.raise_for_status()
-        content = resp.json()["choices"][0]["message"]["content"]
+        body = resp.json()
+        content = body["choices"][0]["message"]["content"]
 
+    usage_meta = _usage_from_body(body, active_model)
     match = re.search(r"\{[\s\S]*\}", content)
     if not match:
         raise ValueError("LLM did not return JSON")
-    return json.loads(match.group())
+    return json.loads(match.group()), usage_meta
 
 
 async def openrouter_chat_with_fallback(
     system: str, user: str, *, temperature: float = 0.05
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], LlmUsageMeta]:
     """Try primary model; on 4xx (except 401) or 5xx fall back to MODEL_FALLBACK."""
     try:
-        result = await openrouter_chat(system, user, temperature=temperature, model=MODEL)
+        result, usage = await openrouter_chat(system, user, temperature=temperature, model=MODEL)
         log.debug("openrouter: primary model %s succeeded", MODEL)
-        return result
+        return result, usage
     except httpx.HTTPStatusError as exc:
         status = exc.response.status_code
         if status == 401:
@@ -213,11 +254,11 @@ def _merge_segments(segments: list[dict[str, Any]]) -> list[dict[str, Any]]:
     return merged
 
 
-async def llm_detect_segments(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:
+async def llm_detect_segments(pages: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], LlmUsageMeta | None]:
     if not pages:
-        return []
+        return [], None
     outline = _page_outline(pages)
-    parsed = await openrouter_chat_with_fallback(
+    parsed, usage = await openrouter_chat_with_fallback(
         SPLIT_SYSTEM_PROMPT,
         f"Pages in uploaded PDF ({len(pages)} page(s)):\n\n{outline}",
     )
@@ -239,7 +280,7 @@ async def llm_detect_segments(pages: list[dict[str, Any]]) -> list[dict[str, Any
                 "confidence": str(s.get("confidence") or "medium"),
             }
         )
-    return _merge_segments(segments)
+    return _merge_segments(segments), usage
 
 
 async def llm_extract_document(
@@ -250,7 +291,7 @@ async def llm_extract_document(
     client_name: str = "",
     page_start: int | None = None,
     page_end: int | None = None,
-) -> dict[str, Any]:
+) -> tuple[dict[str, Any], LlmUsageMeta | None]:
     hint_parts: list[str] = []
     if doc_type_hint:
         hint_parts.append(f"Upload category: {doc_type_hint}")
@@ -265,6 +306,6 @@ async def llm_extract_document(
     if hint_parts:
         user += "\n\nContext:\n" + "\n".join(hint_parts)
 
-    parsed = await openrouter_chat_with_fallback(EXTRACT_SYSTEM_PROMPT, user)
+    parsed, usage = await openrouter_chat_with_fallback(EXTRACT_SYSTEM_PROMPT, user)
     parsed["extractionMethod"] = "ai"
-    return parsed
+    return parsed, usage

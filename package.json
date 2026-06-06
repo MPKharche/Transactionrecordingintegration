@@ -42,6 +42,7 @@
     "prod:fresh": "node scripts/prod-fresh.mjs",
     "dev:prod-sim": "powershell -NoProfile -File scripts/launch-prod-sim.ps1",
     "prod:health": "powershell -NoProfile -File scripts/production-health.ps1",
+    "verify:deploy": "node scripts/verify-deploy-setup.mjs",
     "prod:open": "powershell -NoProfile -File scripts/open-app.ps1",
     "typecheck": "turbo typecheck"
   },

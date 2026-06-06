@@ -3,6 +3,7 @@ import type { Client, GSTDocument } from "@ca-suite/shared";
 import { computeGstrReadiness, isValidEInvoiceIRN } from "@ca-suite/shared";
 import { DocTypeBadge, StageBadge } from "../badges/DocTypeBadge";
 import { EInvoiceBadge } from "../badges/EInvoiceBadge";
+import { LlmCostBadge, BudgetQueuedBadge } from "./LlmCostBadge";
 import { clientByIdFrom, INR } from "../../lib/format";
 import { GstrKpiCell, GstrSummaryBar } from "./GstrKpiCell";
 import { DocumentExpandedDetail } from "./DocumentExpandedDetail";
@@ -32,6 +33,7 @@ export function DocumentWorklistTable({
   onReview,
   onRetry,
   emptyMessage = "No documents match your filter",
+  showAdminCost = false,
 }: {
   docs: GSTDocument[];
   clients: Client[];
@@ -39,6 +41,7 @@ export function DocumentWorklistTable({
   onReview: (id: string) => void;
   onRetry?: (id: string) => void;
   emptyMessage?: string;
+  showAdminCost?: boolean;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const clientById = (id: string) => clientByIdFrom(clients, id);
@@ -79,6 +82,7 @@ export function DocumentWorklistTable({
               <th className={`${HEAD} text-right`}>Amount</th>
               <th className={HEAD}>Type</th>
               <th className={HEAD}>Status</th>
+              {showAdminCost ? <th className={`${HEAD} text-right`}>AI cost</th> : null}
               <th className={HEAD}>GST ready</th>
               <th className={HEAD}>Issues</th>
               <th className={`${HEAD} w-16`} />
@@ -140,8 +144,16 @@ export function DocumentWorklistTable({
                       <DocTypeBadge type={d.doc_type} isDark={isDark} />
                     </td>
                     <td className={CELL}>
-                      <StageBadge stage={d.stage} isDark={isDark} />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <StageBadge stage={d.stage} isDark={isDark} />
+                        {d.budget_deferred ? <BudgetQueuedBadge isDark={isDark} /> : null}
+                      </div>
                     </td>
+                    {showAdminCost ? (
+                      <td className={`${CELL} text-right`}>
+                        <LlmCostBadge costUsd={d.llm_cost_usd} />
+                      </td>
+                    ) : null}
                     <td className={CELL}>
                       <GstrKpiCell report={report} />
                     </td>
@@ -189,7 +201,7 @@ export function DocumentWorklistTable({
                   </tr>
                   {open && (
                     <tr className="border-b border-border/60">
-                      <td colSpan={12} className="p-0">
+                      <td colSpan={showAdminCost ? 13 : 12} className="p-0">
                         <DocumentExpandedDetail
                           doc={d}
                           client={clientById(d.client_id)}

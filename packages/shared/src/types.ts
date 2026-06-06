@@ -137,6 +137,10 @@ export interface GSTDocument {
   itcIneligibleReason?: string;
   /** Whether the e-invoice IRN (irn_hash) is valid (64-char hex if present) */
   isValidEInvoice?: boolean;
+  /** OpenRouter AI cost for this document (admin only in UI). */
+  llm_cost_usd?: number;
+  /** Queued until daily AI processing budget resets (IST midnight). */
+  budget_deferred?: boolean;
 }
 
 /** GST portal snapshot stored on client master (from lookup at create/edit). */

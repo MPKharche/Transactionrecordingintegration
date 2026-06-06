@@ -6,6 +6,7 @@ import {
   integer,
   jsonb,
   pgEnum,
+  boolean,
 } from "drizzle-orm/pg-core";
 import { tenants, users } from "./tenants";
 
@@ -80,6 +81,9 @@ export const uploads = pgTable("uploads", {
   telegramFileId: text("telegram_file_id"),
   currentStage: pipelineStageEnum("current_stage").default("received"),
   docType: docTypeEnum("doc_type").default("unknown"),
+  budgetDeferred: boolean("budget_deferred").notNull().default(false),
+  budgetResumeStage: text("budget_resume_stage"),
+  budgetResumeDocumentId: uuid("budget_resume_document_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });

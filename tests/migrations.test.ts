@@ -58,6 +58,8 @@ describe.skipIf(!integrationEnabled)("Database migrations", () => {
       "document_issues",
       "uploads",
       "party_master",
+      "app_settings",
+      "llm_usage_events",
     ]) {
       expect(names.has(required), `missing table ${required}`).toBe(true);
     }

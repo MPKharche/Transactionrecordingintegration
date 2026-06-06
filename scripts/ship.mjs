@@ -61,7 +61,7 @@ if (!message) {
 run("git add -A", "Stage changes");
 
 const staged = sh("git diff --cached --name-only");
-const secretsPattern = /(^|\/)\.env($|\.)|credentials|\.pem$/i;
+const secretsPattern = /(^|\/)\.env(?!\.example)(\.|$)|credentials|\.pem$/i;
 if (staged.split("\n").some((f) => secretsPattern.test(f))) {
   console.error("\n❌ Refusing to commit files that look like secrets (.env, credentials, keys).\n");
   process.exit(1);

@@ -56,6 +56,7 @@ export function mapDocument(
     uploaded_by?: string;
     captured_at?: string;
     capture_source?: CaptureSource;
+    budget_deferred?: boolean;
   }
 ): GSTDocument {
   return {
@@ -123,6 +124,8 @@ export function mapDocument(
     page_start: row.pageStart ?? undefined,
     page_end: row.pageEnd ?? undefined,
     invoice_label: row.invoiceLabel ?? undefined,
+    llm_cost_usd: num(row.llmCostUsd),
+    budget_deferred: capture?.budget_deferred ?? false,
   };
 }
 

@@ -21,6 +21,7 @@ import type { ExtractorResponse } from "@ca-suite/zoho-schema";
 import { isUploadPastStage } from "@ca-suite/shared";
 import { callExtractorResilient } from "../lib/extractor-client.js";
 import type { PipelineJobData } from "../lib/pipeline-queue.js";
+import { applyExtractorUsage, requireLlmBudgetOrDefer } from "../lib/llm-budget.js";
 import { loadUploadOrThrow } from "../lib/upload-guard.js";
 
 /** Sum numeric-looking strings for purchase bill totals when document omits them. */
@@ -92,6 +93,12 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
 
   let result: ExtractorResponse;
   try {
+    await requireLlmBudgetOrDefer(
+      uploadId,
+      tenantId,
+      "extract",
+      gstDocumentId ?? targetDoc?.id ?? null
+    );
     // For segments beyond the first in a multi-document PDF (segmentIndex > 0),
     // or when the upload type is unknown/auto, pass an empty hint so the
     // extractor auto-detects the type rather than being forced into the wrong type.
@@ -113,12 +120,24 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
       clientName
     );
   } catch (err: any) {
+    if (err?.name === "BudgetDeferredError") throw err;
     result = {
       docType: "unknown",
       confidence: "low",
       extractionMethod: "stub",
       issues: [`Extractor unavailable: ${err.message}`],
     };
+  }
+
+  const llmUsage = (result as ExtractorResponse & { llmUsage?: unknown }).llmUsage;
+  if (llmUsage) {
+    await applyExtractorUsage(
+      tenantId,
+      uploadId,
+      gstDocumentId ?? targetDoc?.id ?? null,
+      "extract",
+      llmUsage
+    );
   }
 
   await db.insert(extractions).values({

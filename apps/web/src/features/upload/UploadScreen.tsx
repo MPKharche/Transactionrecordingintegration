@@ -21,7 +21,7 @@ import {
   Plus, Search, Download, Upload, ChevronDown, FileText, X,
 } from "lucide-react";
 
-export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void }) {
+export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void; isAdmin?: boolean }) {
   const { uploadFile, retryDocument } = useAppData();
   const clientById = (id: string) => clientByIdFrom(clients, id);
   const [dragging, setDragging] = useState(false);
@@ -222,6 +222,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
           isDark={isDark}
           onReview={onReview}
           onRetry={retryDocument}
+          showAdminCost={isAdmin}
         />
       </div>
     </div>

@@ -89,6 +89,11 @@ export type InvoiceSegmentResult = {
   confidence?: string;
 };
 
+export type DetectInvoicesResult = {
+  segments: InvoiceSegmentResult[];
+  llmUsage?: Record<string, unknown> | null;
+};
+
 const DETECT_TIMEOUT_MS = parseInt(process.env.DETECT_INVOICES_TIMEOUT_MS ?? "240000", 10);
 
 export async function callDetectInvoices(
@@ -96,7 +101,7 @@ export async function callDetectInvoices(
   mimeType: string,
   pages: { page: number; text: string }[] = [],
   options: { preferHeuristic?: boolean; timeoutMs?: number } = {}
-): Promise<{ segments: InvoiceSegmentResult[] }> {
+): Promise<DetectInvoicesResult> {
   const headers = {
     "Content-Type": "application/json",
     ...(EXTRACTOR_SECRET ? { Authorization: `Bearer ${EXTRACTOR_SECRET}` } : {}),
@@ -118,7 +123,7 @@ export async function callDetectInvoices(
     const text = await res.text();
     throw new Error(`detect-invoices ${res.status}: ${text.slice(0, 200)}`);
   }
-  return (await res.json()) as { segments: InvoiceSegmentResult[] };
+  return (await res.json()) as DetectInvoicesResult;
 }
 
 export async function callExtractorResilient(

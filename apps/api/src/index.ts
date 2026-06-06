@@ -59,6 +59,13 @@ import {
 } from "@ca-suite/shared";
 import { mapClient, mapDocument, lineToDb } from "./lib/mappers.js";
 import {
+  deferUploadForBudget,
+  getLlmBudgetStatus,
+  listDeferredUploads,
+  listRecentLlmUsage,
+  setDailyBudgetUsd,
+} from "@ca-suite/db/llm-budget-service";
+import {
   loadMastersBundle,
   syncMastersFromDocument,
   upsertHsnMaster,
@@ -182,7 +189,12 @@ async function captureMetaByUploadIds(uploadIds: string[]) {
   const ids = [...new Set(uploadIds.filter(Boolean))];
   const out = new Map<
     string,
-    { uploaded_by?: string; captured_at?: string; capture_source: CaptureSource }
+    {
+      uploaded_by?: string;
+      captured_at?: string;
+      capture_source: CaptureSource;
+      budget_deferred?: boolean;
+    }
   >();
   if (ids.length === 0) return out;
 
@@ -209,6 +221,7 @@ async function captureMetaByUploadIds(uploadIds: string[]) {
       uploaded_by: u.uploadedById ? userById.get(u.uploadedById) : undefined,
       captured_at: u.createdAt.toISOString(),
       capture_source: (u.source ?? "web") as CaptureSource,
+      budget_deferred: u.budgetDeferred ?? false,
     });
   }
   return out;
@@ -1315,11 +1328,16 @@ export async function buildApp() {
       })
       .returning();
 
-    await enqueuePipelineJob(
-      "normalize",
-      { uploadId: uploadRow.id, tenantId: ctx.tenantId, stage: "normalize", gstDocumentId: docId },
-      `${uploadRow.id}-normalize`
-    );
+    const budget = await getLlmBudgetStatus();
+    if (budget.can_spend) {
+      await enqueuePipelineJob(
+        "normalize",
+        { uploadId: uploadRow.id, tenantId: ctx.tenantId, stage: "normalize", gstDocumentId: docId },
+        `${uploadRow.id}-normalize`
+      );
+    } else {
+      await deferUploadForBudget(uploadRow.id, "normalize", docId);
+    }
 
     await audit(ctx, "document.upload", "document", docId, { uploadId: uploadRow.id });
     const [uploader] = ctx.userId
@@ -1333,6 +1351,7 @@ export async function buildApp() {
       uploaded_by: uploader?.name?.trim() || uploader?.email || undefined,
       captured_at: uploadRow.createdAt.toISOString(),
       capture_source: "web",
+      budget_deferred: !budget.can_spend,
     });
   });
 
@@ -1697,19 +1716,30 @@ export async function buildApp() {
         .where(eq(gstDocuments.id, req.params.id));
       await db
         .update(uploads)
-        .set({ currentStage: "received", updatedAt: new Date() })
+        .set({
+          currentStage: "received",
+          budgetDeferred: false,
+          budgetResumeStage: null,
+          budgetResumeDocumentId: null,
+          updatedAt: new Date(),
+        })
         .where(eq(uploads.id, row.uploadId));
+      const budget = await getLlmBudgetStatus();
       const retryJobId = `${row.uploadId}-normalize-retry-${Date.now()}`;
-      await enqueuePipelineJob(
-        "normalize",
-        {
-          uploadId: row.uploadId,
-          tenantId: ctx.tenantId,
-          stage: "normalize",
-          gstDocumentId: row.id,
-        },
-        retryJobId
-      );
+      if (budget.can_spend) {
+        await enqueuePipelineJob(
+          "normalize",
+          {
+            uploadId: row.uploadId,
+            tenantId: ctx.tenantId,
+            stage: "normalize",
+            gstDocumentId: row.id,
+          },
+          retryJobId
+        );
+      } else {
+        await deferUploadForBudget(row.uploadId, "normalize", row.id);
+      }
       await audit(ctx, "document.retry", "document", req.params.id);
       return loadDocument(req.params.id, ctx.tenantId);
     }
@@ -1920,6 +1950,62 @@ export async function buildApp() {
       `attachment; filename="zoho_${type}_${q.financial_year ?? "all"}.csv"`
     );
     return csv;
+  });
+
+  app.get("/api/admin/observe", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    if (ctx.role !== "admin") {
+      return reply.status(403).send({ error: "Admin access required" });
+    }
+    const status = await getLlmBudgetStatus();
+    const deferred = await listDeferredUploads(100);
+    const recent = await listRecentLlmUsage(40);
+    const docIds = recent.map((r) => r.documentId).filter(Boolean) as string[];
+    const docRows =
+      docIds.length > 0
+        ? await db
+            .select({ id: gstDocuments.id, filename: gstDocuments.filename })
+            .from(gstDocuments)
+            .where(inArray(gstDocuments.id, docIds))
+        : [];
+    const filenameByDoc = new Map(docRows.map((d) => [d.id, d.filename]));
+    return {
+      ...status,
+      deferred_count: deferred.length,
+      deferred_uploads: deferred.map((u) => ({
+        id: u.id,
+        filename: u.originalFilename,
+        current_stage: u.currentStage,
+        resume_stage: u.budgetResumeStage,
+        created_at: u.createdAt.toISOString(),
+      })),
+      recent_usage: recent.map((r) => ({
+        id: r.id,
+        document_id: r.documentId,
+        filename: r.documentId ? filenameByDoc.get(r.documentId) : null,
+        upload_id: r.uploadId,
+        stage: r.stage,
+        model: r.model,
+        prompt_tokens: r.promptTokens,
+        completion_tokens: r.completionTokens,
+        cost_usd: parseFloat(r.costUsd ?? "0"),
+        created_at: r.createdAt.toISOString(),
+      })),
+    };
+  });
+
+  app.patch<{ Body: { daily_budget_usd?: number } }>("/api/admin/observe", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    if (ctx.role !== "admin") {
+      return reply.status(403).send({ error: "Admin access required" });
+    }
+    const next = req.body?.daily_budget_usd;
+    if (next == null || !Number.isFinite(next) || next < 0) {
+      return reply.status(400).send({ error: "daily_budget_usd must be a non-negative number" });
+    }
+    const saved = await setDailyBudgetUsd(next);
+    const status = await getLlmBudgetStatus();
+    return { ...status, daily_budget_usd: parseFloat(saved) };
   });
 
   app.get("/api/audit-log", async (req) => {

@@ -189,6 +189,14 @@ export const ExtractorResponseSchema = z.object({
   issues: z.array(z.string()).default([]),
   salesInvoice: SalesInvoiceHeaderSchema.optional(),
   purchaseBill: PurchaseBillHeaderSchema.optional(),
+  llmUsage: z
+    .object({
+      model: z.string(),
+      prompt_tokens: z.number(),
+      completion_tokens: z.number(),
+      cost_usd: z.number(),
+    })
+    .optional(),
 });
 
 export type ExtractorResponse = z.infer<typeof ExtractorResponseSchema>;

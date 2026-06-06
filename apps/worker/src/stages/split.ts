@@ -11,6 +11,7 @@ import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import { callDetectInvoices } from "../lib/extractor-client.js";
 import { enqueuePipelineStage } from "../lib/pipeline-queue.js";
 import { pipelineJobs } from "@ca-suite/db";
+import { applyExtractorUsage, requireLlmBudgetOrDefer } from "../lib/llm-budget.js";
 
 type Segment = { pageStart: number; pageEnd: number; billNumber?: string | null };
 
@@ -39,21 +40,37 @@ export async function splitStage(
 
   let segments: Segment[] = [];
 
+  const docsEarly = await db
+    .select({ id: gstDocuments.id })
+    .from(gstDocuments)
+    .where(eq(gstDocuments.uploadId, uploadId))
+    .orderBy(asc(gstDocuments.segmentIndex))
+    .limit(1);
+  const primaryDocId = docsEarly[0]?.id ?? null;
+
   async function detect(preferHeuristic: boolean) {
+    if (!preferHeuristic) {
+      await requireLlmBudgetOrDefer(uploadId, tenantId, "split", primaryDocId);
+    }
     const detected = await callDetectInvoices(upload.storagePath, upload.mimeType, ocrPages, {
       preferHeuristic,
       timeoutMs: preferHeuristic ? 120_000 : undefined,
     });
+    if (detected.llmUsage) {
+      await applyExtractorUsage(tenantId, uploadId, primaryDocId, "split", detected.llmUsage);
+    }
     return detected.segments ?? [];
   }
 
   try {
     segments = await detect(false);
   } catch (err) {
+    if (err instanceof Error && err.name === "BudgetDeferredError") throw err;
     console.warn("[split] detect failed, retrying heuristic:", err);
     try {
       segments = await detect(true);
     } catch (err2) {
+      if (err2 instanceof Error && err2.name === "BudgetDeferredError") throw err2;
       console.warn("[split] heuristic detect failed:", err2);
     }
   }

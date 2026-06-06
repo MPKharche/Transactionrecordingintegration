@@ -28,6 +28,8 @@ import type { PipelineJobData } from "./lib/pipeline-queue.js";
 import { createSemaphore } from "./lib/semaphore.js";
 import { enqueuePipelineStage, closePipelineQueue } from "./lib/pipeline-queue.js";
 import { shutdownOcrPool } from "./lib/ocr-pool.js";
+import { BudgetDeferredError } from "@ca-suite/shared";
+import { resumeDeferredUploads } from "@ca-suite/db/llm-budget-service";
 import { loadUploadOrThrow } from "./lib/upload-guard.js";
 
 const connection = {
@@ -122,6 +124,19 @@ async function processJob(job: Job<JobData>) {
     }
   } catch (err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
+    if (err instanceof BudgetDeferredError) {
+      console.warn(`[worker] budget deferred ${stage} uploadId=${uploadId}`);
+      await db
+        .update(pipelineJobs)
+        .set({
+          status: "failed",
+          error: message.slice(0, 2000),
+          finishedAt: new Date(),
+          updatedAt: new Date(),
+        })
+        .where(eq(pipelineJobs.id, jobRow.id));
+      return;
+    }
     console.error(`[worker] stage=${stage} uploadId=${uploadId} error:`, message);
     await db
       .update(pipelineJobs)
@@ -181,6 +196,26 @@ async function reconcileStuckJobs() {
 
 reconcileStuckJobs().catch(console.error);
 setInterval(() => reconcileStuckJobs().catch(console.error), 5 * 60 * 1000);
+
+async function resumeBudgetDeferred() {
+  const resumed = await resumeDeferredUploads(async (u) => {
+    const stage = (u.budgetResumeStage ?? "normalize") as JobPipelineStage;
+    const jobId = `${u.id}-${stage}-budget-resume-${Date.now()}`;
+    await enqueuePipelineStage(
+      u.id,
+      u.tenantId,
+      stage,
+      jobId,
+      u.budgetResumeDocumentId ?? undefined
+    );
+  });
+  if (resumed > 0) {
+    console.log(`[worker] resumed ${resumed} budget-deferred upload(s)`);
+  }
+}
+
+resumeBudgetDeferred().catch(console.error);
+setInterval(() => resumeBudgetDeferred().catch(console.error), 15 * 60 * 1000);
 
 console.log(
   `[worker] Started — concurrency=${WORKER_CONCURRENCY} ocr=${OCR_CONCURRENCY} extract=${EXTRACT_LLM_CONCURRENCY} lockMs=${WORKER_LOCK_DURATION_MS}`

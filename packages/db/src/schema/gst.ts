@@ -157,6 +157,7 @@ export const gstDocuments = pgTable("gst_documents", {
     otherChargesTcs: numeric("other_charges_tcs", { precision: 12, scale: 2 }).default("0"),
     completenessScore: numeric("completeness_score", { precision: 5, scale: 2 }).default("0"),
     fieldConfidence: jsonb("field_confidence").$type<Record<string, unknown>>().default({}),
+    llmCostUsd: numeric("llm_cost_usd", { precision: 12, scale: 6 }).notNull().default("0"),
     /** Computed: whether reverse charge mechanism applies to this document */
     reverseChargeApplicable: boolean("reverse_charge_applicable").default(false),
     /** Computed: whether ITC can be claimed on this document (purchase invoices only) */

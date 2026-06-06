@@ -11,6 +11,7 @@ export default defineConfig({
     "./src/schema/coa.ts",
     "./src/schema/audit.ts",
     "./src/schema/masters.ts",
+    "./src/schema/llm-budget.ts",
   ],
   out: "./migrations",
   dialect: "postgresql",

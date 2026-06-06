@@ -23,6 +23,7 @@ import { AmendmentWorkflowScreen } from "../features/amendments/AmendmentWorkflo
 import { ZohoIntegrationScreen } from "../features/integrations/ZohoIntegrationScreen";
 import { GstPortalIntegrationScreen } from "../features/integrations/GstPortalIntegrationScreen";
 import { EmailForwardingScreen } from "../features/integrations/EmailForwardingScreen";
+import { AdminObserveScreen } from "../features/admin/AdminObserveScreen";
 import { PreferencesScreen } from "../features/settings/PreferencesScreen";
 
 export function AppShell() {
@@ -71,7 +72,9 @@ export function AppShell() {
                       ? "registers"
                       : location.pathname.startsWith("/audit")
                         ? "audit"
-                        : location.pathname.startsWith("/settings")
+                        : location.pathname.startsWith("/admin/observe")
+                          ? "observe"
+                          : location.pathname.startsWith("/settings")
                           ? "settings"
                           : location.pathname.startsWith("/clients")
                           ? routeClientId
@@ -104,6 +107,7 @@ export function AppShell() {
       | "client_detail"
       | "registers"
       | "audit"
+      | "observe"
       | "deadlines"
       | "reconciliation"
       | "tax_liability"
@@ -118,6 +122,7 @@ export function AppShell() {
     else if (s === "records") navigate("/records");
     else if (s === "registers") navigate("/registers");
     else if (s === "audit") navigate("/audit");
+    else if (s === "observe") navigate("/admin/observe");
     else if (s === "settings") navigate("/settings");
     else if (s === "clients") navigate("/clients");
     else if (s === "deadlines") navigate("/deadlines");
@@ -154,7 +159,13 @@ export function AppShell() {
           <Dashboard docs={docs} clients={clients} isDark={isDark} onNav={navTo} />
         )}
         {screen === "upload" && (
-          <UploadScreen docs={docs} clients={clients} isDark={isDark} onReview={openReview} />
+          <UploadScreen
+            docs={docs}
+            clients={clients}
+            isDark={isDark}
+            onReview={openReview}
+            isAdmin={session?.role === "admin"}
+          />
         )}
         {screen === "records" && (
           <RecordsScreen
@@ -176,6 +187,7 @@ export function AppShell() {
               onPatch={patchDocument}
               onLock={lockDocument}
               onReject={rejectDocument}
+              isAdmin={session?.role === "admin"}
             />
           ) : (
             <EmptyState
@@ -215,6 +227,7 @@ export function AppShell() {
           />
         )}
         {screen === "audit" && <AuditLogScreen />}
+        {screen === "observe" && <AdminObserveScreen isDark={isDark} />}
         {screen === "settings" && <PreferencesScreen />}
         {/* TIER 2 Screens */}
         {screen === "deadlines" && <FilingDeadlineScreen isDark={isDark} />}
