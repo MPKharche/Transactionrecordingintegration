@@ -294,9 +294,13 @@ export function RecordsScreen({
   const toggleRow = (id: string) => setExpandedId(prev => prev === id ? null : id);
 
   const handleArchive = useCallback(async (id: string) => {
-    await onDelete?.(id);
-    setArchiveConfirm(null);
-    setExpandedId(null);
+    try {
+      await onDelete?.(id);
+      setArchiveConfirm(null);
+      setExpandedId(null);
+    } catch {
+      setArchiveConfirm(null);
+    }
   }, [onDelete]);
 
   // Handle Edit: open review screen (ReviewScreen handles locked-doc editing with version save)

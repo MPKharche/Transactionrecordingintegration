@@ -203,8 +203,14 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const deleteDocument = useCallback(async (id: string) => {
-    await api.documents.delete(id);
-    setDocs((prev) => prev.filter((d) => d.id !== id));
+    try {
+      await api.documents.delete(id);
+      setDocs((prev) => prev.filter((d) => d.id !== id));
+      toast.success("Document archived");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Archive failed");
+      throw e;
+    }
   }, []);
 
   const bulkDeleteDocuments = useCallback(async (ids: string[]) => {

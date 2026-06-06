@@ -3,6 +3,7 @@ import { db } from "@ca-suite/db/client";
 import {
   documentIssues,
   documentLines,
+  documentVersions,
   extractions,
   gstDocuments,
   pipelineJobs,
@@ -12,8 +13,9 @@ import {
 } from "@ca-suite/db";
 import { BUCKET, getMinio } from "./minio.js";
 
-export function isDocumentDeletable(stage: string): boolean {
-  return stage !== "locked";
+/** Locked register rows can be archived from Records (hard delete + audit). */
+export function isDocumentDeletable(_stage: string): boolean {
+  return true;
 }
 
 async function removeMinioObject(storagePath: string): Promise<void> {
@@ -38,11 +40,12 @@ export async function deleteGstDocument(
 
   if (!row) return { ok: false, status: 404, error: "Not found" };
   if (!isDocumentDeletable(row.stage)) {
-    return { ok: false, status: 409, error: "Locked documents cannot be deleted" };
+    return { ok: false, status: 409, error: "Document cannot be deleted" };
   }
 
   const uploadId = row.uploadId;
 
+  await db.delete(documentVersions).where(eq(documentVersions.documentId, documentId));
   await db.delete(documentLines).where(eq(documentLines.documentId, documentId));
   await db.delete(documentIssues).where(eq(documentIssues.documentId, documentId));
   await db.delete(gstDocuments).where(eq(gstDocuments.id, documentId));

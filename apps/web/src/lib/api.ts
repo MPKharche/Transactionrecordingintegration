@@ -20,9 +20,10 @@ export function getAuth() {
   return auth;
 }
 
-function headers(json = true): HeadersInit {
+function requestHeaders(init?: RequestInit): HeadersInit {
   const h: Record<string, string> = {};
-  if (json) h["Content-Type"] = "application/json";
+  const hasBody = init?.body != null && init.body !== "";
+  if (hasBody) h["Content-Type"] = "application/json";
   return h;
 }
 
@@ -30,7 +31,7 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   const res = await fetch(`${BASE}${path}`, {
     ...init,
     credentials: "include",
-    headers: { ...headers(), ...init?.headers },
+    headers: { ...requestHeaders(init), ...init?.headers },
   });
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
