@@ -124,6 +124,12 @@ import {
   verifyOAuthState,
   type AuthContext,
 } from "./lib/auth.js";
+import {
+  passwordLoginEnabled,
+  authenticateWithPassword,
+  LoginInvalidError,
+  LoginRateLimitedError,
+} from "./lib/password-auth.js";
 
 export type { AuthContext };
 
@@ -284,6 +290,7 @@ export async function buildApp() {
       urlPath.startsWith("/api/auth/google") ||
       urlPath.startsWith("/api/auth/config") ||
       urlPath.startsWith("/api/auth/dev-login") ||
+      urlPath.startsWith("/api/auth/password-login") ||
       urlPath.startsWith("/api/auth/session") ||
       urlPath.startsWith("/api/auth/logout");
     if (open) return;
@@ -330,6 +337,7 @@ export async function buildApp() {
     return {
       googleEnabled: googleOAuthConfigured(),
       devLoginEnabled: devAuthAllowed(),
+      passwordLoginEnabled: passwordLoginEnabled(),
       accessRestricted: isAccessRestricted(),
     };
   });
@@ -428,6 +436,52 @@ export async function buildApp() {
     await destroySession(req, reply);
     return { ok: true };
   });
+
+  app.post<{ Body: { email?: string; password?: string } }>(
+    "/api/auth/password-login",
+    async (req, reply) => {
+      if (!passwordLoginEnabled()) {
+        return reply.status(404).send({ error: "Not available" });
+      }
+      const email = String(req.body?.email ?? "").trim();
+      const password = String(req.body?.password ?? "");
+      const clientIp =
+        String(req.headers["x-forwarded-for"] ?? "").split(",")[0]?.trim() ||
+        req.ip;
+
+      try {
+        const { userId } = await authenticateWithPassword(email, password, clientIp);
+        const [membership] = await db
+          .select()
+          .from(memberships)
+          .where(eq(memberships.userId, userId))
+          .limit(1);
+        if (!membership) {
+          return reply.status(403).send({ error: "No practice membership for this account." });
+        }
+        await createSession(userId, reply);
+        const [user] = await db.select().from(users).where(eq(users.id, userId)).limit(1);
+        return {
+          tenantId: membership.tenantId,
+          userId,
+          email: user?.email ?? email,
+          role: membership.role,
+        };
+      } catch (err) {
+        if (err instanceof LoginRateLimitedError) {
+          return reply
+            .status(429)
+            .header("Retry-After", String(err.retryAfterSec))
+            .send({ error: err.message, retryAfterSec: err.retryAfterSec });
+        }
+        if (err instanceof LoginInvalidError) {
+          return reply.status(401).send({ error: err.message });
+        }
+        req.log.error({ err }, "password-login failed");
+        return reply.status(401).send({ error: "Invalid email or password." });
+      }
+    }
+  );
 
   app.post<{ Body: { email?: string } }>("/api/auth/dev-login", async (req, reply) => {
     if (!devAuthAllowed()) {

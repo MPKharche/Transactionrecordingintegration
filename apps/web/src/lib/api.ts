@@ -9,7 +9,7 @@ export type UserProfile = {
   image: string | null;
   role: UserRole;
   preferences: UserPreferences;
-  authProvider: "google" | "dev";
+  authProvider: "google" | "dev" | "password";
 };
 
 export type AuthHeaders = {
@@ -112,6 +112,25 @@ export async function devLogin(): Promise<AuthHeaders> {
     { method: "POST", body: JSON.stringify({}) }
   );
   auth = { tenantId: data.tenantId, userId: data.userId, email: data.email };
+  return auth;
+}
+
+export async function passwordLogin(email: string, password: string): Promise<AuthHeaders> {
+  const data = await request<{
+    tenantId: string;
+    userId: string;
+    email: string;
+    role?: UserRole;
+  }>("/auth/password-login", {
+    method: "POST",
+    body: JSON.stringify({ email, password }),
+  });
+  auth = {
+    tenantId: data.tenantId,
+    userId: data.userId,
+    email: data.email,
+    role: data.role,
+  };
   return auth;
 }
 
@@ -349,9 +368,12 @@ export const api = {
       }>(`/gstin/lookup/${encodeURIComponent(gstin)}`),
   },
   authConfig: () =>
-    request<{ googleEnabled: boolean; devLoginEnabled: boolean; accessRestricted?: boolean }>(
-      "/auth/config"
-    ),
+    request<{
+      googleEnabled: boolean;
+      devLoginEnabled: boolean;
+      passwordLoginEnabled?: boolean;
+      accessRestricted?: boolean;
+    }>("/auth/config"),
   admin: {
     observe: {
       get: () => request<AdminObserveSnapshot>("/admin/observe"),

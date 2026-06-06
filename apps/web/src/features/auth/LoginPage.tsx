@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router";
 import { Shield } from "lucide-react";
-import { devLogin, trySession, api } from "../../lib/api";
+import { devLogin, passwordLogin, trySession, api } from "../../lib/api";
 
 /** Always use same-origin /api so session cookie works via Vite proxy or Vercel rewrite. */
 const GOOGLE_AUTH_HREF = `${import.meta.env.VITE_API_URL ?? "/api"}/auth/google`;
@@ -29,7 +29,11 @@ export function LoginPage() {
   const [devLoginEnabled, setDevLoginEnabled] = useState(
     import.meta.env.VITE_ALLOW_DEV_LOGIN === "true"
   );
+  const [passwordLoginEnabled, setPasswordLoginEnabled] = useState(false);
   const [accessRestricted, setAccessRestricted] = useState(false);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [passwordLoading, setPasswordLoading] = useState(false);
 
   useEffect(() => {
     trySession().then((s) => {
@@ -38,6 +42,7 @@ export function LoginPage() {
     api.authConfig().then((cfg) => {
       setGoogleEnabled(cfg.googleEnabled);
       setDevLoginEnabled(cfg.devLoginEnabled || import.meta.env.VITE_ALLOW_DEV_LOGIN === "true");
+      setPasswordLoginEnabled(Boolean(cfg.passwordLoginEnabled));
       setAccessRestricted(cfg.accessRestricted ?? false);
     }).catch(() => {
       /* API unreachable — keep defaults */
@@ -54,6 +59,20 @@ export function LoginPage() {
       setError(e instanceof Error ? e.message : "Login failed");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function signInPassword(e: React.FormEvent) {
+    e.preventDefault();
+    setPasswordLoading(true);
+    setError("");
+    try {
+      await passwordLogin(email.trim(), password);
+      navigate("/");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Login failed");
+    } finally {
+      setPasswordLoading(false);
     }
   }
 
@@ -112,6 +131,44 @@ export function LoginPage() {
             Google sign-in is not configured yet. Set <code className="text-xs">GOOGLE_CLIENT_ID</code> and{" "}
             <code className="text-xs">GOOGLE_CLIENT_SECRET</code> on the API server.
           </p>
+        )}
+
+        {passwordLoginEnabled && (
+          <form onSubmit={signInPassword} className="space-y-3 pt-2 border-t border-border">
+            <p className="text-xs text-muted-foreground">
+              Testing login — email + password (rate-limited). Google sign-in still works.
+            </p>
+            <label className="block">
+              <span className="text-xs font-medium text-muted-foreground">Email</span>
+              <input
+                type="email"
+                autoComplete="username"
+                required
+                value={email}
+                onChange={(e) => setEmail(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+                placeholder="you@firm.com"
+              />
+            </label>
+            <label className="block">
+              <span className="text-xs font-medium text-muted-foreground">Password</span>
+              <input
+                type="password"
+                autoComplete="current-password"
+                required
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                className="mt-1 w-full px-3 py-2 rounded-lg border border-border bg-background text-sm"
+              />
+            </label>
+            <button
+              type="submit"
+              disabled={passwordLoading}
+              className="w-full py-3 rounded-lg bg-primary text-primary-foreground text-sm font-semibold hover:opacity-90 transition-opacity disabled:opacity-60"
+            >
+              {passwordLoading ? "Signing in…" : "Sign in with password"}
+            </button>
+          </form>
         )}
 
         {devLoginEnabled && (

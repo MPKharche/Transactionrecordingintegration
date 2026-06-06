@@ -37,6 +37,9 @@ export const users = pgTable("users", {
   name: text("name"),
   image: text("image"),
   emailVerified: timestamp("email_verified"),
+  /** scrypt hash for optional password login (testing); null = Google-only */
+  passwordHash: text("password_hash"),
+  passwordUpdatedAt: timestamp("password_updated_at"),
   preferences: jsonb("preferences").$type<Record<string, unknown>>().notNull().default({}),
   createdAt: timestamp("created_at").defaultNow().notNull(),
 });
