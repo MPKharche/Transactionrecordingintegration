@@ -3170,33 +3170,152 @@ export async function buildApp() {
       if (!clientRow) {
         return reply.status(403).send({ error: "Client not found" });
       }
-      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
-      const orgId =
-        clientRow?.zohoBooksOrgId ??
-        tenant?.zohoOrgId ??
-        process.env.ZOHO_ORG_ID ??
-        "";
+
+      const {
+        fetchZohoOrganizations,
+        resolveClientZohoOrg,
+        bindClientToZohoOrg,
+        syncZohoOrganizationsToClients,
+        propagateZohoTokensToTenantClients,
+      } = await import("./lib/zoho-org-sync.js");
+
+      const orgs = await fetchZohoOrganizations(tokens.accessToken);
+      const resolution = resolveClientZohoOrg(clientRow, orgs);
+
       await zohoTokenManager.storeTokens(clientId, tenantId, {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresIn: tokens.expiresIn,
-        orgId,
+        orgId: resolution.status === "resolved" ? (resolution.orgId ?? "") : "",
       });
 
-      try {
-        const { syncZohoOrganizationsToClients, propagateZohoTokensToTenantClients } =
-          await import("./lib/zoho-org-sync.js");
-        const syncResult = await syncZohoOrganizationsToClients(tenantId, tokens.accessToken);
-        const propagated = await propagateZohoTokensToTenantClients(tenantId, clientId);
-        req.log.info({ syncResult, propagated }, "Zoho org → client sync after OAuth");
-      } catch (syncErr) {
-        req.log.warn({ err: syncErr }, "Zoho org sync after OAuth failed (OAuth still connected)");
+      const webBase = process.env.WEB_ORIGIN ?? process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
+
+      if (resolution.status === "resolved" && resolution.orgId) {
+        await bindClientToZohoOrg(tenantId, clientId, resolution.orgId, orgs);
+        try {
+          const syncResult = await syncZohoOrganizationsToClients(tenantId, tokens.accessToken);
+          const propagated = await propagateZohoTokensToTenantClients(tenantId, clientId);
+          req.log.info({ syncResult, propagated, autoMatchedByGstin: resolution.autoMatchedByGstin }, "Zoho org bound after OAuth");
+        } catch (syncErr) {
+          req.log.warn({ err: syncErr }, "Zoho org sync after OAuth failed (OAuth still connected)");
+        }
+        const matched = resolution.autoMatchedByGstin ? "&orgMatched=gstin" : "";
+        return reply.redirect(
+          `${webBase}/integrations/zoho?clientId=${clientId}&connected=true${matched}`
+        );
       }
 
-      const webBase = process.env.WEB_ORIGIN ?? process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
+      try {
+        await syncZohoOrganizationsToClients(tenantId, tokens.accessToken);
+      } catch (syncErr) {
+        req.log.warn({ err: syncErr }, "Zoho org list sync failed during org selection");
+      }
+
       return reply.redirect(
-        `${webBase}/integrations/zoho?clientId=${clientId}&connected=true`
+        `${webBase}/integrations/zoho?clientId=${clientId}&selectOrg=true`
       );
+    }
+  );
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/integrations/zoho/organizations/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const [config] = await db
+        .select()
+        .from(zohoSyncConfig)
+        .where(and(eq(zohoSyncConfig.tenantId, ctx.tenantId), eq(zohoSyncConfig.clientId, clientId)))
+        .limit(1);
+      if (!config?.zohoRefreshToken) {
+        return reply.status(400).send({ error: "Complete Zoho OAuth first" });
+      }
+
+      const accessToken = await zohoTokenManager.getValidToken(clientId, ctx.tenantId);
+      const { fetchZohoOrganizations, resolveClientZohoOrg } = await import("./lib/zoho-org-sync.js");
+      const orgs = await fetchZohoOrganizations(accessToken);
+      const resolution = resolveClientZohoOrg(client, orgs);
+
+      return {
+        client: { id: client.id, name: client.name, gstin: client.gstin },
+        boundOrgId: config.zohoBooksOrgId ?? client.zohoBooksOrgId ?? null,
+        needsSelection: !config.zohoBooksOrgId,
+        resolution: resolution.status,
+        candidates: resolution.candidates,
+      };
+    }
+  );
+
+  app.post<{ Params: { clientId: string }; Body: { zohoOrgId?: string; confirmGstinMismatch?: boolean } }>(
+    "/api/integrations/zoho/bind-org/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const zohoOrgId = String(req.body?.zohoOrgId ?? "").trim();
+      if (!zohoOrgId) return reply.status(400).send({ error: "zohoOrgId required" });
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const connected = await zohoTokenManager.isConnected(clientId, ctx.tenantId);
+      const [config] = await db
+        .select()
+        .from(zohoSyncConfig)
+        .where(and(eq(zohoSyncConfig.tenantId, ctx.tenantId), eq(zohoSyncConfig.clientId, clientId)))
+        .limit(1);
+      if (!config?.zohoRefreshToken) {
+        return reply.status(400).send({ error: "Complete Zoho OAuth first" });
+      }
+      if (connected && config.zohoBooksOrgId === zohoOrgId) {
+        return { ok: true, orgId: zohoOrgId, alreadyBound: true };
+      }
+
+      const accessToken = await zohoTokenManager.getValidToken(clientId, ctx.tenantId);
+      const {
+        fetchZohoOrganizations,
+        bindClientToZohoOrg,
+        propagateZohoTokensToTenantClients,
+      } = await import("./lib/zoho-org-sync.js");
+      const orgs = await fetchZohoOrganizations(accessToken);
+      const picked = orgs.find((o) => o.organization_id === zohoOrgId);
+      if (!picked) return reply.status(404).send({ error: "Zoho organization not found" });
+
+      const clientGstin = client.gstin?.trim().toUpperCase();
+      const orgGstin =
+        picked.tax_id_value?.trim().toUpperCase() ?? picked.company_id_value?.trim().toUpperCase() ?? "";
+      if (
+        clientGstin &&
+        orgGstin &&
+        clientGstin !== orgGstin &&
+        !req.body?.confirmGstinMismatch
+      ) {
+        return reply.status(409).send({
+          error: "GSTIN mismatch",
+          clientGstin,
+          orgGstin,
+          orgName: picked.name,
+          hint: "Retry with confirmGstinMismatch: true if you are sure",
+        });
+      }
+
+      const bound = await bindClientToZohoOrg(tenantId, clientId, zohoOrgId, orgs);
+      const propagated = await propagateZohoTokensToTenantClients(tenantId, clientId);
+      await audit(ctx, "zoho.bind_org", "integration", clientId, { zohoOrgId, propagated });
+
+      return { ok: true, orgId: zohoOrgId, orgName: bound.orgName, propagated };
     }
   );
 
@@ -3324,6 +3443,7 @@ export async function buildApp() {
 
       const byStatus = Object.fromEntries(counts.map((c) => [c.status, c.count]));
       const connected = await zohoTokenManager.isConnected(clientId, ctx.tenantId);
+      const needsOrgSelection = Boolean(config?.zohoRefreshToken && !config?.zohoBooksOrgId);
 
       const [lastLog] = await db
         .select({ createdAt: zohoSyncLog.createdAt })
@@ -3334,7 +3454,10 @@ export async function buildApp() {
 
       return {
         connected,
+        needsOrgSelection,
+        orgId: config?.zohoBooksOrgId ?? client.zohoBooksOrgId ?? null,
         orgName: config?.zohoBooksOrgId ?? config?.zohoOrgId,
+        clientGstin: client.gstin,
         synced: byStatus.synced ?? 0,
         pending: (byStatus.pending ?? 0) + (byStatus.syncing ?? 0),
         errors: byStatus.error ?? 0,

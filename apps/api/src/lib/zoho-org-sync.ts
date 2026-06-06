@@ -42,6 +42,126 @@ function isCaFirmOrg(name: string): boolean {
   return /planet\s*finance/i.test(name);
 }
 
+export type ZohoOrgCandidate = {
+  organizationId: string;
+  name: string;
+  gstin: string | null;
+  isCaFirm: boolean;
+  gstinMatch: boolean;
+};
+
+export type ClientZohoOrgResolution = {
+  status: "resolved" | "needs_selection" | "no_msme_orgs";
+  orgId?: string;
+  orgName?: string;
+  candidates: ZohoOrgCandidate[];
+  autoMatchedByGstin: boolean;
+};
+
+function orgGstin(org: ZohoBooksOrganization): string | null {
+  return normalizeGstin(org.tax_id_value) ?? normalizeGstin(org.company_id_value);
+}
+
+export function toZohoOrgCandidates(
+  orgs: ZohoBooksOrganization[],
+  clientGstin: string
+): ZohoOrgCandidate[] {
+  const clientG = normalizeGstin(clientGstin);
+  return orgs.map((org) => {
+    const gstin = orgGstin(org);
+    return {
+      organizationId: org.organization_id,
+      name: org.name,
+      gstin,
+      isCaFirm: isCaFirmOrg(org.name),
+      gstinMatch: Boolean(clientG && gstin && clientG === gstin),
+    };
+  });
+}
+
+/** Pick the Zoho Books org for an MSME client — never default to the CA firm's tenant org. */
+export function resolveClientZohoOrg(
+  client: { gstin: string; zohoBooksOrgId?: string | null },
+  orgs: ZohoBooksOrganization[]
+): ClientZohoOrgResolution {
+  const candidates = toZohoOrgCandidates(orgs, client.gstin);
+  const msmeOrgs = orgs.filter((o) => !isCaFirmOrg(o.name));
+  const msmeCandidates = candidates.filter((c) => !c.isCaFirm);
+
+  if (client.zohoBooksOrgId) {
+    const preset = candidates.find((c) => c.organizationId === client.zohoBooksOrgId);
+    if (preset && !preset.isCaFirm) {
+      return {
+        status: "resolved",
+        orgId: preset.organizationId,
+        orgName: preset.name,
+        candidates: msmeCandidates,
+        autoMatchedByGstin: preset.gstinMatch,
+      };
+    }
+  }
+
+  const gstinMatches = msmeCandidates.filter((c) => c.gstinMatch);
+  if (gstinMatches.length === 1) {
+    return {
+      status: "resolved",
+      orgId: gstinMatches[0].organizationId,
+      orgName: gstinMatches[0].name,
+      candidates: msmeCandidates,
+      autoMatchedByGstin: true,
+    };
+  }
+
+  if (msmeCandidates.length === 0) {
+    return { status: "no_msme_orgs", candidates: [], autoMatchedByGstin: false };
+  }
+
+  return {
+    status: "needs_selection",
+    candidates: gstinMatches.length > 1 ? gstinMatches : msmeCandidates,
+    autoMatchedByGstin: false,
+  };
+}
+
+export async function bindClientToZohoOrg(
+  tenantId: string,
+  clientId: string,
+  zohoOrgId: string,
+  orgs: ZohoBooksOrganization[]
+): Promise<{ orgName: string; gstin: string | null }> {
+  const org = orgs.find((o) => o.organization_id === zohoOrgId);
+  if (!org) throw new Error("Zoho organization not found");
+  if (isCaFirmOrg(org.name)) {
+    throw new Error("Cannot link an MSME client to the CA firm's Zoho organization");
+  }
+
+  await db
+    .update(clients)
+    .set({ zohoBooksOrgId: zohoOrgId, name: org.name, updatedAt: new Date() })
+    .where(and(eq(clients.id, clientId), eq(clients.tenantId, tenantId)));
+
+  await upsertZohoOrgMapping(tenantId, clientId, zohoOrgId);
+
+  const [cfg] = await db
+    .select()
+    .from(zohoSyncConfig)
+    .where(and(eq(zohoSyncConfig.tenantId, tenantId), eq(zohoSyncConfig.clientId, clientId)))
+    .limit(1);
+  if (cfg) {
+    await db
+      .update(zohoSyncConfig)
+      .set({
+        zohoBooksOrgId: zohoOrgId,
+        zohoOrgId: zohoOrgId,
+        isActive: true,
+        updatedAt: new Date(),
+      })
+      .where(eq(zohoSyncConfig.id, cfg.id));
+  }
+
+  return { orgName: org.name, gstin: orgGstin(org) };
+}
+
 export async function upsertZohoOrgMapping(
   tenantId: string,
   clientId: string,

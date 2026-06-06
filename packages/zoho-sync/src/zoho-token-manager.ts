@@ -66,9 +66,9 @@ export class ZohoTokenManager {
     const cfg = await this.getConfig(clientId, tenantId);
     if (!cfg?.isActive) return false;
     if (cfg.authMethod === "oauth2") {
-      return Boolean(cfg.zohoRefreshToken);
+      return Boolean(cfg.zohoRefreshToken && cfg.zohoBooksOrgId);
     }
-    return Boolean(cfg.zohoApiKey);
+    return Boolean(cfg.zohoApiKey && cfg.zohoBooksOrgId);
   }
 
   async getValidToken(clientId: string, tenantId: string): Promise<string> {

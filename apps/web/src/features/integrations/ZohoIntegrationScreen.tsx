@@ -15,13 +15,24 @@ import { Loader2, CheckCircle2, AlertCircle, Power, RotateCcw } from "lucide-rea
 
 interface ZohoStatus {
   connected: boolean;
+  needsOrgSelection?: boolean;
+  orgId?: string;
   orgName?: string;
+  clientGstin?: string;
   lastSyncTime?: string;
   invoicesSynced?: number;
   registersPushed?: number;
   syncStatus?: "success" | "failed" | "in_progress";
   error?: string;
 }
+
+type ZohoOrgCandidate = {
+  organizationId: string;
+  name: string;
+  gstin: string | null;
+  isCaFirm: boolean;
+  gstinMatch: boolean;
+};
 
 export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
   const { clients } = useAppData();
@@ -32,6 +43,10 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncInterval, setSyncInterval] = useState("6h");
+  const [orgCandidates, setOrgCandidates] = useState<ZohoOrgCandidate[]>([]);
+  const [selectedOrgId, setSelectedOrgId] = useState("");
+  const [bindingOrg, setBindingOrg] = useState(false);
+  const [clientGstin, setClientGstin] = useState("");
 
   useEffect(() => {
     void loadStatus();
@@ -39,8 +54,17 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
 
   useEffect(() => {
     if (searchParams.get("connected") === "true") {
-      toast.success("Zoho Books connected");
+      const matched = searchParams.get("orgMatched") === "gstin";
+      toast.success(
+        matched
+          ? "Zoho connected — organization matched by GSTIN"
+          : "Zoho Books connected"
+      );
       void loadStatus();
+    }
+    if (searchParams.get("selectOrg") === "true") {
+      toast.message("Select the Zoho Books organization for this client");
+      void loadOrgCandidates();
     }
     if (searchParams.get("error") === "oauth_state") {
       toast.error("Zoho sign-in expired or was interrupted. Click Connect again.");
@@ -68,16 +92,72 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
       const data = await res.json();
       setStatus({
         connected: Boolean(data.connected),
+        needsOrgSelection: Boolean(data.needsOrgSelection),
+        orgId: data.orgId,
         orgName: data.orgName,
+        clientGstin: data.clientGstin,
         lastSyncTime: data.lastSyncAt,
         invoicesSynced: data.synced,
         registersPushed: data.pending,
         syncStatus: data.errors > 0 ? "failed" : "success",
       });
+      setClientGstin(data.clientGstin ?? "");
+      if (data.needsOrgSelection) {
+        void loadOrgCandidates();
+      }
     } catch (error) {
       toast.error("Failed to load integration status");
     } finally {
       setLoading(false);
+    }
+  }
+
+  async function loadOrgCandidates() {
+    if (!clientId) return;
+    try {
+      const res = await fetch(`/api/integrations/zoho/organizations/${clientId}`, {
+        credentials: "include",
+      });
+      if (!res.ok) throw new Error("Failed to load Zoho organizations");
+      const data = await res.json();
+      setOrgCandidates(data.candidates ?? []);
+      setClientGstin(data.client?.gstin ?? "");
+      const firstMatch = (data.candidates as ZohoOrgCandidate[] | undefined)?.find((c) => c.gstinMatch);
+      setSelectedOrgId(firstMatch?.organizationId ?? data.candidates?.[0]?.organizationId ?? "");
+    } catch {
+      toast.error("Could not load Zoho organizations — try Connect again");
+    }
+  }
+
+  async function handleBindOrg(confirmGstinMismatch = false) {
+    if (!clientId || !selectedOrgId) {
+      toast.error("Select a Zoho organization");
+      return;
+    }
+    setBindingOrg(true);
+    try {
+      const res = await fetch(`/api/integrations/zoho/bind-org/${clientId}`, {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ zohoOrgId: selectedOrgId, confirmGstinMismatch }),
+      });
+      const data = await res.json();
+      if (res.status === 409 && !confirmGstinMismatch) {
+        const ok = window.confirm(
+          `GSTIN mismatch: client ${data.clientGstin} vs Zoho org ${data.orgGstin} (${data.orgName}). Link anyway?`
+        );
+        if (ok) return handleBindOrg(true);
+        return;
+      }
+      if (!res.ok) throw new Error(data.error ?? "Failed to link organization");
+      toast.success(`Linked to ${data.orgName ?? "Zoho org"}`);
+      selectClient(clientId);
+      await loadStatus();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed to link organization");
+    } finally {
+      setBindingOrg(false);
     }
   }
 
@@ -173,6 +253,64 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
             <Card className="p-8 text-center text-sm text-muted-foreground">
               Choose a client above to view connection status or connect Zoho Books.
             </Card>
+          ) : status.needsOrgSelection ? (
+            <>
+              <Card className="p-6 border-amber-200 bg-amber-50/50">
+                <div className="flex gap-3 mb-4">
+                  <AlertCircle className="w-5 h-5 text-amber-600 shrink-0 mt-0.5" />
+                  <div>
+                    <h3 className="font-semibold text-amber-950">Choose Zoho organization</h3>
+                    <p className="text-sm text-amber-900/80 mt-1">
+                      OAuth succeeded. Pick the Books org for this client — we never auto-link the CA
+                      firm org ({clientGstin ? `client GSTIN: ${clientGstin}` : "check GSTIN matches"}).
+                    </p>
+                  </div>
+                </div>
+                <div className="space-y-2 max-h-72 overflow-y-auto">
+                  {orgCandidates.map((org) => (
+                    <label
+                      key={org.organizationId}
+                      className={`flex items-start gap-3 p-3 rounded-lg border cursor-pointer ${
+                        selectedOrgId === org.organizationId
+                          ? "border-primary bg-primary/5"
+                          : "border-border bg-background"
+                      }`}
+                    >
+                      <input
+                        type="radio"
+                        name="zoho-org"
+                        checked={selectedOrgId === org.organizationId}
+                        onChange={() => setSelectedOrgId(org.organizationId)}
+                        className="mt-1"
+                      />
+                      <div className="min-w-0">
+                        <p className="font-medium text-sm">{org.name}</p>
+                        <p className="text-xs text-muted-foreground font-mono mt-0.5">
+                          Org ID {org.organizationId}
+                          {org.gstin ? ` · GSTIN ${org.gstin}` : ""}
+                        </p>
+                        {org.gstinMatch && (
+                          <span className="inline-block mt-1 text-[10px] font-semibold text-emerald-700 bg-emerald-100 px-1.5 py-0.5 rounded">
+                            GSTIN match
+                          </span>
+                        )}
+                      </div>
+                    </label>
+                  ))}
+                  {orgCandidates.length === 0 && (
+                    <p className="text-sm text-muted-foreground">Loading organizations…</p>
+                  )}
+                </div>
+                <Button
+                  className="mt-4 gap-2"
+                  disabled={bindingOrg || !selectedOrgId}
+                  onClick={() => void handleBindOrg()}
+                >
+                  {bindingOrg ? <Loader2 className="w-4 h-4 animate-spin" /> : <CheckCircle2 className="w-4 h-4" />}
+                  Confirm organization link
+                </Button>
+              </Card>
+            </>
           ) : status.connected ? (
             <>
               {/* Status Dashboard */}
