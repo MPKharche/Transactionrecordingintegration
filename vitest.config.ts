@@ -7,6 +7,10 @@ export default defineConfig({
   resolve: {
     alias: [
       {
+        find: "@ca-suite/zoho-sync",
+        replacement: path.resolve(__dirname, "packages/zoho-sync/src/index.ts"),
+      },
+      {
         find: "@ca-suite/db/client",
         replacement: path.resolve(__dirname, "packages/db/src/client.ts"),
       },

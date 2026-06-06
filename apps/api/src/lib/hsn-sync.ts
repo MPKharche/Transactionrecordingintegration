@@ -17,6 +17,7 @@ import {
   validateHsnAgainstSource,
 } from "@ca-suite/shared";
 import { eq, and } from "drizzle-orm";
+import Decimal from "decimal.js";
 
 /**
  * Parse numeric value safely
@@ -213,7 +214,9 @@ export async function validateHsnRate(
     };
   }
 
-  const rateMatch = Math.abs(master.gstRate - declaredRate) < 0.01;
+  const masterDecimal = new Decimal(master.gstRate);
+  const declaredDecimal = new Decimal(declaredRate);
+  const rateMatch = masterDecimal.eq(declaredDecimal);
 
   return {
     code,

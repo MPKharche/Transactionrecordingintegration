@@ -36,14 +36,21 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
   async function loadStatus() {
     try {
       setLoading(true);
-      // Mock data - in production, fetch from API
+      const clientId = new URLSearchParams(window.location.search).get("clientId") ?? "";
+      if (!clientId) {
+        setStatus({ connected: false });
+        return;
+      }
+      const res = await fetch(`/api/integrations/zoho/status/${clientId}`, { credentials: "include" });
+      if (!res.ok) throw new Error("Failed to load status");
+      const data = await res.json();
       setStatus({
-        connected: true,
-        orgName: "Demo Company Ltd.",
-        lastSyncTime: new Date(Date.now() - 2 * 60 * 60 * 1000).toISOString(),
-        invoicesSynced: 245,
-        registersPushed: 152,
-        syncStatus: "success",
+        connected: Boolean(data.connected),
+        orgName: data.orgName,
+        lastSyncTime: data.lastSyncAt,
+        invoicesSynced: data.synced,
+        registersPushed: data.pending,
+        syncStatus: data.errors > 0 ? "failed" : "success",
       });
     } catch (error) {
       toast.error("Failed to load integration status");
@@ -55,17 +62,18 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
   async function handleSync() {
     try {
       setSyncing(true);
-      // Simulate sync
-      await new Promise((r) => setTimeout(r, 2000));
-      setStatus((prev) => ({
-        ...prev,
-        lastSyncTime: new Date().toISOString(),
-        syncStatus: "success",
-      }));
-      toast.success("Sync completed successfully");
+      const clientId = new URLSearchParams(window.location.search).get("clientId") ?? "";
+      const res = await fetch(`/api/integrations/zoho/sync/${clientId}`, {
+        method: "POST",
+        credentials: "include",
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error ?? "Sync failed");
+      toast.success(`Queued ${data.queued} document(s) for sync`);
+      await loadStatus();
     } catch (error) {
       toast.error("Sync failed");
-      setStatus((prev) => ({ ...prev, syncStatus: "failed", error: "Connection timeout" }));
+      setStatus((prev) => ({ ...prev, syncStatus: "failed", error: "Sync request failed" }));
     } finally {
       setSyncing(false);
     }
@@ -73,9 +81,12 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
 
   async function handleOAuthConnect() {
     try {
-      // In production, redirect to OAuth flow
-      window.open(`/oauth/zoho?tenant=${Date.now()}`, "_blank", "width=600,height=600");
-      toast.success("Opening Zoho connection dialog...");
+      const clientId = new URLSearchParams(window.location.search).get("clientId") ?? "";
+      if (!clientId) {
+        toast.error("Select a client first");
+        return;
+      }
+      window.location.href = `/api/oauth/zoho?clientId=${encodeURIComponent(clientId)}`;
     } catch (error) {
       toast.error("Failed to initiate connection");
     }

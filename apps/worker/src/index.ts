@@ -31,6 +31,10 @@ import { shutdownOcrPool } from "./lib/ocr-pool.js";
 import { BudgetDeferredError } from "@ca-suite/shared";
 import { resumeDeferredUploads } from "@ca-suite/db/llm-budget-service";
 import { loadUploadOrThrow } from "./lib/upload-guard.js";
+import { createZohoPushWorker } from "./jobs/zoho-push.job.js";
+import { createZohoTokenRefreshWorker } from "./jobs/zoho-token-refresh.job.js";
+import { createZohoReconcileWorker, runZohoReconcile } from "./jobs/zoho-reconcile.job.js";
+import { Queue } from "bullmq";
 
 const connection = {
   host: process.env.REDIS_HOST ?? "localhost",
@@ -221,10 +225,34 @@ console.log(
   `[worker] Started — concurrency=${WORKER_CONCURRENCY} ocr=${OCR_CONCURRENCY} extract=${EXTRACT_LLM_CONCURRENCY} lockMs=${WORKER_LOCK_DURATION_MS}`
 );
 
+const zohoPushWorker = createZohoPushWorker();
+const zohoTokenRefreshWorker = createZohoTokenRefreshWorker();
+const zohoReconcileWorker = createZohoReconcileWorker();
+
+const cronConnection = connection;
+async function scheduleZohoCrons() {
+  const tokenQ = new Queue("zoho-token-refresh", { connection: cronConnection });
+  const reconcileQ = new Queue("zoho-reconcile", { connection: cronConnection });
+  await tokenQ.add("refresh", {}, { repeat: { pattern: "*/30 * * * *" }, jobId: "zoho-token-refresh-cron" });
+  await reconcileQ.add("reconcile", {}, { repeat: { pattern: "*/10 * * * *" }, jobId: "zoho-reconcile-cron" });
+  await tokenQ.close();
+  await reconcileQ.close();
+}
+
+scheduleZohoCrons().catch(console.error);
+runZohoReconcile().catch(console.error);
+
+zohoPushWorker.on("failed", (job, err) =>
+  console.error(`[zoho-push] failed doc=${job?.data.docId}`, err.message)
+);
+
 process.on("unhandledRejection", (reason) => console.error("[worker] unhandledRejection", reason));
 
 async function shutdown() {
   await worker.close();
+  await zohoPushWorker.close();
+  await zohoTokenRefreshWorker.close();
+  await zohoReconcileWorker.close();
   await closePipelineQueue();
   await shutdownOcrPool();
   process.exit(0);

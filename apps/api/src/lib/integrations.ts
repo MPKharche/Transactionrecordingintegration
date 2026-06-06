@@ -1,11 +1,18 @@
 /**
- * TIER 3 Integration Stubs
- * Placeholder implementations for Zoho, GST Portal, Email, Categories
+ * TIER 3 Integration — Zoho OAuth sync + other integration stubs
  */
 
 import { createHash } from "crypto";
+import {
+  encryptSensitiveData,
+  decryptSensitiveData,
+  zohoTokenManager,
+} from "./zoho-token-manager.js";
 
-function tenantSlug(tenantId: string): string {
+export { encryptSensitiveData, decryptSensitiveData, zohoTokenManager };
+
+
+export function tenantSlug(tenantId: string): string {
   return createHash("sha256").update(tenantId).digest("hex").slice(0, 8);
 }
 
@@ -107,16 +114,4 @@ export async function autoSuggestCategory(
   };
   const [code, name] = hsnMap[hsnCode] || [];
   return { suggestedCode: code, suggestedName: name };
-}
-
-export function encryptSensitiveData(plaintext: string): string {
-  // Simple base64 encoding (not real encryption - use AES-256-CBC in production)
-  const iv = Math.random().toString(36).substring(2, 18);
-  const encoded = Buffer.from(plaintext).toString("base64");
-  return `${iv}:${encoded}`;
-}
-
-export function decryptSensitiveData(ciphertext: string): string {
-  const [, encoded] = ciphertext.split(":");
-  return Buffer.from(encoded, "base64").toString();
 }

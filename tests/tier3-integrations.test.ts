@@ -32,7 +32,7 @@ describe("TIER 3: Integrations", () => {
 
       expect(encrypted).not.toBe(original);
       expect(encrypted).toContain(":");
-      expect(encrypted.split(":")).toHaveLength(2); // IV:ciphertext
+      expect(encrypted.split(":")).toHaveLength(3); // iv:tag:ciphertext (AES-256-GCM)
 
       const decrypted = decryptSensitiveData(encrypted);
       expect(decrypted).toBe(original);

@@ -13,7 +13,7 @@ import {
   jsonb,
 } from "drizzle-orm/pg-core";
 import { tenants } from "./tenants";
-import { clients } from "./gst";
+import { clients, gstDocuments } from "./gst";
 
 export const masterHsn = pgTable(
   "master_hsn",
@@ -70,13 +70,15 @@ export const hsnSacMaster = pgTable(
   "hsn_sac_master",
   {
     id: uuid("id").defaultRandom().primaryKey(),
-    tenantId: uuid("tenant_id")
-      .notNull()
-      .references(() => tenants.id, { onDelete: "cascade" }),
+    tenantId: uuid("tenant_id").references(() => tenants.id, { onDelete: "cascade" }),
     code: text("code").notNull(),
     type: text("type").notNull(), // 'HSN' | 'SAC'
     description: text("description").notNull(),
     gstRate: numeric("gst_rate", { precision: 5, scale: 2 }).notNull(),
+    isGlobal: boolean("is_global").notNull().default(false),
+    cbicVersion: text("cbic_version"),
+    chapter: text("chapter"),
+    cessRate: numeric("cess_rate", { precision: 5, scale: 2 }),
     cgstRate: numeric("cgst_rate", { precision: 5, scale: 2 }),
     sgstRate: numeric("sgst_rate", { precision: 5, scale: 2 }),
     validFrom: timestamp("valid_from").defaultNow().notNull(),
@@ -218,11 +220,46 @@ export const zohoSyncConfig = pgTable("zoho_sync_config", {
   syncErrorMessage: text("sync_error_message"),
   syncIntervalMinutes: integer("sync_interval_minutes").default(360), // 6 hours default
   isActive: boolean("is_active").default(true),
+  zohoAccessToken: text("zoho_access_token"),
+  zohoRefreshToken: text("zoho_refresh_token"),
+  zohoTokenExpiresAt: timestamp("zoho_token_expires_at"),
+  zohoBooksOrgId: text("zoho_books_org_id"),
+  authMethod: text("auth_method", { enum: ["api_key", "oauth2"] }).notNull().default("api_key"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({
   tenantClientIdx: uniqueIndex("zoho_sync_config_tenant_client_uidx").on(t.tenantId, t.clientId),
 }));
+
+export const zohoSyncLog = pgTable(
+  "zoho_sync_log",
+  {
+    id: uuid("id").defaultRandom().primaryKey(),
+    tenantId: uuid("tenant_id")
+      .notNull()
+      .references(() => tenants.id, { onDelete: "cascade" }),
+    clientId: uuid("client_id").references(() => clients.id, { onDelete: "set null" }),
+    docId: uuid("doc_id").references(() => gstDocuments.id, { onDelete: "set null" }),
+    jobId: text("job_id"),
+    operation: text("operation").notNull(),
+    attemptNumber: integer("attempt_number").notNull().default(1),
+    status: text("status", {
+      enum: ["success", "retryable_failure", "permanent_failure"],
+    }).notNull(),
+    errorCode: text("error_code"),
+    errorMessage: text("error_message"),
+    zohoHttpStatus: integer("zoho_http_status"),
+    zohoErrorCode: integer("zoho_error_code"),
+    zohoResponse: jsonb("zoho_response"),
+    durationMs: integer("duration_ms"),
+    createdAt: timestamp("created_at").defaultNow().notNull(),
+  },
+  (t) => ({
+    docIdx: index("idx_zoho_sync_log_doc").on(t.docId, t.createdAt),
+    tenantIdx: index("idx_zoho_sync_log_tenant").on(t.tenantId, t.createdAt),
+    statusIdx: index("idx_zoho_sync_log_status").on(t.tenantId, t.status, t.createdAt),
+  })
+);
 
 // TIER 3.2: GST Portal Integration Config
 export const gstPortalConfig = pgTable("gst_portal_config", {

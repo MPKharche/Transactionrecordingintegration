@@ -41,6 +41,9 @@ import {
   gstPortalConfig,
   emailForwardConfig,
   categoryMaster,
+  zohoSyncLog,
+  subscriptionPlans,
+  tenantSubscriptions,
 } from "@ca-suite/db";
 import {
   canLockDocument,
@@ -102,7 +105,10 @@ import {
   initializeCategoryMaster,
   assignCategoryToLineItem,
   autoSuggestCategory,
+  zohoTokenManager,
 } from "./lib/integrations.js";
+import { enqueueZohoPush, getZohoReconcileQueue, isZohoSyncEnabled } from "./lib/zoho-queue.js";
+import { hsnValidator } from "./lib/hsn-validator.js";
 import type { GSTDocument, CaptureSource, Client } from "@ca-suite/shared";
 import {
   resolveAuth,
@@ -1426,6 +1432,31 @@ export async function buildApp() {
       if (errorIds.length) {
         await db.delete(documentIssues).where(inArray(documentIssues.id, errorIds));
       }
+
+      const [zohoCfg] = await db
+        .select()
+        .from(zohoSyncConfig)
+        .where(
+          and(eq(zohoSyncConfig.tenantId, ctx.tenantId), eq(zohoSyncConfig.clientId, doc.client_id))
+        )
+        .limit(1);
+
+      if (
+        zohoCfg?.isActive &&
+        zohoCfg.authMethod === "oauth2" &&
+        isZohoSyncEnabled(ctx.tenantId)
+      ) {
+        await db
+          .update(gstDocuments)
+          .set({ zohoSyncStatus: "pending", updatedAt: new Date() })
+          .where(eq(gstDocuments.id, req.params.id));
+        await enqueueZohoPush({
+          docId: req.params.id,
+          tenantId: ctx.tenantId,
+          clientId: doc.client_id,
+        });
+      }
+
       await audit(ctx, "document.lock", "document", req.params.id, undefined, req);
       return loadDocument(req.params.id, ctx.tenantId);
     }
@@ -2961,6 +2992,112 @@ export async function buildApp() {
 
   // ─── TIER 3: Zoho Books Integration ───────────────────────────────────────
 
+  app.get<{ Querystring: { clientId: string } }>(
+    "/api/oauth/zoho",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const clientId = req.query.clientId;
+      if (!clientId) return reply.status(400).send({ error: "clientId required" });
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(403).send({ error: "Forbidden" });
+
+      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, ctx.tenantId)).limit(1);
+      const zohoClientId = tenant?.zohoClientId ?? process.env.ZOHO_CLIENT_ID;
+      if (!zohoClientId) return reply.status(400).send({ error: "Zoho OAuth not configured" });
+
+      const redirectUri =
+        process.env.ZOHO_OAUTH_REDIRECT_URI ??
+        `${process.env.API_PUBLIC_URL ?? "http://localhost:3000"}/api/oauth/zoho/callback`;
+      const state = createOAuthState(reply);
+      reply.setCookie("zoho_oauth_client_id", clientId, {
+        path: "/",
+        httpOnly: true,
+        sameSite: "lax",
+        secure: process.env.NODE_ENV === "production",
+        maxAge: 600,
+      });
+      const scopes = [
+        "ZohoBooks.fullaccess.all",
+        "ZohoBooks.contacts.CREATE",
+        "ZohoBooks.invoices.CREATE",
+      ].join(",");
+      const url = new URL("https://accounts.zoho.in/oauth/v2/auth");
+      url.searchParams.set("scope", scopes);
+      url.searchParams.set("client_id", zohoClientId);
+      url.searchParams.set("response_type", "code");
+      url.searchParams.set("access_type", "offline");
+      url.searchParams.set("prompt", "consent");
+      url.searchParams.set("redirect_uri", redirectUri);
+      url.searchParams.set("state", state);
+      return reply.redirect(url.toString());
+    }
+  );
+
+  app.get<{ Querystring: { code?: string; state?: string } }>(
+    "/api/oauth/zoho/callback",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { code, state } = req.query;
+      if (!code || !state) return reply.status(400).send({ error: "Missing code or state" });
+      if (!verifyOAuthState(req, reply)) {
+        return reply.status(403).send({ error: "Invalid OAuth state" });
+      }
+      const clientId = req.cookies.zoho_oauth_client_id;
+      reply.clearCookie("zoho_oauth_client_id", { path: "/" });
+      if (!clientId) return reply.status(400).send({ error: "Missing client context" });
+
+      const redirectUri =
+        process.env.ZOHO_OAUTH_REDIRECT_URI ??
+        `${process.env.API_PUBLIC_URL ?? "http://localhost:3000"}/api/oauth/zoho/callback`;
+
+      const tokens = await zohoTokenManager.exchangeCodeForTokens(code, ctx.tenantId, redirectUri);
+      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, ctx.tenantId)).limit(1);
+      await zohoTokenManager.storeTokens(clientId, ctx.tenantId, {
+        accessToken: tokens.accessToken,
+        refreshToken: tokens.refreshToken,
+        expiresIn: tokens.expiresIn,
+        orgId: tenant?.zohoOrgId ?? process.env.ZOHO_ORG_ID ?? "",
+      });
+
+      const webBase = process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
+      return reply.redirect(
+        `${webBase}/settings/integrations/zoho?clientId=${clientId}&connected=true`
+      );
+    }
+  );
+
+  app.delete<{ Params: { clientId: string } }>(
+    "/api/integrations/zoho/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(403).send({ error: "Forbidden" });
+
+      await zohoTokenManager.revokeTokens(clientId, ctx.tenantId);
+      await db
+        .update(gstDocuments)
+        .set({ zohoSyncStatus: "not_configured", updatedAt: new Date() })
+        .where(
+          and(
+            eq(gstDocuments.clientId, clientId),
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            inArray(gstDocuments.zohoSyncStatus, ["pending", "error"])
+          )
+        );
+      return { ok: true };
+    }
+  );
+
   app.post<{
     Params: { clientId: string };
     Body: { api_key: string; org_id: string };
@@ -3000,7 +3137,6 @@ export async function buildApp() {
       const ctx = (req as unknown as { auth: AuthContext }).auth;
       const { clientId } = req.params;
 
-      // Verify client exists
       const [client] = await db
         .select()
         .from(clients)
@@ -3008,15 +3144,24 @@ export async function buildApp() {
         .limit(1);
       if (!client) return reply.status(404).send({ error: "Client not found" });
 
-      const result = await syncZohoBooks(ctx.tenantId, clientId);
+      const pending = await db
+        .select({ id: gstDocuments.id })
+        .from(gstDocuments)
+        .where(
+          and(
+            eq(gstDocuments.clientId, clientId),
+            eq(gstDocuments.tenantId, ctx.tenantId),
+            eq(gstDocuments.stage, "locked"),
+            inArray(gstDocuments.zohoSyncStatus, ["pending", "error"])
+          )
+        );
 
-      await audit(ctx, "zoho.sync", "integration", clientId, {
-        invoicesPulled: result.invoicesPulled,
-        invoicesPushed: result.invoicesPushed,
-        errors: result.errors.length,
-      });
+      for (const row of pending) {
+        await enqueueZohoPush({ docId: row.id, tenantId: ctx.tenantId, clientId });
+      }
 
-      return result;
+      await audit(ctx, "zoho.sync", "integration", clientId, { queued: pending.length });
+      return { queued: pending.length };
     }
   );
 
@@ -3039,18 +3184,133 @@ export async function buildApp() {
         .where(and(eq(zohoSyncConfig.tenantId, ctx.tenantId), eq(zohoSyncConfig.clientId, clientId)))
         .limit(1);
 
+      const counts = await db
+        .select({
+          status: gstDocuments.zohoSyncStatus,
+          count: sql<number>`count(*)::int`,
+        })
+        .from(gstDocuments)
+        .where(and(eq(gstDocuments.clientId, clientId), eq(gstDocuments.tenantId, ctx.tenantId)))
+        .groupBy(gstDocuments.zohoSyncStatus);
+
+      const byStatus = Object.fromEntries(counts.map((c) => [c.status, c.count]));
+      const connected = await zohoTokenManager.isConnected(clientId, ctx.tenantId);
+
+      const [lastLog] = await db
+        .select({ createdAt: zohoSyncLog.createdAt })
+        .from(zohoSyncLog)
+        .where(and(eq(zohoSyncLog.tenantId, ctx.tenantId), eq(zohoSyncLog.clientId, clientId)))
+        .orderBy(desc(zohoSyncLog.createdAt))
+        .limit(1);
+
       return {
-        configured: !!config,
-        last_sync: config?.lastSyncAt?.toISOString(),
-        status: config?.syncStatus,
-        error: config?.syncErrorMessage,
-        sync_interval_minutes: config?.syncIntervalMinutes,
+        connected,
+        orgName: config?.zohoBooksOrgId ?? config?.zohoOrgId,
+        synced: byStatus.synced ?? 0,
+        pending: (byStatus.pending ?? 0) + (byStatus.syncing ?? 0),
+        errors: byStatus.error ?? 0,
+        lastSyncAt: lastLog?.createdAt?.toISOString() ?? config?.lastSyncAt?.toISOString(),
+        configured: !!config?.isActive,
       };
     }
   );
 
-  // ─── TIER 3: GST Portal Integration ───────────────────────────────────────
+  app.get<{
+    Params: { clientId: string };
+    Querystring: { status?: string; docId?: string; limit?: string; offset?: string };
+  }>("/api/integrations/zoho/log/:clientId", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const { clientId } = req.params;
+    const limit = Math.min(parseInt(req.query.limit ?? "20", 10), 100);
+    const offset = parseInt(req.query.offset ?? "0", 10);
 
+    const [client] = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+      .limit(1);
+    if (!client) return reply.status(403).send({ error: "Forbidden" });
+
+    const conditions = [
+      eq(zohoSyncLog.tenantId, ctx.tenantId),
+      eq(zohoSyncLog.clientId, clientId),
+    ];
+    if (req.query.status) conditions.push(eq(zohoSyncLog.status, req.query.status as any));
+    if (req.query.docId) conditions.push(eq(zohoSyncLog.docId, req.query.docId));
+
+    const rows = await db
+      .select()
+      .from(zohoSyncLog)
+      .where(and(...conditions))
+      .orderBy(desc(zohoSyncLog.createdAt))
+      .limit(limit)
+      .offset(offset);
+
+    const [{ total }] = await db
+      .select({ total: sql<number>`count(*)::int` })
+      .from(zohoSyncLog)
+      .where(and(...conditions));
+
+    return { rows, total };
+  });
+
+  app.post("/api/integrations/zoho/reconcile", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const [membership] = await db
+      .select()
+      .from(memberships)
+      .where(and(eq(memberships.userId, ctx.userId), eq(memberships.tenantId, ctx.tenantId)))
+      .limit(1);
+    if (membership?.role !== "admin") {
+      return reply.status(403).send({ error: "Admin only" });
+    }
+    await getZohoReconcileQueue().add("reconcile", {}, { jobId: `manual-reconcile-${Date.now()}` });
+    return { triggered: true };
+  });
+
+  app.get<{ Querystring: { q?: string; type?: string; rate?: string; limit?: string } }>(
+    "/api/masters/hsn-sac/search",
+    async (req) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query.q?.trim() ?? "";
+      const limit = Math.min(parseInt(req.query.limit ?? "20", 10), 50);
+      if (!q) return { results: [] };
+      const results = await hsnValidator.suggest(q, ctx.tenantId, limit);
+      const filtered = req.query.type
+        ? results.filter((r) => r.type === req.query.type)
+        : results;
+      const rateFiltered = req.query.rate
+        ? filtered.filter((r) => r.gstRate === req.query.rate)
+        : filtered;
+      return { results: rateFiltered };
+    }
+  );
+
+  app.get("/api/billing/plans", async () => {
+    const plans = await db
+      .select()
+      .from(subscriptionPlans)
+      .where(eq(subscriptionPlans.isActive, true));
+    return { plans };
+  });
+
+  app.get("/api/billing/subscription", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const [sub] = await db
+      .select()
+      .from(tenantSubscriptions)
+      .where(eq(tenantSubscriptions.tenantId, ctx.tenantId))
+      .limit(1);
+    if (!sub) return reply.status(404).send({ error: "No subscription" });
+    const [plan] = await db
+      .select()
+      .from(subscriptionPlans)
+      .where(eq(subscriptionPlans.id, sub.planId))
+      .limit(1);
+    return { plan, status: sub.status, trialEnd: sub.trialEnd, periodEnd: sub.currentPeriodEnd };
+  });
+
+  // Legacy API-key connect (kept for backward compatibility)
   app.post<{
     Params: { clientId: string };
     Body: { portal_token: string; refresh_token?: string };

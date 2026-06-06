@@ -22,6 +22,11 @@ export const tenants = pgTable("tenants", {
   openrouterApiKey: text("openrouter_api_key"),
   defaultCurrencyCode: text("default_currency_code").default("INR"),
   isActive: boolean("is_active").default(true),
+  tenantType: text("tenant_type", { enum: ["ca_firm", "direct_client"] })
+    .notNull()
+    .default("ca_firm"),
+  planId: text("plan_id"),
+  assignedCaTenantId: uuid("assigned_ca_tenant_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 });
@@ -44,7 +49,9 @@ export const memberships = pgTable("memberships", {
   userId: uuid("user_id")
     .notNull()
     .references(() => users.id, { onDelete: "cascade" }),
-  role: text("role", { enum: ["admin", "manager", "operator"] })
+  role: text("role", {
+    enum: ["admin", "manager", "operator", "ca_partner", "client_user"],
+  })
     .notNull()
     .default("operator"),
   createdAt: timestamp("created_at").defaultNow().notNull(),

@@ -127,6 +127,10 @@ export function mapDocument(
     invoice_label: row.invoiceLabel ?? undefined,
     llm_cost_usd: num(row.llmCostUsd),
     budget_deferred: capture?.budget_deferred ?? false,
+    zoho_sync_status: row.zohoSyncStatus as GSTDocument["zoho_sync_status"],
+    zoho_entity_id: row.zohoEntityId ?? undefined,
+    zoho_error: (row.zohoError as GSTDocument["zoho_error"]) ?? undefined,
+    zoho_synced_at: row.zohoSyncedAt?.toISOString() ?? undefined,
   };
 }
 

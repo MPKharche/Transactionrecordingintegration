@@ -18,6 +18,8 @@ import { loadUploadOrThrow } from "../lib/upload-guard.js";
 import type { PipelineJobData } from "../lib/pipeline-queue.js";
 import { syncValidationIssuesToGst, refreshDocumentCompleteness } from "../lib/sync-gst-document.js";
 import { mapGstRowToDocument } from "../lib/map-gst-doc.js";
+import { hsnValidator } from "@ca-suite/zoho-sync";
+import Decimal from "decimal.js";
 import { saveDocumentIssues } from "../lib/persist-issues.js";
 
 function validateDate(s: string | null | undefined): boolean {
@@ -116,6 +118,37 @@ export async function validateStage(uploadId: string, tenantId: string, job: Job
         itcIneligibleReason: itcResult.reason || null,
       })
       .where(eq(gstDocuments.id, gstRow.id));
+
+    for (const line of lines) {
+      if (!line.hsnSac) continue;
+      const lineRate =
+        line.igstRate && parseFloat(line.igstRate) > 0
+          ? new Decimal(line.igstRate)
+          : new Decimal(line.cgstRate ?? "0").plus(new Decimal(line.sgstRate ?? "0"));
+      const result = await hsnValidator.validate(
+        line.hsnSac,
+        lineRate,
+        line.hsnSac.length === 6 && /^\d{6}$/.test(line.hsnSac) ? "SAC" : "HSN",
+        tenantId
+      );
+      if (!result.found) {
+        await saveDocumentIssues(gstRow.id, [
+          {
+            field: `line_${line.seq}_hsn`,
+            severity: "warning",
+            message: `UNKNOWN_HSN: code ${line.hsnSac} not in master`,
+          },
+        ]);
+      } else if (result.severity === "error" || result.severity === "warning") {
+        await saveDocumentIssues(gstRow.id, [
+          {
+            field: `line_${line.seq}_rate`,
+            severity: "warning",
+            message: `HSN_RATE_MISMATCH: ${line.hsnSac} declared ${lineRate.toFixed(2)}% vs master ${result.masterRate?.toFixed(2)}%`,
+          },
+        ]);
+      }
+    }
   }
 
   const allMessages = [

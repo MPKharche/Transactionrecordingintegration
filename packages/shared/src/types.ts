@@ -141,6 +141,11 @@ export interface GSTDocument {
   llm_cost_usd?: number;
   /** Queued until daily AI processing budget resets (IST midnight). */
   budget_deferred?: boolean;
+  /** Zoho Books sync status (locked documents). */
+  zoho_sync_status?: "not_configured" | "pending" | "syncing" | "synced" | "error" | "skipped";
+  zoho_entity_id?: string | null;
+  zoho_error?: { code?: string; message?: string } | null;
+  zoho_synced_at?: string | null;
 }
 
 /** GST portal snapshot stored on client master (from lookup at create/edit). */

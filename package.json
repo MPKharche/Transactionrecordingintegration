@@ -19,6 +19,7 @@
     "test:e2e": "playwright test",
     "test:workflows": "vitest run tests/workflows.test.ts",
     "test:regression": "node scripts/run-regression.mjs",
+    "test:zoho": "vitest run tests/unit/circuit-breaker.test.ts tests/unit/retry.test.ts tests/unit/zoho-push.test.ts tests/unit/decimal-money.test.ts tests/unit/hsn-validator.test.ts tests/regression/existing-pipeline.test.ts",
     "test:regression:ci": "node scripts/run-regression.mjs --skip-preflight",
     "test:all": "pnpm test:regression",
     "lint": "turbo lint",
@@ -26,6 +27,8 @@
     "db:migrate": "pnpm --filter @ca-suite/db migrate",
     "db:push": "pnpm --filter @ca-suite/db push",
     "db:seed": "tsx scripts/seed-demo.ts",
+    "db:seed:hsn": "tsx packages/db/scripts/seed-hsn-cbic.ts",
+    "db:generate:hsn-seed": "tsx packages/db/scripts/generate-hsn-cbic-seed.ts",
     "db:clear": "tsx scripts/db-clear-demo.ts",
     "db:wipe": "tsx scripts/db-wipe-all.ts",
     "db:reset": "pnpm db:clear",
@@ -50,6 +53,7 @@
   "devDependencies": {
     "bullmq": "^5.34.8",
     "dotenv": "^16.4.7",
+    "decimal.js": "^10.6.0",
     "@ca-suite/shared": "workspace:*",
     "@playwright/test": "^1.49.1",
     "@testing-library/dom": "^10.4.0",
@@ -64,6 +68,7 @@
     "react-dom": "18.3.1",
     "react-router": "7.13.0",
     "tsx": "^4.19.2",
+    "ioredis-mock": "^8.9.0",
     "turbo": "^2.3.3",
     "typescript": "^5.6.3",
     "vitest": "^2.1.8"

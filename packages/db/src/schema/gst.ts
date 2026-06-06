@@ -105,6 +105,8 @@ export const partyMaster = pgTable(
     email: text("email"),
     isRegistered: boolean("is_registered").default(true),
     lastSeen: timestamp("last_seen").defaultNow(),
+    zohoContactId: text("zoho_contact_id"),
+    zohoContactVerifiedAt: timestamp("zoho_contact_verified_at"),
   },
   (t) => ({
     pk: primaryKey({ columns: [t.tenantId, t.gstin] }),
@@ -164,6 +166,15 @@ export const gstDocuments = pgTable("gst_documents", {
     itcEligibleComputed: boolean("itc_eligible_computed"),
     /** Computed: human-readable reason if ITC is ineligible */
     itcIneligibleReason: text("itc_ineligible_reason"),
+    zohoSyncStatus: text("zoho_sync_status", {
+      enum: ["not_configured", "pending", "syncing", "synced", "error", "skipped"],
+    })
+      .notNull()
+      .default("not_configured"),
+    zohoEntityId: text("zoho_entity_id"),
+    zohoError: jsonb("zoho_error").$type<Record<string, unknown>>(),
+    zohoSyncedAt: timestamp("zoho_synced_at"),
+    zohoLastAttemptAt: timestamp("zoho_last_attempt_at"),
     createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({

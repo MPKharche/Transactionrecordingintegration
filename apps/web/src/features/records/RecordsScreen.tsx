@@ -11,6 +11,7 @@ import {
 } from "@ca-suite/shared";
 import { useAppData } from "../../context/AppDataContext";
 import { DocTypeBadge } from "../../components/badges/DocTypeBadge";
+import { ZohoSyncBadge } from "../zoho/ZohoSyncBadge";
 import { CopyBtn } from "../../components/ui/CopyBtn";
 import { INR, INR_SIGNED, getCounterParty, clientByIdFrom } from "../../lib/format";
 import { exportCSV } from "../../lib/csv-export";
@@ -82,7 +83,7 @@ function docOtherCharges(d: GSTDocument): number {
   return reconcileOtherCharges(d.total, linesSub);
 }
 
-const TABLE_COLS = 10;
+const TABLE_COLS = 11;
 
 function PartyChip({ name, gstin, city }: { name: string; gstin?: string; city?: string }) {
   return (
@@ -123,6 +124,7 @@ export function RecordsScreen({
   const [financialYear, setFinancialYear] = useState(currentIndianFinancialYear());
   const [docTab, setDocTab] = useState<DocType | "all">("all");
   const [search, setSearch] = useState("");
+  const [needsSyncOnly, setNeedsSyncOnly] = useState(false);
   const [versionsDocId, setVersionsDocId] = useState<string | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<string | null>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -144,6 +146,9 @@ export function RecordsScreen({
 
   const filtered = useMemo(() => {
     let base = fyScoped.filter((d) => docTab === "all" || d.doc_type === docTab);
+    if (needsSyncOnly) {
+      base = base.filter((d) => d.zoho_sync_status === "pending" || d.zoho_sync_status === "error");
+    }
 
     if (!search.trim()) return base.sort((a, b) => (b.doc_date ?? "").localeCompare(a.doc_date ?? ""));
 
@@ -153,7 +158,7 @@ export function RecordsScreen({
       .filter((x) => x.score > 0)
       .sort((a, b) => b.score - a.score);
     return scored.map((x) => x.d);
-  }, [fyScoped, docTab, search]);
+  }, [fyScoped, docTab, search, needsSyncOnly]);
 
   const totals = useMemo(() => ({
     taxable: filtered.reduce((s, d) => s + d.taxable_amount, 0),
@@ -286,6 +291,13 @@ export function RecordsScreen({
             ))}
           </div>
         </div>
+        <button
+          type="button"
+          onClick={() => setNeedsSyncOnly((v) => !v)}
+          className={`px-2 py-1 text-xs rounded-full border shrink-0 ${needsSyncOnly ? "border-primary bg-primary/10 text-primary" : "border-border text-muted-foreground"}`}
+        >
+          Needs sync
+        </button>
         <div className="relative">
           <Search size={13} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-muted-foreground" />
           <input
@@ -317,6 +329,7 @@ export function RecordsScreen({
                 { label: "Tax", align: "right", w: "" },
                 { label: "Other", align: "right", w: "" },
                 { label: "Total", align: "right", w: "" },
+                { label: "Zoho", align: "left", w: "" },
                 { label: "", align: "right", w: "w-16" },
               ].map((h, i) => (
                 <th
@@ -385,6 +398,9 @@ export function RecordsScreen({
                     {Math.abs(docOtherCharges(d)) > 0.005 ? INR(docOtherCharges(d)) : "—"}
                   </td>
                   <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-foreground whitespace-nowrap tabular-nums">{INR(d.total)}</td>
+                  <td className="px-2 py-1.5">
+                    <ZohoSyncBadge status={d.zoho_sync_status} entityId={d.zoho_entity_id} syncedAt={d.zoho_synced_at} error={d.zoho_error} />
+                  </td>
                   <td className="px-2 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                     <div className="flex items-center justify-end gap-1">
                       <button

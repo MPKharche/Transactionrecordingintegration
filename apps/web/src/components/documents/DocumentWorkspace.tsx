@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from "react";
 import type { Client, GSTDocument, DocType, Party } from "@ca-suite/shared";
 import { isValidEInvoiceIRN } from "@ca-suite/shared";
 import { DocTypeBadge, StageBadge } from "../badges/DocTypeBadge";
+import { ZohoSyncBadge } from "../../features/zoho/ZohoSyncBadge";
 import { EInvoiceBadge } from "../badges/EInvoiceBadge";
 import { LlmCostBadge } from "../documents/LlmCostBadge";
 import { DocumentLineItemsEditor } from "./DocumentLineItemsEditor";
@@ -228,6 +229,14 @@ export function DocumentWorkspace({
               </h2>
               <DocTypeBadge type={form.docType} isDark={isDark} />
               <StageBadge stage={form.locked ? "locked" : doc.stage} isDark={isDark} />
+              <ZohoSyncBadge
+                docId={doc.id}
+                clientId={doc.client_id}
+                status={doc.zoho_sync_status}
+                entityId={doc.zoho_entity_id}
+                error={doc.zoho_error}
+                syncedAt={doc.zoho_synced_at}
+              />
               {isAdmin ? <LlmCostBadge costUsd={doc.llm_cost_usd} /> : null}
               {!form.locked && form.gstrReadiness.overall_score >= 0 && (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums border border-border">
