@@ -63,6 +63,7 @@ describe("PreferencesScreen", () => {
     expect(await screen.findByRole("heading", { name: "Profile & preferences" })).toBeTruthy();
     expect(screen.getByText("Test CA")).toBeTruthy();
     expect(screen.getByText("Font size")).toBeTruthy();
+    expect(screen.getByText("Zoho Books")).toBeTruthy();
     expect(screen.getByText("Open Google Account security")).toBeTruthy();
   });
 });

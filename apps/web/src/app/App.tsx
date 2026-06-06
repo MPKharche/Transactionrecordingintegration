@@ -20,6 +20,7 @@ export default function App() {
         <Route path="/audit" element={<AuthenticatedApp />} />
         <Route path="/admin/observe" element={<AuthenticatedApp />} />
         <Route path="/settings" element={<AuthenticatedApp />} />
+        <Route path="/settings/integrations/zoho" element={<Navigate to="/integrations/zoho" replace />} />
         {/* TIER 2 Routes */}
         <Route path="/deadlines" element={<AuthenticatedApp />} />
         <Route path="/reconciliation" element={<AuthenticatedApp />} />

@@ -12,8 +12,25 @@ vi.mock("sonner", () => ({
 vi.mock("../../context/AppDataContext", () => ({
   useAppData: () => ({
     docs: [],
+    clients: [{ id: "c1", name: "Test Client", gstin: "27AAAAA0000A1Z5" }],
   }),
 }));
+
+vi.mock("react-router", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("react-router")>();
+  return {
+    ...actual,
+    useNavigate: () => vi.fn(),
+    useSearchParams: () => [new URLSearchParams("clientId=c1")],
+  };
+});
+
+global.fetch = vi.fn(async () =>
+  ({
+    ok: true,
+    json: async () => ({ connected: true, orgName: "Test Org", synced: 1, pending: 0, errors: 0 }),
+  }) as Response
+);
 
 describe("ZohoIntegrationScreen", () => {
   beforeEach(() => {

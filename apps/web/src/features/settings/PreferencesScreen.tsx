@@ -1,5 +1,5 @@
 import { useNavigate } from "react-router";
-import { ExternalLink, LogOut, Monitor, Moon, Sun, Type, User } from "lucide-react";
+import { ChevronRight, ExternalLink, Link2, LogOut, Monitor, Moon, Sun, Type, User } from "lucide-react";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { ThemeToggle } from "../../components/layout/ThemeToggle";
 import { useAppData } from "../../context/AppDataContext";
@@ -194,6 +194,33 @@ export function PreferencesScreen() {
           <p className="text-lg font-mono font-bold text-emerald-700 dark:text-emerald-400 mt-1">₹36,639.00</p>
           <p className="text-xs text-muted-foreground mt-1">Line items and registers use these settings.</p>
         </div>
+      </PrefSection>
+
+      <PrefSection
+        title="Integrations"
+        description="Connect external systems for this practice. Pick a client on the Zoho screen before connecting OAuth."
+      >
+        <button
+          type="button"
+          onClick={() => navigate("/integrations/zoho")}
+          className="w-full flex items-center gap-3 px-4 py-3 rounded-lg border border-border hover:border-primary/40 hover:bg-muted/40 transition-colors text-left"
+        >
+          <span className="w-9 h-9 rounded-lg bg-primary/10 flex items-center justify-center shrink-0">
+            <Link2 size={16} className="text-primary" />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-sm font-semibold text-foreground">Zoho Books</span>
+            <span className="block text-xs text-muted-foreground mt-0.5">
+              OAuth sync for locked invoices and GST registers
+            </span>
+          </span>
+          <ChevronRight size={16} className="text-muted-foreground shrink-0" />
+        </button>
+        {(session?.role === "operator") && (
+          <p className="text-xs text-muted-foreground">
+            Your role is operator. If connect fails, ask a practice admin to complete OAuth or upgrade your role.
+          </p>
+        )}
       </PrefSection>
 
       <PrefSection

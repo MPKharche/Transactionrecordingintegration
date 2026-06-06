@@ -3061,7 +3061,7 @@ export async function buildApp() {
 
       const webBase = process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
       return reply.redirect(
-        `${webBase}/settings/integrations/zoho?clientId=${clientId}&connected=true`
+        `${webBase}/integrations/zoho?clientId=${clientId}&connected=true`
       );
     }
   );

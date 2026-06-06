@@ -4,6 +4,7 @@
  */
 
 import { useState, useEffect } from "react";
+import { useNavigate, useSearchParams } from "react-router";
 import { toast } from "sonner";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { useAppData } from "../../context/AppDataContext";
@@ -23,22 +24,33 @@ interface ZohoStatus {
 }
 
 export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
-  const { docs } = useAppData();
+  const { clients } = useAppData();
+  const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const clientId = searchParams.get("clientId") ?? "";
   const [status, setStatus] = useState<ZohoStatus>({ connected: false });
   const [loading, setLoading] = useState(true);
   const [syncing, setSyncing] = useState(false);
   const [syncInterval, setSyncInterval] = useState("6h");
 
   useEffect(() => {
-    loadStatus();
-  }, []);
+    void loadStatus();
+  }, [clientId]);
+
+  function selectClient(nextClientId: string) {
+    const params = new URLSearchParams(searchParams);
+    if (nextClientId) params.set("clientId", nextClientId);
+    else params.delete("clientId");
+    const q = params.toString();
+    navigate({ pathname: "/integrations/zoho", search: q ? `?${q}` : "" }, { replace: true });
+  }
 
   async function loadStatus() {
     try {
       setLoading(true);
-      const clientId = new URLSearchParams(window.location.search).get("clientId") ?? "";
       if (!clientId) {
         setStatus({ connected: false });
+        setLoading(false);
         return;
       }
       const res = await fetch(`/api/integrations/zoho/status/${clientId}`, { credentials: "include" });
@@ -62,7 +74,10 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
   async function handleSync() {
     try {
       setSyncing(true);
-      const clientId = new URLSearchParams(window.location.search).get("clientId") ?? "";
+      if (!clientId) {
+        toast.error("Select a client first");
+        return;
+      }
       const res = await fetch(`/api/integrations/zoho/sync/${clientId}`, {
         method: "POST",
         credentials: "include",
@@ -81,7 +96,6 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
 
   async function handleOAuthConnect() {
     try {
-      const clientId = new URLSearchParams(window.location.search).get("clientId") ?? "";
       if (!clientId) {
         toast.error("Select a client first");
         return;
@@ -101,7 +115,7 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
     }
   }
 
-  if (loading) {
+  if (loading && clientId) {
     return (
       <div className="p-6">
         <PageHeader title="Zoho Books Integration" subtitle="Sync invoices and registers with Zoho" />
@@ -123,7 +137,33 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
 
       <div className="flex-1 overflow-auto">
         <div className="p-6 space-y-6">
-          {status.connected ? (
+          <Card className="p-4">
+            <label htmlFor="zoho-client" className="block text-sm font-medium mb-2">
+              Client (MSME)
+            </label>
+            <select
+              id="zoho-client"
+              value={clientId}
+              onChange={(e) => selectClient(e.target.value)}
+              className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
+            >
+              <option value="">Select a client…</option>
+              {clients.map((c) => (
+                <option key={c.id} value={c.id}>
+                  {c.name}
+                </option>
+              ))}
+            </select>
+            <p className="text-xs text-muted-foreground mt-2">
+              Each client maps to one Zoho Books organization. OAuth tokens are stored per client.
+            </p>
+          </Card>
+
+          {!clientId ? (
+            <Card className="p-8 text-center text-sm text-muted-foreground">
+              Choose a client above to view connection status or connect Zoho Books.
+            </Card>
+          ) : status.connected ? (
             <>
               {/* Status Dashboard */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
