@@ -14,17 +14,20 @@ set -a && source .env && set +a
 DEPLOY_TARGET="${DEPLOY_TARGET:-standalone}"
 case "$DEPLOY_TARGET" in
   vps|VPS)
-    export COMPOSE_FILE="infra/docker-compose.yml:infra/docker-compose.vps.yml"
     APP_HTTP_URL="${APP_HTTP_URL:-http://127.0.0.1:4000}"
+    export COMPOSE_CMD=(
+      docker compose
+      -f infra/docker-compose.yml
+      -f infra/docker-compose.vps.yml
+      --env-file .env
+    )
     ;;
   standalone|STANDALONE|"")
-    export COMPOSE_FILE="infra/docker-compose.yml"
     APP_HTTP_URL="${APP_HTTP_URL:-http://127.0.0.1}"
+    export COMPOSE_CMD=(docker compose -f infra/docker-compose.yml --env-file .env)
     ;;
   *)
     echo "ERROR: DEPLOY_TARGET must be 'vps' or 'standalone' (got: $DEPLOY_TARGET)" >&2
     exit 1
     ;;
 esac
-
-export COMPOSE_CMD=(docker compose -f "$COMPOSE_FILE" --env-file .env)

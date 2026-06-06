@@ -25,20 +25,20 @@ Optional:
 | Secret | Default |
 |--------|---------|
 | `VPS_SSH_PORT` | `22` |
-| `VPS_REPO_DIR` | `/root/ca-saas` |
+| `VPS_REPO_DIR` | `/root/apps/ca-saas` |
 | `VPS_HEALTH_URL` | `https://practice.planetfinance.cloud/api/health` |
 
 ## VPS prerequisites
 
-1. Clone: `git clone https://github.com/MPKharche/Transactionrecordingintegration.git /root/ca-saas`
+1. Clone: `git clone https://github.com/MPKharche/Transactionrecordingintegration.git /root/apps/ca-saas`
 2. Copy `.env` from `.env.production.example` and fill secrets (`DEPLOY_TARGET=vps`, DB, OAuth, OpenRouter, etc.)
-3. Manual first deploy: `cd /root/ca-saas && ./scripts/deploy.sh`
+3. Manual first deploy: `cd /root/apps/ca-saas && ./scripts/deploy.sh`
 4. Host nginx + TLS per `docs/DEPLOY.md` Step 4
 
 ## Manual deploy (fallback)
 
 ```bash
-ssh root@YOUR_VPS 'bash /root/ca-saas/scripts/vps-remote-update.sh'
+ssh root@YOUR_VPS 'bash /root/apps/ca-saas/scripts/vps-remote-update.sh'
 ```
 
 ## Local ship (agents / developers)

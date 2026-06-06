@@ -1,8 +1,7 @@
 import { useState, useEffect, useMemo, useCallback } from "react";
-import type { Client, GSTDocument, GstRegisterRow, RegisterKind } from "@ca-suite/shared";
+import type { Client, GstRegisterRow, RegisterKind } from "@ca-suite/shared";
 import { financialYearFromIsoDate, REGISTER_KINDS, registerExportType, registerKindMeta, isAllFinancialYears, formatFinancialYearLabel } from "@ca-suite/shared";
 import { DocTypeBadge } from "../../components/badges/DocTypeBadge";
-import { InvoiceDetailModal } from "../../components/documents/InvoiceDetailModal";
 import { FinancialYearSelect } from "../../components/ui/FinancialYearSelect";
 import { INR, INR_SIGNED } from "../../lib/format";
 import { api, currentFinancialYear } from "../../lib/api";
@@ -33,29 +32,13 @@ export function GstRegistersScreen({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState({ kind: "", clientId: "", fy: "" });
   const [exporting, setExporting] = useState(false);
-  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
-  const [detailDoc, setDetailDoc] = useState<GSTDocument | null>(null);
-  const [detailLoading, setDetailLoading] = useState(false);
-  const [detailError, setDetailError] = useState<string | null>(null);
 
-  const openDetail = useCallback((documentId: string) => {
-    setSelectedDocId(documentId);
-    setDetailDoc(null);
-    setDetailError(null);
-    setDetailLoading(true);
-    api.documents
-      .get(documentId)
-      .then(setDetailDoc)
-      .catch((e: Error) => setDetailError(e.message || "Failed to load invoice"))
-      .finally(() => setDetailLoading(false));
-  }, []);
-
-  const closeDetail = useCallback(() => {
-    setSelectedDocId(null);
-    setDetailDoc(null);
-    setDetailError(null);
-    setDetailLoading(false);
-  }, []);
+  const openDetail = useCallback(
+    (documentId: string) => {
+      onReview?.(documentId);
+    },
+    [onReview]
+  );
 
   // Fetch register rows whenever filter changes
   useEffect(() => {
@@ -123,14 +106,6 @@ export function GstRegistersScreen({
 
   return (
     <div className="space-y-5">
-      <InvoiceDetailModal
-        doc={detailDoc}
-        client={client}
-        loading={detailLoading && !!selectedDocId}
-        error={detailError}
-        onClose={closeDetail}
-        onOpenReview={onReview}
-      />
       {/* Header */}
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div>

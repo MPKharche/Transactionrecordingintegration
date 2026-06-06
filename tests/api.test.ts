@@ -218,6 +218,16 @@ describe.skipIf(!integrationEnabled)("CA Suite API (integration)", () => {
     expect(second.json().id).not.toBe(docId);
   });
 
+  it("US-API-06: accepts extended register kinds (credit notes in)", async () => {
+    const res = await app.inject({
+      method: "GET",
+      url: `/api/registers/credit_note_received?client_id=${clientId}&financial_year=2026-27`,
+      headers: authHeaders(),
+    });
+    expect(res.statusCode).toBe(200);
+    expect(Array.isArray(res.json())).toBe(true);
+  });
+
   it("US-API-04: rejects duplicate upload sha", async () => {
     const boundary = "----dup";
     const pdf = Buffer.from(`%PDF-1.4 duplicate test ${Date.now()}`);

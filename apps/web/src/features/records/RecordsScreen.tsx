@@ -18,14 +18,12 @@ import { DOC_TYPE_META } from "../../lib/constants";
 import { CAPTURE_SOURCE_LABELS, formatCapturedAt } from "../../lib/capture-meta";
 import { api } from "../../lib/api";
 import {
-  Search, Download, ExternalLink, Building2, ChevronDown,
-  ChevronRight, Pencil, Trash2, History, RotateCcw, X, Check,
-  AlertTriangle, Info, Eye,
+  Search, Download, Building2, ChevronDown,
+  History, Eye,
+  AlertTriangle,
 } from "lucide-react";
 import { handleTabListKeyDown } from "../../lib/a11y";
 import { VersionHistoryModal } from "./VersionHistoryModal";
-import { InvoiceLineItemsTable } from "../../components/documents/InvoiceLineItemsTable";
-import { InvoiceDetailModal } from "../../components/documents/InvoiceDetailModal";
 import { FinancialYearSelect } from "../../components/ui/FinancialYearSelect";
 
 const RECORD_TABS: { id: DocType | "all"; label: string }[] = [
@@ -84,9 +82,8 @@ function docOtherCharges(d: GSTDocument): number {
   return reconcileOtherCharges(d.total, linesSub);
 }
 
-const TABLE_COLS = 11;
+const TABLE_COLS = 10;
 
-// ─── Compact party column ────────────────────────────────────────────────────
 function PartyChip({ name, gstin, city }: { name: string; gstin?: string; city?: string }) {
   return (
     <div className="min-w-0">
@@ -97,127 +94,6 @@ function PartyChip({ name, gstin, city }: { name: string; gstin?: string; city?:
         </p>
       )}
     </div>
-  );
-}
-
-// ─── Expanded row detail ─────────────────────────────────────────────────────
-function ExpandedDetail({
-  doc,
-  client,
-  selectedFy,
-  onReview,
-  onEdit,
-  onShowVersions,
-  onArchive,
-}: {
-  doc: GSTDocument;
-  client?: Client;
-  selectedFy: string;
-  onReview: (id: string) => void;
-  onEdit: (id: string) => void;
-  onShowVersions: (id: string) => void;
-  onArchive: (id: string) => void;
-}) {
-  const isOutward = ["sales_invoice", "debit_note_issued", "credit_note_issued"].includes(doc.doc_type);
-  const supplier = isOutward ? doc.recipient : doc.supplier;
-  const buyer    = isOutward ? doc.supplier  : doc.recipient;
-
-  const effectiveFy = effectiveDocumentFinancialYear(doc);
-  const fyMismatch = effectiveFy && !isAllFinancialYears(selectedFy) && effectiveFy !== selectedFy;
-
-  const P = ({ label, value, mono }: { label: string; value?: string | null; mono?: boolean }) => (
-    <div className="min-w-0">
-      <p className="text-[10px] text-muted-foreground leading-none">{label}</p>
-      <p className={`text-xs text-foreground mt-0.5 truncate ${mono ? "font-mono" : ""}`} title={value ?? ""}>{value?.trim() || "—"}</p>
-    </div>
-  );
-
-  return (
-    <tr className="bg-muted/20">
-      <td colSpan={TABLE_COLS} className="px-0 py-0">
-        <div className="mx-0 border-t border-border/50 px-3 py-2 text-xs">
-
-          {/* Supplier + Buyer side by side */}
-          <div className="grid grid-cols-2 gap-4 mb-2">
-            <div className="rounded-md border border-border/50 bg-card px-3 py-2 space-y-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-1">
-                {isOutward ? "Bill To / Recipient" : "Supplier / Bill From"}
-              </p>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-                <P label="Name" value={supplier?.name} />
-                <P label="GSTIN" value={supplier?.gstin} mono />
-                <P label="Address" value={supplier?.address} />
-                <P label="City" value={supplier?.city} />
-                <P label="State" value={supplier?.state ? `${supplier.state}${supplier.state_code ? ` (${supplier.state_code})` : ""}` : ""} />
-                {supplier?.pan && <P label="PAN" value={supplier.pan} mono />}
-              </div>
-            </div>
-            <div className="rounded-md border border-border/50 bg-card px-3 py-2 space-y-1.5">
-              <p className="text-[10px] font-bold uppercase tracking-wide text-muted-foreground mb-1">
-                {isOutward ? "Supplier / Our Firm" : "Bill To / Client"}
-              </p>
-              <div className="grid grid-cols-2 gap-x-3 gap-y-1.5">
-                <P label="Name" value={buyer?.name ?? client?.name} />
-                <P label="GSTIN" value={buyer?.gstin ?? client?.gstin} mono />
-                <P label="Address" value={buyer?.address ?? client?.address} />
-                <P label="City" value={buyer?.city} />
-                <P label="State" value={buyer?.state ? `${buyer.state}${buyer.state_code ? ` (${buyer.state_code})` : ""}` : ""} />
-                {(buyer?.pan || client?.pan) && <P label="PAN" value={buyer?.pan ?? client?.pan} mono />}
-              </div>
-            </div>
-          </div>
-
-          <InvoiceLineItemsTable doc={doc} />
-
-          {/* Audit info + FY mismatch warning + actions */}
-          <div className="flex items-center justify-between flex-wrap gap-2 pt-1 border-t border-border/30">
-            <div className="flex items-center gap-3 text-[10px] text-muted-foreground flex-wrap">
-              {fyMismatch && (
-                <span className="inline-flex items-center gap-1 text-amber-500 font-medium">
-                  <AlertTriangle size={10} />
-                  Uploaded under FY {doc.financial_year ?? "?"} · Doc date belongs to FY {effectiveFy}
-                </span>
-              )}
-              {doc.captured_at && (
-                <span className="inline-flex items-center gap-1">
-                  <Info size={10} />
-                  Uploaded {formatCapturedAt(doc.captured_at)}
-                  {doc.uploaded_by ? ` by ${doc.uploaded_by}` : ""}
-                  {doc.capture_source ? ` via ${CAPTURE_SOURCE_LABELS[doc.capture_source]}` : ""}
-                </span>
-              )}
-            </div>
-            <div className="flex items-center gap-1.5">
-              <button
-                onClick={() => onShowVersions(doc.id)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] border border-border text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-              >
-                <History size={11} /> History
-              </button>
-              <button
-                onClick={() => onEdit(doc.id)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] border border-border text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors"
-              >
-                <Pencil size={11} /> Edit
-              </button>
-              <button
-                onClick={() => onReview(doc.id)}
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 transition-colors font-medium"
-              >
-                <ExternalLink size={11} /> View
-              </button>
-              <button
-                onClick={() => onArchive(doc.id)}
-                title="Archive (soft delete)"
-                className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] border border-border text-muted-foreground hover:text-red-500 hover:border-red-400 transition-colors"
-              >
-                <Trash2 size={11} />
-              </button>
-            </div>
-          </div>
-        </div>
-      </td>
-    </tr>
   );
 }
 
@@ -247,8 +123,6 @@ export function RecordsScreen({
   const [financialYear, setFinancialYear] = useState(currentIndianFinancialYear());
   const [docTab, setDocTab] = useState<DocType | "all">("all");
   const [search, setSearch] = useState("");
-  const [expandedId, setExpandedId] = useState<string | null>(null);
-  const [modalDocId, setModalDocId] = useState<string | null>(null);
   const [versionsDocId, setVersionsDocId] = useState<string | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<string | null>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -293,30 +167,17 @@ export function RecordsScreen({
     return fyScoped.filter((d) => d.doc_type === id).length;
   };
 
-  const toggleRow = (id: string) => setExpandedId(prev => prev === id ? null : id);
-  const modalDoc = modalDocId ? docs.find((d) => d.id === modalDocId) ?? null : null;
-
   const handleArchive = useCallback(async (id: string) => {
     try {
       await onDelete?.(id);
       setArchiveConfirm(null);
-      setExpandedId(null);
     } catch {
       setArchiveConfirm(null);
     }
   }, [onDelete]);
 
-  // Handle Edit: open review screen (ReviewScreen handles locked-doc editing with version save)
-  const handleEdit = (id: string) => onReview(id);
-
   return (
     <div className="space-y-4">
-      <InvoiceDetailModal
-        doc={modalDoc}
-        client={client}
-        onClose={() => setModalDocId(null)}
-        onOpenReview={onReview}
-      />
       {/* Header */}
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div>
@@ -344,7 +205,7 @@ export function RecordsScreen({
           <div className="relative">
             <select
               value={clientId}
-              onChange={e => { const id = e.target.value; setClientId(id); localStorage.setItem(storageKey, id); setExpandedId(null); }}
+              onChange={e => { const id = e.target.value; setClientId(id); localStorage.setItem(storageKey, id); }}
               className="bg-card border border-border rounded-lg pl-10 pr-8 py-2.5 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer shadow-sm min-w-[220px]"
             >
               {clients.filter(c => c.active).map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
@@ -365,7 +226,7 @@ export function RecordsScreen({
           <div className="relative">
             <FinancialYearSelect
               value={financialYear}
-              onChange={(fy) => { setFinancialYear(fy); setExpandedId(null); }}
+              onChange={(fy) => { setFinancialYear(fy); }}
               className="bg-input border border-border rounded-lg pl-3 pr-8 py-1.5 text-sm font-semibold text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer min-w-[7rem]"
             />
             <ChevronDown size={14} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
@@ -414,7 +275,7 @@ export function RecordsScreen({
                 id={`records-tab-${t.id}`}
                 aria-selected={docTab === t.id}
                 tabIndex={docTab === t.id ? 0 : -1}
-                onClick={() => { setDocTab(t.id); setExpandedId(null); }}
+                onClick={() => setDocTab(t.id)}
                 className={`px-3 py-1.5 text-xs font-medium rounded-t-md border-b-2 transition-colors whitespace-nowrap ${
                   docTab === t.id ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
                 }`}
@@ -448,7 +309,6 @@ export function RecordsScreen({
             <tr className="border-b border-border bg-muted/50">
               {[
                 { label: "#", align: "left", w: "w-8" },
-                { label: "", align: "left", w: "w-6" },
                 { label: "Doc Number", align: "left", w: "" },
                 { label: "Date", align: "left", w: "" },
                 { label: "Type", align: "left", w: "" },
@@ -478,92 +338,74 @@ export function RecordsScreen({
             )}
             {filtered.map((d, idx) => {
               const cp = getCounterParty(d);
-              const isExpanded = expandedId === d.id;
               const effectiveFy = effectiveDocumentFinancialYear(d);
               const fyMismatch = effectiveFy && !isAllFinancialYears(financialYear) && effectiveFy !== financialYear;
 
               return (
-                <>
-                  <tr
-                    key={d.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => setModalDocId(d.id)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter" || e.key === " ") {
-                        e.preventDefault();
-                        setModalDocId(d.id);
-                      }
-                    }}
-                    className={`transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/50 ${isExpanded ? "bg-primary/5" : "hover:bg-muted/30"}`}
-                    title="Open invoice details"
-                  >
-                    <td className="px-2 py-1.5 text-xs text-muted-foreground">{idx + 1}</td>
-                    <td className="px-1 py-1.5 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
+                <tr
+                  key={d.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() => onReview(d.id)}
+                  onKeyDown={(e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      onReview(d.id);
+                    }
+                  }}
+                  className="transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/50 hover:bg-muted/30"
+                  title="Open invoice workspace"
+                >
+                  <td className="px-2 py-1.5 text-xs text-muted-foreground">{idx + 1}</td>
+                  <td className="px-2 py-1.5">
+                    <div className="flex items-center gap-1.5">
+                      <span className="font-mono text-xs text-foreground whitespace-nowrap">{d.doc_number || "—"}</span>
+                      {fyMismatch && (
+                        <span
+                          title={`Doc date is in FY ${effectiveFy}, but uploaded under FY ${d.financial_year ?? "?"}`}
+                          className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-500 font-medium whitespace-nowrap"
+                        >
+                          <AlertTriangle size={8} /> {effectiveFy}
+                        </span>
+                      )}
+                    </div>
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-xs text-foreground whitespace-nowrap">{d.doc_date || "—"}</td>
+                  <td className="px-2 py-1.5">
+                    <DocTypeBadge type={d.doc_type} isDark={isDark} />
+                  </td>
+                  <td className="px-2 py-1.5">
+                    <PartyChip name={cp.name} gstin={cp.gstin} city={cp.city} />
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-xs text-right text-foreground whitespace-nowrap tabular-nums">{INR(d.taxable_amount)}</td>
+                  <td className="px-2 py-1.5 font-mono text-xs text-right whitespace-nowrap tabular-nums" style={{ color: isDark ? "#a78bfa" : "#6941c6" }}>
+                    {INR(d.igst + d.cgst + d.sgst)}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-xs text-right whitespace-nowrap tabular-nums text-muted-foreground">
+                    {Math.abs(docOtherCharges(d)) > 0.005 ? INR(docOtherCharges(d)) : "—"}
+                  </td>
+                  <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-foreground whitespace-nowrap tabular-nums">{INR(d.total)}</td>
+                  <td className="px-2 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
+                    <div className="flex items-center justify-end gap-1">
                       <button
                         type="button"
-                        aria-label={isExpanded ? "Collapse row" : "Expand row"}
-                        onClick={() => toggleRow(d.id)}
-                        className="p-0.5 rounded hover:bg-muted/60"
+                        title="Version history"
+                        onClick={() => setVersionsDocId(d.id)}
+                        className="p-1 rounded text-muted-foreground hover:text-foreground hover:bg-muted/60"
                       >
-                        <ChevronRight
-                          size={13}
-                          className={`transition-transform ${isExpanded ? "rotate-90" : ""}`}
-                        />
+                        <History size={12} />
                       </button>
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <div className="flex items-center gap-1.5">
-                        <span className="font-mono text-xs text-foreground whitespace-nowrap">{d.doc_number || "—"}</span>
-                        {fyMismatch && (
-                          <span
-                            title={`Doc date is in FY ${effectiveFy}, but uploaded under FY ${d.financial_year ?? "?"}`}
-                            className="inline-flex items-center gap-0.5 text-[9px] px-1 py-0.5 rounded bg-amber-500/15 text-amber-500 font-medium whitespace-nowrap"
-                          >
-                            <AlertTriangle size={8} /> {effectiveFy}
-                          </span>
-                        )}
-                      </div>
-                    </td>
-                    <td className="px-2 py-1.5 font-mono text-xs text-foreground whitespace-nowrap">{d.doc_date || "—"}</td>
-                    <td className="px-2 py-1.5">
-                      <DocTypeBadge type={d.doc_type} isDark={isDark} />
-                    </td>
-                    <td className="px-2 py-1.5">
-                      <PartyChip name={cp.name} gstin={cp.gstin} city={cp.city} />
-                    </td>
-                    <td className="px-2 py-1.5 font-mono text-xs text-right text-foreground whitespace-nowrap tabular-nums">{INR(d.taxable_amount)}</td>
-                    <td className="px-2 py-1.5 font-mono text-xs text-right whitespace-nowrap tabular-nums" style={{ color: isDark ? "#a78bfa" : "#6941c6" }}>
-                      {INR(d.igst + d.cgst + d.sgst)}
-                    </td>
-                    <td className="px-2 py-1.5 font-mono text-xs text-right whitespace-nowrap tabular-nums text-muted-foreground">
-                      {Math.abs(docOtherCharges(d)) > 0.005 ? INR(docOtherCharges(d)) : "—"}
-                    </td>
-                    <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-foreground whitespace-nowrap tabular-nums">{INR(d.total)}</td>
-                    <td className="px-2 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
-                        title="Open invoice details"
-                        onClick={() => setModalDocId(d.id)}
+                        title="Open invoice workspace"
+                        onClick={() => onReview(d.id)}
                         className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 font-medium transition-colors"
                       >
                         <Eye size={12} /> View
                       </button>
-                    </td>
-                  </tr>
-                  {isExpanded && (
-                    <ExpandedDetail
-                      key={`exp-${d.id}`}
-                      doc={d}
-                      client={client}
-                      selectedFy={financialYear}
-                      onReview={onReview}
-                      onEdit={handleEdit}
-                      onShowVersions={(id) => setVersionsDocId(id)}
-                      onArchive={(id) => setArchiveConfirm(id)}
-                    />
-                  )}
-                </>
+                    </div>
+                  </td>
+                </tr>
               );
             })}
           </tbody>

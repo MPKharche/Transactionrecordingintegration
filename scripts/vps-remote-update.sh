@@ -2,7 +2,7 @@
 # Run ON the VPS (or via GitHub Actions SSH). Idempotent: pull main + deploy + health.
 set -euo pipefail
 
-REPO_DIR="${VPS_REPO_DIR:-/root/ca-saas}"
+REPO_DIR="${VPS_REPO_DIR:-/root/apps/ca-saas}"
 BRANCH="${VPS_BRANCH:-main}"
 HEALTH_URL="${VPS_HEALTH_URL:-https://practice.planetfinance.cloud/api/health}"
 

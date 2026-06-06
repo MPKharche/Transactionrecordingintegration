@@ -29,6 +29,25 @@ test.describe("User stories — GST Registers", () => {
     await expect(page.getByRole("button", { name: /Zoho CSV/i })).toBeVisible();
   });
 
+  test("US-GST-04: credit notes (in) filter loads without API error", async ({ page }) => {
+    const apiErrors: string[] = [];
+    page.on("response", (res) => {
+      if (res.url().includes("/api/registers/credit_note_received") && res.status() >= 400) {
+        apiErrors.push(`${res.status()} ${res.url()}`);
+      }
+    });
+
+    await page.goto("/registers");
+    await expect(page.getByRole("heading", { name: "GST Registers" })).toBeVisible({ timeout: 15_000 });
+
+    const kindSelect = page.locator("select").filter({ has: page.locator('option[value="credit_note_received"]') });
+    await kindSelect.selectOption("credit_note_received");
+
+    await expect(page.getByText("Failed to load register")).toHaveCount(0, { timeout: 15_000 });
+    await expect(page.getByText("kind must be sales or purchase")).toHaveCount(0);
+    expect(apiErrors, `Registers API must not 4xx: ${apiErrors.join("; ")}`).toEqual([]);
+  });
+
   test("US-GST-02: register row opens invoice detail modal", async ({ page }) => {
     await page.goto("/registers");
     const row = page.locator("tbody tr[role='button']").first();

@@ -9,7 +9,7 @@ import { EmptyState } from "../components/ui/EmptyState";
 import { Dashboard } from "../features/dashboard/Dashboard";
 import { UploadScreen } from "../features/upload/UploadScreen";
 import { RecordsScreen } from "../features/records/RecordsScreen";
-import { ReviewScreen } from "../features/review/ReviewScreen";
+import { DocumentWorkspace } from "../components/documents/DocumentWorkspace";
 import { ClientsScreen } from "../features/clients/ClientsScreen";
 import { ClientDetailScreen } from "../features/clients/ClientDetailScreen";
 import { GstRegistersScreen } from "../features/registers/GstRegistersScreen";
@@ -65,9 +65,7 @@ export function AppShell() {
                 : location.pathname.startsWith("/upload")
                   ? "upload"
                   : location.pathname.startsWith("/records")
-                    ? routeDocId
-                      ? "review"
-                      : "records"
+                    ? "records"
                     : location.pathname.startsWith("/registers")
                       ? "registers"
                       : location.pathname.startsWith("/audit")
@@ -82,7 +80,8 @@ export function AppShell() {
                             : "clients"
                           : "dashboard";
 
-  const reviewId = routeDocId ?? null;
+  const reviewId =
+    routeDocId ?? new URLSearchParams(location.search).get("doc") ?? null;
   const selectedClientId = routeClientId ?? null;
   const pending = docs.filter((d) => d.stage === "ready_for_review").length;
   const mainRef = useRef<HTMLElement>(null);
@@ -92,7 +91,24 @@ export function AppShell() {
   }, [loading, session, navigate]);
 
   function openReview(id: string) {
-    navigate(`/records/${id}`);
+    if (location.pathname.startsWith("/records")) {
+      navigate(`/records/${id}`);
+    } else {
+      const params = new URLSearchParams(location.search);
+      params.set("doc", id);
+      navigate({ pathname: location.pathname, search: params.toString() ? `?${params}` : "" });
+    }
+  }
+
+  function closeReview() {
+    if (routeDocId) {
+      navigate("/records");
+      return;
+    }
+    const params = new URLSearchParams(location.search);
+    params.delete("doc");
+    const q = params.toString();
+    navigate({ pathname: location.pathname, search: q ? `?${q}` : "" });
   }
   function openClient(id: string) {
     navigate(`/clients/${id}`);
@@ -176,35 +192,6 @@ export function AppShell() {
             onDelete={deleteDocument}
           />
         )}
-        {screen === "review" && reviewId && (
-          docs.some((d) => d.id === reviewId) ? (
-            <ReviewScreen
-              docId={reviewId}
-              docs={docs}
-              isDark={isDark}
-              onBack={() => navigate("/records")}
-              partyByGstin={partyByGstin}
-              onPatch={patchDocument}
-              onLock={lockDocument}
-              onReject={rejectDocument}
-              isAdmin={session?.role === "admin"}
-            />
-          ) : (
-            <EmptyState
-              title="Document not found"
-              description="This document was removed or the link is outdated."
-              action={
-                <button
-                  type="button"
-                  onClick={() => navigate("/records")}
-                  className="px-4 py-2.5 bg-primary text-white text-sm font-semibold rounded-lg"
-                >
-                  Back to Records
-                </button>
-              }
-            />
-          )
-        )}
         {screen === "clients" && (
           <ClientsScreen docs={docs} clients={clients} isDark={isDark} onClientClick={openClient} />
         )}
@@ -267,17 +254,30 @@ export function AppShell() {
           tabIndex={-1}
           className="flex-1 min-h-0 flex flex-col overflow-hidden outline-none"
         >
-          <div
-            className={
-              screen === "review"
-                ? "flex-1 min-h-0 flex flex-col overflow-hidden"
-                : "flex-1 overflow-y-auto max-w-[1440px] w-full mx-auto px-7 py-7"
-            }
-          >
+          <div className="flex-1 overflow-y-auto max-w-[1440px] w-full mx-auto px-7 py-7">
             {main}
           </div>
         </main>
       </div>
+      {reviewId && (() => {
+        const reviewDoc = docs.find((d) => d.id === reviewId);
+        if (!reviewDoc) return null;
+        const reviewClient = clients.find((c) => c.id === reviewDoc.client_id);
+        return (
+          <DocumentWorkspace
+            doc={reviewDoc}
+            docs={docs}
+            client={reviewClient}
+            isDark={isDark}
+            isAdmin={session?.role === "admin"}
+            partyByGstin={partyByGstin}
+            onClose={closeReview}
+            onPatch={patchDocument}
+            onLock={lockDocument}
+            onReject={rejectDocument}
+          />
+        );
+      })()}
     </div>
   );
 }

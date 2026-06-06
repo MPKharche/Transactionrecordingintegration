@@ -34,7 +34,7 @@ jobs:
           command_timeout: 45m
           script: |
             set -euo pipefail
-            REPO="${{ secrets.VPS_REPO_DIR || '/root/ca-saas' }}"
+            REPO="${{ secrets.VPS_REPO_DIR || '/root/apps/ca-saas' }}"
             cd "$REPO"
             git fetch origin main
             git reset --hard origin/main
