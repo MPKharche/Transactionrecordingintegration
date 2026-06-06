@@ -3171,9 +3171,11 @@ export async function buildApp() {
       });
 
       try {
-        const { syncZohoOrganizationsToClients } = await import("./lib/zoho-org-sync.js");
+        const { syncZohoOrganizationsToClients, propagateZohoTokensToTenantClients } =
+          await import("./lib/zoho-org-sync.js");
         const syncResult = await syncZohoOrganizationsToClients(ctx.tenantId, tokens.accessToken);
-        req.log.info({ syncResult }, "Zoho org → client sync after OAuth");
+        const propagated = await propagateZohoTokensToTenantClients(ctx.tenantId, clientId);
+        req.log.info({ syncResult, propagated }, "Zoho org → client sync after OAuth");
       } catch (syncErr) {
         req.log.warn({ err: syncErr }, "Zoho org sync after OAuth failed (OAuth still connected)");
       }

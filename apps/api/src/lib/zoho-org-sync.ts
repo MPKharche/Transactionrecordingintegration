@@ -277,3 +277,68 @@ export async function seedKnownZohoOrgIds(
 
   return { created, updated, skipped };
 }
+
+/** Share one OAuth grant across all MSME clients in the tenant (multi-org Books account). */
+export async function propagateZohoTokensToTenantClients(
+  tenantId: string,
+  anchorClientId: string
+): Promise<number> {
+  const [anchorCfg] = await db
+    .select()
+    .from(zohoSyncConfig)
+    .where(and(eq(zohoSyncConfig.tenantId, tenantId), eq(zohoSyncConfig.clientId, anchorClientId)))
+    .limit(1);
+  if (!anchorCfg?.zohoAccessToken || !anchorCfg.zohoRefreshToken || !anchorCfg.zohoTokenExpiresAt) {
+    return 0;
+  }
+
+  const encAccess = anchorCfg.zohoAccessToken;
+  const encRefresh = anchorCfg.zohoRefreshToken;
+  const expiresAt = anchorCfg.zohoTokenExpiresAt;
+
+  const tenantClients = await db
+    .select({ id: clients.id, zohoBooksOrgId: clients.zohoBooksOrgId })
+    .from(clients)
+    .where(eq(clients.tenantId, tenantId));
+
+  let propagated = 0;
+  for (const client of tenantClients) {
+    if (client.id === anchorClientId || !client.zohoBooksOrgId) continue;
+    const [existing] = await db
+      .select()
+      .from(zohoSyncConfig)
+      .where(and(eq(zohoSyncConfig.tenantId, tenantId), eq(zohoSyncConfig.clientId, client.id)))
+      .limit(1);
+
+    if (existing) {
+      await db
+        .update(zohoSyncConfig)
+        .set({
+          zohoAccessToken: encAccess,
+          zohoRefreshToken: encRefresh,
+          zohoTokenExpiresAt: expiresAt,
+          zohoBooksOrgId: client.zohoBooksOrgId,
+          zohoOrgId: client.zohoBooksOrgId,
+          authMethod: "oauth2",
+          isActive: true,
+          updatedAt: new Date(),
+        })
+        .where(eq(zohoSyncConfig.id, existing.id));
+    } else {
+      await db.insert(zohoSyncConfig).values({
+        tenantId,
+        clientId: client.id,
+        zohoApiKey: encAccess,
+        zohoAccessToken: encAccess,
+        zohoRefreshToken: encRefresh,
+        zohoTokenExpiresAt: expiresAt,
+        zohoBooksOrgId: client.zohoBooksOrgId,
+        zohoOrgId: client.zohoBooksOrgId,
+        authMethod: "oauth2",
+        isActive: true,
+      });
+    }
+    propagated += 1;
+  }
+  return propagated;
+}
