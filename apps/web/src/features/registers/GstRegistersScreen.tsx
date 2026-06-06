@@ -1,7 +1,7 @@
 import { useState, useEffect, useMemo } from "react";
-import type { Client, GstRegisterRow } from "@ca-suite/shared";
-import { financialYearFromIsoDate } from "@ca-suite/shared";
-import { PageHeader } from "../../components/layout/PageHeader";
+import type { Client, GstRegisterRow, RegisterKind } from "@ca-suite/shared";
+import { financialYearFromIsoDate, REGISTER_KINDS, registerExportType, registerKindMeta } from "@ca-suite/shared";
+import { DocTypeBadge } from "../../components/badges/DocTypeBadge";
 import { INR, INR_SIGNED } from "../../lib/format";
 import { api, currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
 import { exportRegistersAsJSON, downloadGSTRJSON } from "../../lib/gstr-export";
@@ -17,7 +17,7 @@ export function GstRegistersScreen({
   clients: Client[];
   isDark: boolean;
 }) {
-  const [kind, setKind] = useState<"sales" | "purchase">("purchase");
+  const [kind, setKind] = useState<RegisterKind>("purchase");
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
   const [fy, setFy] = useState(currentFinancialYear());
   const [rows, setRows] = useState<GstRegisterRow[]>([]);
@@ -76,12 +76,14 @@ export function GstRegistersScreen({
 
   const client = clients.find((c) => c.id === clientId);
 
+  const kindMeta = registerKindMeta(kind);
+
   const handleExportGSTRJSON = async () => {
     if (!client || !rows.length) return;
     try {
       setExporting(true);
-      const json = exportRegistersAsJSON(rows, client, kind, fy);
-      downloadGSTRJSON(json, client, fy, kind);
+      const json = exportRegistersAsJSON(rows, client, registerExportType(kind), fy);
+      downloadGSTRJSON(json, client, fy, registerExportType(kind));
     } finally {
       setExporting(false);
     }
@@ -94,7 +96,7 @@ export function GstRegistersScreen({
         <div>
           <h1 className="text-xl font-bold text-foreground">GST Registers</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Locked {kind === "sales" ? "outward" : "inward"} supplies · FY {fy}
+            {kindMeta.label} · FY {fy}
           </p>
         </div>
         <div className="flex gap-2">
@@ -108,7 +110,13 @@ export function GstRegistersScreen({
           </button>
           <button
             type="button"
-            onClick={() => api.export.zoho(kind, { client_id: clientId, financial_year: fy })}
+            onClick={() =>
+              api.export.zoho(registerExportType(kind), {
+                client_id: clientId,
+                financial_year: fy,
+                register_kind: kind,
+              })
+            }
             className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors"
           >
             <Download size={15} /> Zoho CSV
@@ -122,11 +130,12 @@ export function GstRegistersScreen({
         <div className="relative">
           <select
             value={kind}
-            onChange={(e) => setKind(e.target.value as "sales" | "purchase")}
-            className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer"
+            onChange={(e) => setKind(e.target.value as RegisterKind)}
+            className="bg-card border border-border rounded-lg pl-3 pr-8 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer min-w-[220px]"
           >
-            <option value="purchase">Purchase register (ITC)</option>
-            <option value="sales">Sales register</option>
+            {REGISTER_KINDS.map((k) => (
+              <option key={k.id} value={k.id}>{k.label}</option>
+            ))}
           </select>
           <ChevronDown size={13} className="absolute right-2 top-1/2 -translate-y-1/2 text-muted-foreground pointer-events-none" />
         </div>
@@ -225,7 +234,7 @@ export function GstRegistersScreen({
         ) : rows.length === 0 ? (
           <div className="p-8 text-center space-y-2">
             <p className="text-muted-foreground text-sm">
-              No locked {kind === "sales" ? "sales" : "purchase"} documents for FY {fy}.
+              No locked documents in {kindMeta.label} for FY {fy}.
             </p>
             <p className="text-xs text-muted-foreground">
               Lock reviewed invoices from Upload → they'll appear here automatically.
@@ -239,7 +248,7 @@ export function GstRegistersScreen({
             <table className="w-full text-sm">
               <thead className="bg-muted/50 border-b border-border">
                 <tr>
-                  {["#", "Date", "Number", "Party", "GSTIN", "POS", "Taxable", "IGST", "CGST", "SGST", "Total", kind === "purchase" ? "ITC" : "B2B/B2C"].map(
+                  {["#", "Date", "Type", "Number", "Party", "GSTIN", "POS", "Taxable", "IGST", "CGST", "SGST", "Total", kindMeta.exportType === "purchase" ? "ITC" : "B2B/B2C"].map(
                     (h) => (
                       <th key={h} className={`px-3 py-2 text-xs font-semibold text-muted-foreground uppercase tracking-wide whitespace-nowrap ${["Taxable","IGST","CGST","SGST","Total"].includes(h) ? "text-right" : "text-left"}`}>
                         {h}
@@ -267,6 +276,9 @@ export function GstRegistersScreen({
                           </span>
                         )}
                       </td>
+                      <td className="px-3 py-2 whitespace-nowrap">
+                        <DocTypeBadge type={r.doc_type} />
+                      </td>
                       <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{r.doc_number}</td>
                       <td className="px-3 py-2 text-xs max-w-[140px] truncate" title={r.party_name}>{r.party_name}</td>
                       <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">{r.party_gstin}</td>
@@ -277,7 +289,7 @@ export function GstRegistersScreen({
                       <td className="px-3 py-2 font-mono text-xs text-right tabular-nums">{INR(r.sgst)}</td>
                       <td className="px-3 py-2 font-mono text-xs text-right tabular-nums font-semibold">{INR(r.total)}</td>
                       <td className="px-3 py-2 text-xs">
-                        {kind === "purchase"
+                        {kindMeta.exportType === "purchase"
                           ? (r.itc_eligible === false ? "No" : "Yes")
                           : (r.reverse_charge ? "RC" : "—")}
                       </td>
@@ -287,7 +299,7 @@ export function GstRegistersScreen({
               </tbody>
               <tfoot>
                 <tr className="border-t-2 border-border bg-muted/30">
-                  <td colSpan={6} className="px-3 py-2 text-xs font-semibold text-muted-foreground">
+                  <td colSpan={7} className="px-3 py-2 text-xs font-semibold text-muted-foreground">
                     Total — {rows.length} document{rows.length !== 1 ? "s" : ""}
                   </td>
                   <td className="px-3 py-2 font-mono text-xs text-right font-bold tabular-nums text-foreground">{INR_SIGNED(totals.taxable)}</td>

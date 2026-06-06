@@ -5,7 +5,7 @@ import { INR } from "../../lib/format";
 import { Button } from "../../app/components/ui/button";
 import { Card } from "../../app/components/ui/card";
 import { currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
-import { TrendChart } from "../../components/ui/TrendChart";
+import { TrendChart } from "../../app/components/ui/TrendChart";
 import { Download, AlertTriangle, TrendingDown } from "lucide-react";
 
 interface TaxLiabilityData {

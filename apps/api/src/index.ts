@@ -50,6 +50,9 @@ import {
   computeDocumentCompleteness,
   currentIndianFinancialYear,
   financialYearFromIsoDate,
+  docTypesForRegisterKind,
+  registerKindOrNull,
+  isOutwardRegisterDocType,
   type GstRegisterRow,
 } from "@ca-suite/shared";
 import { mapClient, mapDocument, lineToDb } from "./lib/mappers.js";
@@ -1795,11 +1798,8 @@ export async function buildApp() {
   app.get<{ Params: { kind: string } }>("/api/registers/:kind", async (req, reply) => {
     const ctx = (req as unknown as { auth: AuthContext }).auth;
     const q = req.query as { client_id?: string; financial_year?: string };
-    const kind = req.params.kind;
-    const salesTypes = ["sales_invoice", "debit_note_issued", "credit_note_issued"];
-    const purchTypes = ["purchase_invoice", "debit_note_received", "credit_note_received"];
-    const types = kind === "sales" ? salesTypes : kind === "purchase" ? purchTypes : null;
-    if (!types) return reply.status(400).send({ error: "kind must be sales or purchase" });
+    const types = docTypesForRegisterKind(req.params.kind);
+    if (!types) return reply.status(400).send({ error: "Invalid register kind" });
 
     const rows = await db
       .select()
@@ -1811,8 +1811,6 @@ export async function buildApp() {
       if (!types.includes(r.docType)) return false;
       if (q.client_id && r.clientId !== q.client_id) return false;
       if (q.financial_year) {
-        // Use doc_date-derived FY as the source of truth (same logic as Records screen).
-        // Fall back to the stored financial_year column if doc_date is absent.
         const effectiveFy =
           (r.docDate ? financialYearFromIsoDate(r.docDate) : null) ?? r.financialYear;
         if (effectiveFy !== q.financial_year) return false;
@@ -1823,10 +1821,11 @@ export async function buildApp() {
     const out: GstRegisterRow[] = filtered.map((r) => {
       const sup = r.supplier as Record<string, string>;
       const rec = r.recipient as Record<string, string>;
-      const isSales = salesTypes.includes(r.docType);
+      const isSales = isOutwardRegisterDocType(r.docType);
       const party = isSales ? rec : sup;
       return {
         document_id: r.id,
+        doc_type: r.docType,
         doc_number: r.docNumber ?? "",
         doc_date: r.docDate ?? "",
         party_name: String(party.name ?? ""),
@@ -1848,8 +1847,14 @@ export async function buildApp() {
 
   app.get("/api/export/zoho", async (req, reply) => {
     const ctx = (req as unknown as { auth: AuthContext }).auth;
-    const q = req.query as { type?: string; client_id?: string; financial_year?: string };
+    const q = req.query as {
+      type?: string;
+      client_id?: string;
+      financial_year?: string;
+      register_kind?: string;
+    };
     const type = q.type === "purchase" ? "purchase" : "sales";
+    const registerTypes = q.register_kind ? docTypesForRegisterKind(q.register_kind) : null;
     const all = await db
       .select()
       .from(gstDocuments)
@@ -1858,6 +1863,7 @@ export async function buildApp() {
       );
     const ids = all
       .filter((r) => {
+        if (registerTypes && !registerTypes.includes(r.docType)) return false;
         if (q.client_id && r.clientId !== q.client_id) return false;
         if (q.financial_year) {
           const effectiveFy =

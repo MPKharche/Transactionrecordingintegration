@@ -186,6 +186,7 @@ export interface AuditLogEntry {
 
 export interface GstRegisterRow {
   document_id: string;
+  doc_type: DocType;
   doc_number: string;
   doc_date: string;
   party_name: string;

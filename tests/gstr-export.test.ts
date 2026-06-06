@@ -19,6 +19,7 @@ describe("GSTR Export", () => {
   const mockRegisters: GstRegisterRow[] = [
     {
       document_id: "doc-1",
+      doc_type: "purchase_invoice",
       doc_number: "INV-001",
       doc_date: "2025-01-15",
       party_name: "XYZ Ltd",
@@ -36,6 +37,7 @@ describe("GSTR Export", () => {
     },
     {
       document_id: "doc-2",
+      doc_type: "purchase_invoice",
       doc_number: "INV-002",
       doc_date: "2025-01-20",
       party_name: "ABC Corp",

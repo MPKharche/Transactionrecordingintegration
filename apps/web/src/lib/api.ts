@@ -1,4 +1,4 @@
-import type { AuditLogEntry, Client, GSTDocument, GstRegisterRow, MastersBundle, Party, UserRole } from "@ca-suite/shared";
+import type { AuditLogEntry, Client, GSTDocument, GstRegisterRow, MastersBundle, Party, UserRole, RegisterKind } from "@ca-suite/shared";
 
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
@@ -209,7 +209,7 @@ export const api = {
       }>("/pipeline/status"),
   },
   registers: {
-    list: (kind: "sales" | "purchase", params?: { client_id?: string; financial_year?: string }) => {
+    list: (kind: RegisterKind, params?: { client_id?: string; financial_year?: string }) => {
       const q = new URLSearchParams({ ...(params as Record<string, string>) });
       const qs = q.toString();
       return request<GstRegisterRow[]>(`/registers/${kind}${qs ? `?${qs}` : ""}`);
@@ -218,7 +218,7 @@ export const api = {
   export: {
     zoho: async (
       type: "sales" | "purchase",
-      params?: { client_id?: string; financial_year?: string }
+      params?: { client_id?: string; financial_year?: string; register_kind?: RegisterKind }
     ) => {
       const q = new URLSearchParams({ type, ...(params as Record<string, string>) });
       const res = await fetch(`${BASE}/export/zoho?${q}`, { credentials: "include" });
