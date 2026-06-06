@@ -269,7 +269,6 @@ export const emailForwardConfig = pgTable("email_forward_config", {
 
 // TIER 3.4: Expense Category Master
 export const categoryMaster = pgTable("category_master", {
-  id: uuid("id").defaultRandom().primaryKey(),
   tenantId: uuid("tenant_id")
     .notNull()
     .references(() => tenants.id, { onDelete: "cascade" }),
