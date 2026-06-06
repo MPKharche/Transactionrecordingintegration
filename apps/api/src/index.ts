@@ -122,6 +122,9 @@ import {
   devAuthAllowed,
   createOAuthState,
   verifyOAuthState,
+  createZohoOAuthState,
+  verifyZohoOAuthState,
+  zohoRedirectUri,
   type AuthContext,
 } from "./lib/auth.js";
 import {
@@ -288,6 +291,7 @@ export async function buildApp() {
     const open =
       urlPath.startsWith("/api/health") ||
       urlPath.startsWith("/api/auth/google") ||
+      urlPath.startsWith("/api/oauth/zoho/callback") ||
       urlPath.startsWith("/api/auth/config") ||
       urlPath.startsWith("/api/auth/dev-login") ||
       urlPath.startsWith("/api/auth/password-login") ||
@@ -3122,17 +3126,8 @@ export async function buildApp() {
       const zohoClientId = tenant?.zohoClientId ?? process.env.ZOHO_CLIENT_ID;
       if (!zohoClientId) return reply.status(400).send({ error: "Zoho OAuth not configured" });
 
-      const redirectUri =
-        process.env.ZOHO_OAUTH_REDIRECT_URI ??
-        `${process.env.API_PUBLIC_URL ?? "http://localhost:3000"}/api/oauth/zoho/callback`;
-      const state = createOAuthState(reply);
-      reply.setCookie("zoho_oauth_client_id", clientId, {
-        path: "/",
-        httpOnly: true,
-        sameSite: "lax",
-        secure: process.env.NODE_ENV === "production",
-        maxAge: 600,
-      });
+      const redirectUri = zohoRedirectUri(req);
+      const state = createZohoOAuthState(ctx, clientId);
       const scopes = [
         "ZohoBooks.fullaccess.all",
         "ZohoBooks.contacts.CREATE",
@@ -3153,33 +3148,35 @@ export async function buildApp() {
   app.get<{ Querystring: { code?: string; state?: string } }>(
     "/api/oauth/zoho/callback",
     async (req, reply) => {
-      const ctx = (req as unknown as { auth: AuthContext }).auth;
       const { code, state } = req.query;
       if (!code || !state) return reply.status(400).send({ error: "Missing code or state" });
-      if (!verifyOAuthState(req, reply)) {
-        return reply.status(403).send({ error: "Invalid OAuth state" });
+      const oauthState = verifyZohoOAuthState(state);
+      if (!oauthState) {
+        const webBase = process.env.WEB_ORIGIN ?? process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
+        return reply.redirect(
+          `${webBase}/integrations/zoho?error=oauth_state`
+        );
       }
-      const clientId = req.cookies.zoho_oauth_client_id;
-      reply.clearCookie("zoho_oauth_client_id", { path: "/" });
-      if (!clientId) return reply.status(400).send({ error: "Missing client context" });
+      const { clientId, tenantId } = oauthState;
 
-      const redirectUri =
-        process.env.ZOHO_OAUTH_REDIRECT_URI ??
-        `${process.env.API_PUBLIC_URL ?? "http://localhost:3000"}/api/oauth/zoho/callback`;
+      const redirectUri = zohoRedirectUri(req);
 
-      const tokens = await zohoTokenManager.exchangeCodeForTokens(code, ctx.tenantId, redirectUri);
+      const tokens = await zohoTokenManager.exchangeCodeForTokens(code, tenantId, redirectUri);
       const [clientRow] = await db
         .select()
         .from(clients)
-        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, tenantId)))
         .limit(1);
-      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, ctx.tenantId)).limit(1);
+      if (!clientRow) {
+        return reply.status(403).send({ error: "Client not found" });
+      }
+      const [tenant] = await db.select().from(tenants).where(eq(tenants.id, tenantId)).limit(1);
       const orgId =
         clientRow?.zohoBooksOrgId ??
         tenant?.zohoOrgId ??
         process.env.ZOHO_ORG_ID ??
         "";
-      await zohoTokenManager.storeTokens(clientId, ctx.tenantId, {
+      await zohoTokenManager.storeTokens(clientId, tenantId, {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresIn: tokens.expiresIn,
@@ -3189,14 +3186,14 @@ export async function buildApp() {
       try {
         const { syncZohoOrganizationsToClients, propagateZohoTokensToTenantClients } =
           await import("./lib/zoho-org-sync.js");
-        const syncResult = await syncZohoOrganizationsToClients(ctx.tenantId, tokens.accessToken);
-        const propagated = await propagateZohoTokensToTenantClients(ctx.tenantId, clientId);
+        const syncResult = await syncZohoOrganizationsToClients(tenantId, tokens.accessToken);
+        const propagated = await propagateZohoTokensToTenantClients(tenantId, clientId);
         req.log.info({ syncResult, propagated }, "Zoho org → client sync after OAuth");
       } catch (syncErr) {
         req.log.warn({ err: syncErr }, "Zoho org sync after OAuth failed (OAuth still connected)");
       }
 
-      const webBase = process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
+      const webBase = process.env.WEB_ORIGIN ?? process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
       return reply.redirect(
         `${webBase}/integrations/zoho?clientId=${clientId}&connected=true`
       );

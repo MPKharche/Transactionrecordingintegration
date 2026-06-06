@@ -1,4 +1,4 @@
-import { randomUUID, randomBytes } from "crypto";
+import { randomUUID, randomBytes, createHmac, timingSafeEqual } from "crypto";
 import { eq, and, gt } from "drizzle-orm";
 import { db } from "@ca-suite/db/client";
 import { authSessions, memberships, users } from "@ca-suite/db";
@@ -119,6 +119,72 @@ export function verifyOAuthState(req: FastifyRequest, reply: FastifyReply): bool
   const got = (req.query as { state?: string }).state;
   reply.clearCookie(OAUTH_STATE_COOKIE, { path: "/" });
   return Boolean(expected && got && expected === got);
+}
+
+type ZohoOAuthStatePayload = {
+  p: "zoho";
+  clientId: string;
+  tenantId: string;
+  userId: string;
+  exp: number;
+};
+
+function oauthStateSecret() {
+  return process.env.AUTH_SECRET ?? "dev-insecure-oauth-state";
+}
+
+/** Signed state survives cross-domain OAuth (Vercel UI → VPS callback). */
+export function createZohoOAuthState(ctx: AuthContext, clientId: string): string {
+  const payload: ZohoOAuthStatePayload = {
+    p: "zoho",
+    clientId,
+    tenantId: ctx.tenantId,
+    userId: ctx.userId,
+    exp: Date.now() + 10 * 60 * 1000,
+  };
+  const body = Buffer.from(JSON.stringify(payload)).toString("base64url");
+  const sig = createHmac("sha256", oauthStateSecret()).update(body).digest("base64url");
+  return `${body}.${sig}`;
+}
+
+export function verifyZohoOAuthState(state: string): ZohoOAuthStatePayload | null {
+  const dot = state.lastIndexOf(".");
+  if (dot <= 0) return null;
+  const body = state.slice(0, dot);
+  const sig = state.slice(dot + 1);
+  const expected = createHmac("sha256", oauthStateSecret()).update(body).digest("base64url");
+  try {
+    const a = Buffer.from(sig);
+    const b = Buffer.from(expected);
+    if (a.length !== b.length || !timingSafeEqual(a, b)) return null;
+  } catch {
+    return null;
+  }
+  try {
+    const payload = JSON.parse(Buffer.from(body, "base64url").toString()) as ZohoOAuthStatePayload;
+    if (payload.p !== "zoho" || payload.exp < Date.now()) return null;
+    if (!payload.clientId || !payload.tenantId || !payload.userId) return null;
+    return payload;
+  } catch {
+    return null;
+  }
+}
+
+export function zohoRedirectUri(req?: FastifyRequest): string {
+  if (process.env.ZOHO_OAUTH_REDIRECT_URI) {
+    return process.env.ZOHO_OAUTH_REDIRECT_URI.replace(/\/$/, "");
+  }
+  const forwardedHost = req?.headers["x-forwarded-host"];
+  const forwardedProto = String(req?.headers["x-forwarded-proto"] ?? "https");
+  if (forwardedHost) {
+    const host = Array.isArray(forwardedHost) ? forwardedHost[0] : forwardedHost;
+    return `${forwardedProto}://${host}/api/oauth/zoho/callback`;
+  }
+  if (process.env.WEB_ORIGIN) {
+    return `${process.env.WEB_ORIGIN.replace(/\/$/, "")}/api/oauth/zoho/callback`;
+  }
+  const apiBase = process.env.API_PUBLIC_URL ?? `http://localhost:${process.env.API_PORT ?? 4000}`;
+  return `${apiBase.replace(/\/$/, "")}/api/oauth/zoho/callback`;
 }
 
 export function googleRedirectUri(req?: FastifyRequest): string {

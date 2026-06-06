@@ -17,6 +17,7 @@
     "test:extractor": "cd services/extractor && python -m pytest tests -q",
     "test:pipeline-split": "vitest run tests/pipeline-split.test.ts",
     "test:e2e": "playwright test",
+    "test:qa:prod": "playwright test --config playwright.prod.config.ts",
     "test:workflows": "vitest run tests/workflows.test.ts",
     "test:regression": "node scripts/run-regression.mjs",
     "test:zoho": "vitest run tests/unit/circuit-breaker.test.ts tests/unit/retry.test.ts tests/unit/zoho-push.test.ts tests/unit/decimal-money.test.ts tests/unit/hsn-validator.test.ts tests/regression/existing-pipeline.test.ts",

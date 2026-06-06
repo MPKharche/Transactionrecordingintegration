@@ -37,6 +37,16 @@ export function ZohoIntegrationScreen({ isDark }: { isDark: boolean }) {
     void loadStatus();
   }, [clientId]);
 
+  useEffect(() => {
+    if (searchParams.get("connected") === "true") {
+      toast.success("Zoho Books connected");
+      void loadStatus();
+    }
+    if (searchParams.get("error") === "oauth_state") {
+      toast.error("Zoho sign-in expired or was interrupted. Click Connect again.");
+    }
+  }, [searchParams]);
+
   function selectClient(nextClientId: string) {
     const params = new URLSearchParams(searchParams);
     if (nextClientId) params.set("clientId", nextClientId);
