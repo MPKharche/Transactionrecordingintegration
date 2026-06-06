@@ -15,7 +15,14 @@ function sh(cmd) {
 }
 
 const PRODUCTION_URL = process.env.PRODUCTION_URL?.replace(/\/+$/, "") || "https://ca-suite-web.vercel.app";
-const MARKERS = ["Observe", "admin/observe", "Queued for AI"];
+const MARKERS = [
+  "Observe",
+  "admin/observe",
+  "Queued for AI",
+  "Zoho Books",
+  "/integrations/zoho",
+  "Integrations",
+];
 
 console.log("\n=== Vercel ↔ GitHub sync check ===\n");
 
