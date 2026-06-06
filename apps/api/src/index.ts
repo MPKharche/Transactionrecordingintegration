@@ -1880,16 +1880,11 @@ export async function buildApp() {
       if (!row) return reply.status(404).send({ error: "Not found" });
       if (!row.storagePath) return reply.status(404).send({ error: "File not yet stored" });
 
-      // Generate a short-lived (15 min) MinIO presigned URL so the browser iframe can
-      // load the PDF directly without needing to forward the session cookie (which
-      // SameSite=Lax cookies won't send in cross-origin iframes, causing 502 on Vercel).
-      const { presignedGet } = await import("./lib/minio.js");
-      const presigned = await presignedGet(row.storagePath, 900); // 15 min TTL
-
-      // Build the final URL: for segmented docs, append a page anchor
-      let url = presigned;
+      // Same-origin API stream (Vercel /api rewrite → VPS). Presigned MinIO URLs use the
+      // internal docker host (http://minio:9000) and are blocked as mixed content on HTTPS.
+      let url = `/api/documents/${req.params.id}/file`;
       if (row.pageStart != null && row.pageStart > 0) {
-        url = `${presigned}#page=${row.pageStart}`;
+        url = `${url}#page=${row.pageStart}`;
       }
       return { url };
     }
