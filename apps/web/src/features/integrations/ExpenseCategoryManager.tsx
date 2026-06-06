@@ -168,7 +168,7 @@ export function ExpenseCategoryManager() {
 }
 
 /**
- * Category Picker for line items in ReviewScreen
+ * Category Picker for line items in DocumentWorkspace
  */
 export function CategoryPicker({
   selected,

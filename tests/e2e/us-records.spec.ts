@@ -7,6 +7,7 @@ import {
   currentFinancialYearLabel,
   waitForRecordsData,
   waitForPipelineOutcome,
+  ensureDocumentForReview,
 } from "./helpers";
 
 test.describe("User stories — Records", () => {
@@ -86,5 +87,16 @@ test.describe("User stories — Records", () => {
     await waitForRecordsData(page, { clientId: client.id, financialYear: currentFy });
     await expect(page.getByText("No documents for this selection")).not.toBeVisible();
     await expect(page.getByRole("tab").filter({ hasText: "All" }).first()).toContainText("(");
+  });
+
+  test("US-RECORDS-02: record opens DocumentWorkspace with Summary and PDF tabs", async ({ page }) => {
+    const docId = await ensureDocumentForReview(page);
+    await page.goto(`/records/${docId}`);
+    const dialog = page.getByRole("dialog");
+    await expect(dialog).toBeVisible({ timeout: 15_000 });
+    await expect(page.getByRole("button", { name: "Summary" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Original PDF" })).toBeVisible();
+    await page.getByRole("button", { name: "Original PDF" }).click();
+    await expect(page.locator('iframe[title="Original document"]')).toBeVisible({ timeout: 15_000 });
   });
 });

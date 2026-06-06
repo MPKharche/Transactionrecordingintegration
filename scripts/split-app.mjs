@@ -208,18 +208,6 @@ ${body(816, 927).replace(/^function PartyPanel/, "export function PartyPanel")}
 );
 
 write(
-  "features/review/ReviewScreen.tsx",
-  `${featImports}
-import { PartyPanel } from "./PartyPanel";
-import {
-  Lock, XCircle, AlertTriangle, ChevronRight, ChevronDown, Info, Phone, Mail,
-} from "lucide-react";
-
-${body(930, 1245).replace(/^function ReviewScreen/, "export function ReviewScreen")}
-`
-);
-
-write(
   "features/clients/ClientsScreen.tsx",
   `${featImports}
 import { Plus, Search, Building2, ChevronRight, Phone, Mail } from "lucide-react";
