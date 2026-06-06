@@ -194,7 +194,8 @@ export function DocumentWorkspace({
     try {
       await downloadElementAsPng(
         summaryRef.current,
-        safeFilename(doc.doc_number || doc.filename || "invoice-summary")
+        safeFilename(doc.doc_number || doc.filename || "invoice-summary"),
+        { dark: isDark }
       );
     } catch (e) {
       setExportError(e instanceof Error ? e.message : "PNG export failed");

@@ -345,8 +345,9 @@ export async function buildApp() {
   app.get("/api/auth/session", async (req, reply) => {
     try {
       const ctx = await resolveAuth(req);
-      if (!ctx) return reply.status(401).send({ error: "Not signed in" });
+      if (!ctx) return { signedIn: false as const };
       return {
+        signedIn: true as const,
         tenantId: ctx.tenantId,
         userId: ctx.userId,
         email: ctx.email,

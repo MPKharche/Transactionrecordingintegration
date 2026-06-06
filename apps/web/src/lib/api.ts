@@ -79,23 +79,24 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   return res.json() as Promise<T>;
 }
 
-/** Returns null when not signed in (401). Does not log to console on expected 401. */
+/** Returns null when not signed in. Uses 200 + signedIn:false (no console 401 noise). */
 export async function trySession(): Promise<AuthHeaders | null> {
   const res = await fetch(`${BASE}/auth/session`, {
     credentials: "include",
   });
-  if (res.status === 401) return null;
   if (!res.ok) {
     const body = await res.json().catch(() => ({}));
     throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
   }
   const d = (await res.json()) as {
-    tenantId: string;
-    userId: string;
-    email: string;
+    signedIn?: boolean;
+    tenantId?: string;
+    userId?: string;
+    email?: string;
     name?: string;
     role?: UserRole;
   };
+  if (d.signedIn === false || !d.tenantId || !d.userId) return null;
   auth = {
     tenantId: d.tenantId,
     userId: d.userId,
