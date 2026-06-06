@@ -236,7 +236,7 @@ export function AmendmentWorkflowScreen({ isDark }: { isDark: boolean }) {
                   className="w-full px-3 py-2 border border-input rounded-md bg-background"
                   required
                 >
-                  <option value="">Choose a locked document...</option>
+                  <option value="">Choose a confirmed invoice…</option>
                   {docs
                     .filter((d) => d.stage === "locked")
                     .map((doc) => (

@@ -7,7 +7,11 @@ import { clientByIdFrom } from "../../lib/format";
 import { useAppData } from "../../context/AppDataContext";
 import { currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
 import { activateOnEnterSpace } from "../../lib/a11y";
+import { ALREADY_IN_RECORDS } from "../../lib/user-copy";
 import { DocumentWorklistTable } from "../../components/documents/DocumentWorklistTable";
+import { isPipelinePending } from "../../lib/pipeline";
+
+type WorklistFilter = "all" | "ready_for_review" | "processing" | "failed";
 
 const UPLOAD_BATCH = Math.min(
   10,
@@ -27,7 +31,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
   const [uploading, setUploading] = useState(false);
   const [uploadError, setUploadError] = useState("");
   const [financialYear, setFinancialYear] = useState(currentFinancialYear());
-  const [stageF, setStageF] = useState<DocStage | "all">("all");
+  const [stageF, setStageF] = useState<WorklistFilter>("all");
   const [search, setSearch] = useState("");
   const ref = useRef<HTMLInputElement>(null);
 
@@ -63,9 +67,9 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
       const err = e as Error & { existingId?: string; existingStage?: string };
       const dupHint =
         err.existingStage === "locked"
-          ? " This file is already locked in Records."
+          ? ` ${ALREADY_IN_RECORDS}`
           : err.existingStage === "ready_for_review"
-            ? " This file is already in review."
+            ? " This file is already awaiting your review."
             : "";
       setUploadError(
         err.existingId
@@ -83,7 +87,8 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
   );
 
   const filtered = worklistDocs.filter((d) => {
-    if (stageF !== "all" && d.stage !== stageF) return false;
+    if (stageF === "processing" && !isPipelinePending(d.stage)) return false;
+    if (stageF !== "all" && stageF !== "processing" && d.stage !== stageF) return false;
     const q = search.toLowerCase();
     if (q && !d.filename.toLowerCase().includes(q) && !(clientById(d.client_id)?.name ?? "").toLowerCase().includes(q)) return false;
     return true;
@@ -91,7 +96,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
 
   return (
     <div className="space-y-6">
-      <PageHeader title="Upload Documents" subtitle="Upload new files and manage in-progress documents until they are locked into Records"
+      <PageHeader title="Upload Documents" subtitle="Upload invoices and track them until they are confirmed in Records"
         action={
           <button onClick={() => ref.current?.click()}
             className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
@@ -202,7 +207,7 @@ export function UploadScreen({ docs, clients, isDark, onReview }: { docs: GSTDoc
             <Download size={14} /> Export CSV
           </button>
           <div className="flex gap-1.5">
-            {([["all","All"],["ready_for_review","Needs Review"],["extracting","Processing"],["locked","Locked"],["failed","Failed"]] as [DocStage|"all",string][]).map(([id, label]) => (
+            {([["all","All"],["ready_for_review","Needs review"],["processing","Processing"],["failed","Needs attention"]] as [WorklistFilter, string][]).map(([id, label]) => (
               <button key={id} type="button" onClick={() => setStageF(id)}
                 className={`px-3 py-2 text-sm rounded-lg transition-colors ${stageF === id ? "bg-primary text-white font-medium" : "bg-card border border-border text-muted-foreground hover:text-foreground"}`}>
                 {label}

@@ -310,7 +310,7 @@ export function InvoiceDetailModal({
             <p className="text-xs text-red-500">{exportError}</p>
           ) : (
             <span className="text-[11px] text-muted-foreground hidden sm:block">
-              Click a register row anytime to reopen this summary
+              Click any row to open the invoice summary again
             </span>
           )}
           <div className="flex flex-wrap items-center justify-end gap-2 ml-auto">

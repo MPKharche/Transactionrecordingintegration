@@ -43,7 +43,7 @@ describe("AmendmentWorkflowScreen", () => {
 
   it("shows document selection dropdown", () => {
     render(<AmendmentWorkflowScreen isDark={false} />);
-    const documentSelect = screen.getByDisplayValue("Choose a locked document...");
+    const documentSelect = screen.getByDisplayValue("Choose a confirmed invoice…");
     expect(documentSelect).toBeInTheDocument();
   });
 
@@ -72,7 +72,7 @@ describe("AmendmentWorkflowScreen", () => {
   it("shows document preview when selected", async () => {
     render(<AmendmentWorkflowScreen isDark={false} />);
 
-    const documentSelect = screen.getByDisplayValue("Choose a locked document...");
+    const documentSelect = screen.getByDisplayValue("Choose a confirmed invoice…");
     fireEvent.change(documentSelect, { target: { value: "1" } });
 
     await waitFor(() => {

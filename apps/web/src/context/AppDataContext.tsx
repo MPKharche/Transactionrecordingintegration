@@ -165,7 +165,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     const parties = await api.parties.list();
     setPartyByGstin(parties);
     await refreshMasters();
-    toast.success("Document locked successfully");
+    toast.success("Invoice confirmed and added to Records");
   }, [refreshMasters]);
 
   const bulkLockDocuments = useCallback(async (ids: string[]) => {
@@ -182,10 +182,10 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       const parties = await api.parties.list();
       setPartyByGstin(parties);
       await refreshMasters();
-      toast.success(`${res.locked.length} document${res.locked.length !== 1 ? "s" : ""} locked`);
+      toast.success(`${res.locked.length} invoice${res.locked.length !== 1 ? "s" : ""} confirmed`);
     }
     if (res.errors.length > 0) {
-      toast.error(`${res.errors.length} document${res.errors.length !== 1 ? "s" : ""} could not be locked`);
+      toast.error(`${res.errors.length} invoice${res.errors.length !== 1 ? "s" : ""} could not be confirmed`);
     }
     return res;
   }, [refreshMasters]);

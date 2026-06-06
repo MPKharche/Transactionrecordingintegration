@@ -11,7 +11,7 @@ test.describe("User stories — Auth", () => {
   test("US-AUTH-02: dev login reaches dashboard", async ({ page }) => {
     const errors = await collectConsoleErrors(page);
     await requireDevLogin(page);
-    await expect(page.getByText(/Needs Review|In Pipeline|Locked|Failed/).first()).toBeVisible({
+    await expect(page.getByText(/Needs review|Processing|Confirmed|Needs attention/).first()).toBeVisible({
       timeout: 10_000,
     });
     assertNoConsoleErrors(errors, "US-AUTH-02");

@@ -59,7 +59,7 @@ export function EInvoiceBadge({ isValid }: EInvoiceBadgeProps) {
             <>
               <p className="font-semibold">Invalid IRN</p>
               <p className="text-xs">
-                The IRN provided does not match the expected 64-character hexadecimal format. Please verify the e-invoice number and correct if necessary before locking the document.
+                The IRN provided does not match the expected 64-character hexadecimal format. Please verify the e-invoice number and correct if necessary before confirming the invoice.
               </p>
             </>
           )}

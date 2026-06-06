@@ -575,13 +575,13 @@ export function ClientsScreen({
 
                 <div className="grid grid-cols-2 gap-3 mb-4">
                   <div className="bg-muted/50 rounded-lg px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Sales (locked)</p>
+                    <p className="text-xs text-muted-foreground">Sales (confirmed)</p>
                     <p className="text-sm font-bold font-mono text-foreground mt-0.5">
                       {salesLocked.length}
                     </p>
                   </div>
                   <div className="bg-muted/50 rounded-lg px-3 py-2">
-                    <p className="text-xs text-muted-foreground">Purchases (locked)</p>
+                    <p className="text-xs text-muted-foreground">Purchases (confirmed)</p>
                     <p className="text-sm font-bold font-mono text-foreground mt-0.5">
                       {purchLocked.length}
                     </p>

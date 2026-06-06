@@ -68,7 +68,7 @@ export function Sidebar({
     { id: "records", label: "Records", icon: ReceiptText },
     { id: "registers", label: "GST Registers", icon: FileText },
     { id: "clients", label: "Clients", icon: Users },
-    { id: "audit", label: "Audit log", icon: Shield },
+    { id: "audit", label: "Activity log", icon: Shield },
   ];
 
   const displayName = userName ?? "Signed in";

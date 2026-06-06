@@ -29,8 +29,8 @@ export function AuditLogScreen() {
   return (
     <div className="space-y-5">
       <PageHeader
-        title="Audit log"
-        subtitle="Who changed clients, documents, locks, and exports"
+        title="Activity log"
+        subtitle="Who changed clients, invoices, confirmations, and exports"
       />
       <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
         {loading ? (

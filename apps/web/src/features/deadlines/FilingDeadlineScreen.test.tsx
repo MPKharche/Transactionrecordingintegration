@@ -74,7 +74,7 @@ describe("FilingDeadlineScreen", () => {
     render(<FilingDeadlineScreen isDark={false} />);
 
     await waitFor(() => {
-      expect(screen.getByText("Avg Docs Locked")).toBeInTheDocument();
+      expect(screen.getByText("Avg invoices confirmed")).toBeInTheDocument();
       expect(screen.getByText("Total Registered")).toBeInTheDocument();
       expect(screen.getByText("Issues Fixed")).toBeInTheDocument();
     });

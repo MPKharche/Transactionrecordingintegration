@@ -168,7 +168,7 @@ export function DocumentWorklistTable({
                         <button
                           type="button"
                           onClick={() => onReview(d.id)}
-                          title={d.stage === "locked" ? "View locked record" : "Open review"}
+                          title={d.stage === "locked" ? "View in Records" : "Open review"}
                           className="inline-flex items-center gap-1 text-primary font-medium hover:underline"
                         >
                           <Eye size={12} />

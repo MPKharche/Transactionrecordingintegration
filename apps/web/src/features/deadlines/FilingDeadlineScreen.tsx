@@ -206,7 +206,7 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
           {/* Summary KPIs */}
           <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <KpiCard
-              label="Avg Docs Locked"
+              label="Avg invoices confirmed"
               value={readyStats.avgLocked}
               color="#10b981"
             />
@@ -352,7 +352,7 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
                             <div className="flex items-center gap-2">
                               <div className="w-2 h-2 rounded-full bg-muted-foreground" />
                               <span className="text-muted-foreground">
-                                {deadline.docsLocked} / {deadline.totalDocs} docs locked
+                                {deadline.docsLocked} / {deadline.totalDocs} invoices confirmed
                               </span>
                             </div>
                             <div className="flex items-center gap-2">

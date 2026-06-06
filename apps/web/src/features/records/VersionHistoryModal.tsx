@@ -131,7 +131,7 @@ export function VersionHistoryModal({
             {!loading && !error && versions.length === 0 && (
               <div className="text-center py-10 text-muted-foreground text-sm">
                 <p>No edit history yet.</p>
-                <p className="text-xs mt-1">Each save on a locked record creates a version with a field-level diff.</p>
+                <p className="text-xs mt-1">Each amendment on a confirmed invoice is saved as a new version with a field-level diff.</p>
               </div>
             )}
 

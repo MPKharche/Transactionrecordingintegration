@@ -13,11 +13,11 @@ export const DOC_TYPE_META: Record<DocType, { label: string; short: string; text
 };
 
 export const STAGE_META: Record<DocStage, { label: string; lightText: string; darkText: string; lightBg: string; darkBg: string }> = {
-  stored:           { label: "Stored",       lightText: "#4b5563", darkText: "#9ca3af", lightBg: "#f3f4f6", darkBg: "rgba(156,163,175,0.12)" },
-  ocr:              { label: "OCR",          lightText: "#1d6af5", darkText: "#60a5fa", lightBg: "#eff6ff", darkBg: "rgba(96,165,250,0.12)"  },
-  extracting:       { label: "Extracting",   lightText: "#5b21b6", darkText: "#a78bfa", lightBg: "#f5f3ff", darkBg: "rgba(167,139,250,0.12)" },
-  ready_for_review: { label: "Needs Review", lightText: "#92400e", darkText: "#fbbf24", lightBg: "#fffbeb", darkBg: "rgba(251,191,36,0.12)"  },
-  locked:           { label: "Locked",       lightText: "#065f46", darkText: "#34d399", lightBg: "#ecfdf5", darkBg: "rgba(52,211,153,0.12)"  },
-  failed:           { label: "Failed",       lightText: "#9b1c1c", darkText: "#f87171", lightBg: "#fef2f2", darkBg: "rgba(248,113,113,0.12)" },
-  rejected:         { label: "Rejected",     lightText: "#9b1c1c", darkText: "#f87171", lightBg: "#fef2f2", darkBg: "rgba(248,113,113,0.12)" },
+  stored:           { label: "Received",           lightText: "#4b5563", darkText: "#9ca3af", lightBg: "#f3f4f6", darkBg: "rgba(156,163,175,0.12)" },
+  ocr:              { label: "Reading invoice",    lightText: "#1d6af5", darkText: "#60a5fa", lightBg: "#eff6ff", darkBg: "rgba(96,165,250,0.12)"  },
+  extracting:       { label: "Extracting details", lightText: "#5b21b6", darkText: "#a78bfa", lightBg: "#f5f3ff", darkBg: "rgba(167,139,250,0.12)" },
+  ready_for_review: { label: "Needs review",       lightText: "#92400e", darkText: "#fbbf24", lightBg: "#fffbeb", darkBg: "rgba(251,191,36,0.12)"  },
+  locked:           { label: "Confirmed",          lightText: "#065f46", darkText: "#34d399", lightBg: "#ecfdf5", darkBg: "rgba(52,211,153,0.12)"  },
+  failed:           { label: "Needs attention",    lightText: "#9b1c1c", darkText: "#f87171", lightBg: "#fef2f2", darkBg: "rgba(248,113,113,0.12)" },
+  rejected:         { label: "Rejected",           lightText: "#9b1c1c", darkText: "#f87171", lightBg: "#fef2f2", darkBg: "rgba(248,113,113,0.12)" },
 };

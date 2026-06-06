@@ -174,7 +174,7 @@ export function FieldHint({ fieldKey, completeness }: { fieldKey: string; comple
   return (
     <p className="text-[10px] mt-0.5 flex items-center gap-1 text-muted-foreground">
       <HelpCircle size={10} />
-      {f.message ?? (f.status === "missing" ? "Not extracted — verify from PDF" : `${f.score}% confidence`)}
+      {f.message ?? (f.status === "missing" ? "Not found on invoice — check the PDF" : `${f.score}% confidence`)}
     </p>
   );
 }

@@ -270,10 +270,10 @@ export function GstRegistersScreen({
         ) : rows.length === 0 ? (
           <div className="p-8 text-center space-y-2">
             <p className="text-muted-foreground text-sm">
-              No locked documents in {kindMeta.label} for {formatFinancialYearLabel(fy)}.
+              No confirmed invoices in {kindMeta.label} for {formatFinancialYearLabel(fy)}.
             </p>
             <p className="text-xs text-muted-foreground">
-              Lock reviewed invoices from Upload → they'll appear here automatically.
+              Confirm reviewed invoices from Upload — they appear here automatically.
             </p>
             {!isAllFinancialYears(fy) && (
               <p className="text-xs text-muted-foreground">

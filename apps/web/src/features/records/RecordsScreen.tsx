@@ -322,7 +322,7 @@ export function RecordsScreen({
         <div>
           <h1 className="text-xl font-bold text-foreground">Records</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
-            Confirmed register — locked documents only.
+            Confirmed invoices in your books — ready for GST returns and exports.
           </p>
         </div>
         <div className="flex items-center gap-2 flex-wrap justify-end">
@@ -472,7 +472,7 @@ export function RecordsScreen({
             {filtered.length === 0 && (
               <tr>
                 <td colSpan={TABLE_COLS} className="px-5 py-8 text-center text-sm text-muted-foreground">
-                  No locked records for {formatFinancialYearLabel(financialYear)} on this tab. Try another FY or document type.
+                  No confirmed invoices for {formatFinancialYearLabel(financialYear)} on this tab. Try another FY or document type.
                 </td>
               </tr>
             )}

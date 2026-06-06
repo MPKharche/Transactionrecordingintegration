@@ -135,17 +135,17 @@ export function ClientDetailScreen({
         <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
           <p className="text-sm text-muted-foreground">Total Sales</p>
           <p className="text-xl font-bold font-mono mt-1.5" style={{ color: isDark ? "#34d399" : "#065f46" }}>{INR(salesTotal)}</p>
-          <p className="text-xs text-muted-foreground mt-1">{salesLocked.length} invoices locked</p>
+          <p className="text-xs text-muted-foreground mt-1">{salesLocked.length} confirmed invoice{salesLocked.length !== 1 ? "s" : ""}</p>
         </div>
         <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
           <p className="text-sm text-muted-foreground">Total Purchases</p>
           <p className="text-xl font-bold font-mono mt-1.5" style={{ color: isDark ? "#60a5fa" : "#1d6af5" }}>{INR(purchaseTotal)}</p>
-          <p className="text-xs text-muted-foreground mt-1">{purchaseLocked.length} invoices locked</p>
+          <p className="text-xs text-muted-foreground mt-1">{purchaseLocked.length} confirmed invoice{purchaseLocked.length !== 1 ? "s" : ""}</p>
         </div>
         <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
           <p className="text-sm text-muted-foreground">Total Documents</p>
           <p className="text-xl font-bold font-mono mt-1.5 text-foreground">{allClientDocs.length}</p>
-          <p className="text-xs text-muted-foreground mt-1">{allClientDocs.filter(d => d.stage === "locked").length} locked</p>
+          <p className="text-xs text-muted-foreground mt-1">{allClientDocs.filter(d => d.stage === "locked").length} confirmed</p>
         </div>
         <div className="bg-card border border-border rounded-xl px-5 py-4 shadow-sm">
           <p className="text-sm text-muted-foreground">Needs Review</p>
@@ -174,8 +174,8 @@ export function ClientDetailScreen({
           <Filter size={14} className="text-muted-foreground" />
           <select value={stageF} onChange={e => setStageF(e.target.value as typeof stageF)}
             className="bg-card border border-border rounded-lg px-3 py-2 text-sm text-foreground focus:outline-none focus:border-primary appearance-none cursor-pointer">
-            <option value="all">All stages</option>
-            <option value="locked">Locked</option>
+            <option value="all">All statuses</option>
+            <option value="locked">Confirmed</option>
             <option value="pending">Needs review</option>
           </select>
           <div className="relative">

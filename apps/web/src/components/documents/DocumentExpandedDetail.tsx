@@ -186,7 +186,7 @@ export function DocumentExpandedDetail({
           onClick={() => onReview(doc.id)}
           className="inline-flex items-center gap-1 text-xs font-medium text-primary hover:underline"
         >
-          <Eye size={12} /> {doc.stage === "locked" ? "View record" : "Open review"}
+          <Eye size={12} /> {doc.stage === "locked" ? "View in Records" : "Open review"}
         </button>
       </div>
     </div>

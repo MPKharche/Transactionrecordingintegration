@@ -27,8 +27,13 @@ import { ReviewSection } from "./ReviewSection";
 import { trapFocus } from "../../lib/a11y";
 import { CAPTURE_SOURCE_LABELS, formatCapturedAt } from "../../lib/capture-meta";
 import {
-  Lock, XCircle, AlertTriangle, ChevronRight, ChevronDown, Info, Save, Pencil, Loader2, X,
+  CheckCircle2, XCircle, AlertTriangle, ChevronRight, ChevronDown, Info, Save, Pencil, Loader2, X,
 } from "lucide-react";
+import {
+  AMENDING_CONFIRMED,
+  CONFIRM_INVOICE,
+  confirmedOnDate,
+} from "../../lib/user-copy";
 
 export function ReviewScreen({
   docId,
@@ -596,7 +601,7 @@ export function ReviewScreen({
         {locked && !lockedEditMode && (
           <div className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-xs font-medium flex items-center gap-1" style={{ color: isDark ? "#34d399" : "#065f46" }}>
-              <Lock size={13} /> Locked {doc.recorded_at}
+              <CheckCircle2 size={13} /> {confirmedOnDate(doc.recorded_at)}
             </span>
             <button
               type="button"
@@ -610,7 +615,7 @@ export function ReviewScreen({
         {locked && lockedEditMode && (
           <div className="ml-auto flex items-center gap-2 shrink-0">
             <span className="text-[10px] text-amber-500 font-medium flex items-center gap-1">
-              <Pencil size={11} /> Editing locked record — will save as new version
+              <Pencil size={11} /> {AMENDING_CONFIRMED}
             </span>
           </div>
         )}
@@ -654,7 +659,7 @@ export function ReviewScreen({
             <Info size={14} className="text-primary shrink-0 mt-0.5" />
             <div className="space-y-1 text-sm">
               <p className="font-semibold text-foreground">
-                {extractionPending ? "Reading your document…" : "Automatic extraction did not complete"}
+                {extractionPending ? "Reading your invoice…" : "We couldn't read all details automatically"}
               </p>
               {extractionAlerts.map((a, i) => (
                 <p key={i} className="text-muted-foreground">{a.message}</p>
@@ -669,7 +674,7 @@ export function ReviewScreen({
           {errors.length > 0 && (
             <div className="px-3 py-2" style={{ background: isDark ? "rgba(217,45,32,0.07)" : "#fef3f2" }}>
               <p className="font-semibold text-red-600 flex items-center gap-1.5">
-                <XCircle size={13} /> {errors.length} error{errors.length > 1 ? "s" : ""} — fix before locking
+                <XCircle size={13} /> {errors.length} error{errors.length > 1 ? "s" : ""} — fix before confirming
               </p>
               {errors.map((e, i) => (
                 <p key={i} className="text-red-500 mt-0.5"><span className="font-medium">{e.field}:</span> {e.message}</p>
@@ -812,7 +817,7 @@ export function ReviewScreen({
 
       <ReviewSection
         title="4. Line items"
-        subtitle={lines.length ? `${lines.length} item(s) — verify description, HSN, qty, UQC` : "No line items extracted yet"}
+        subtitle={lines.length ? `${lines.length} item(s) — verify description, HSN, qty, UQC` : "No line items captured yet"}
         badge={
           lines.length > 0 ? (
             <span className="text-xs px-2 py-0.5 rounded-full bg-muted text-muted-foreground">{lines.length}</span>
@@ -1096,7 +1101,7 @@ export function ReviewScreen({
             )}
           </div>
           {!canLock && liveErrors.length > 0 && (
-            <p className="text-xs text-red-500 mb-1.5 flex items-center gap-1.5"><Info size={13} /> Fix {liveErrors.length} error(s) before locking</p>
+            <p className="text-xs text-red-500 mb-1.5 flex items-center gap-1.5"><Info size={13} /> Fix {liveErrors.length} error(s) before confirming</p>
           )}
           {!showReject ? (
             <div className="flex gap-2">
@@ -1123,13 +1128,13 @@ export function ReviewScreen({
                     setLocked(true);
                     setIsDirty(false);
                   } catch (e) {
-                    setActionError(e instanceof Error ? e.message : "Lock failed");
+                    setActionError(e instanceof Error ? e.message : "Could not confirm invoice");
                   }
                 }}
                 className={`flex-1 flex items-center justify-center gap-1.5 py-2 rounded-lg text-xs font-semibold transition-all ${
                   canLock ? "bg-primary text-white hover:bg-primary/90 shadow-sm" : "bg-muted text-muted-foreground cursor-not-allowed"
                 }`}>
-                <Lock size={13} /> Confirm & lock record
+                <CheckCircle2 size={13} /> {CONFIRM_INVOICE}
               </button>
               <button
                 type="button"
@@ -1169,7 +1174,7 @@ export function ReviewScreen({
             color: isDark ? { template:"#67e8f9", ai:"#c4b5fd", merged:"#60a5fa", manual:"#9ca3af" }[doc.extraction_method] : { template:"#0e7490", ai:"#5b21b6", merged:"#1d6af5", manual:"#4b5563" }[doc.extraction_method],
             background: isDark ? { template:"rgba(14,116,144,0.15)", ai:"rgba(91,33,182,0.15)", merged:"rgba(29,106,245,0.15)", manual:"rgba(75,85,99,0.15)" }[doc.extraction_method] : { template:"#ecfeff", ai:"#f5f3ff", merged:"#eff6ff", manual:"#f9fafb" }[doc.extraction_method],
           }}>
-            {doc.extraction_method === "ai" ? "AI extracted" : doc.extraction_method}
+            {doc.extraction_method === "ai" ? "Auto-filled from invoice" : doc.extraction_method === "template" ? "Template matched" : doc.extraction_method === "merged" ? "Combined sources" : "Manual entry"}
           </span>
           <DocTypeBadge type={doc.doc_type} isDark={isDark} />
           <StageBadge stage={locked ? "locked" : doc.stage} isDark={isDark} />
