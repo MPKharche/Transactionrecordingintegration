@@ -24,6 +24,7 @@ import {
 import { handleTabListKeyDown } from "../../lib/a11y";
 import { VersionHistoryModal } from "./VersionHistoryModal";
 import { InvoiceLineItemsTable } from "../../components/documents/InvoiceLineItemsTable";
+import { InvoiceDetailModal } from "../../components/documents/InvoiceDetailModal";
 
 const FY_OPTIONS = listIndianFinancialYears(2016);
 
@@ -247,6 +248,7 @@ export function RecordsScreen({
   const [docTab, setDocTab] = useState<DocType | "all">("all");
   const [search, setSearch] = useState("");
   const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [modalDocId, setModalDocId] = useState<string | null>(null);
   const [versionsDocId, setVersionsDocId] = useState<string | null>(null);
   const [archiveConfirm, setArchiveConfirm] = useState<string | null>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
@@ -292,6 +294,7 @@ export function RecordsScreen({
   };
 
   const toggleRow = (id: string) => setExpandedId(prev => prev === id ? null : id);
+  const modalDoc = modalDocId ? docs.find((d) => d.id === modalDocId) ?? null : null;
 
   const handleArchive = useCallback(async (id: string) => {
     try {
@@ -308,6 +311,12 @@ export function RecordsScreen({
 
   return (
     <div className="space-y-4">
+      <InvoiceDetailModal
+        doc={modalDoc}
+        client={client}
+        onClose={() => setModalDocId(null)}
+        onOpenReview={onReview}
+      />
       {/* Header */}
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div>
@@ -482,10 +491,20 @@ export function RecordsScreen({
                 <>
                   <tr
                     key={d.id}
-                    className={`transition-colors ${isExpanded ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => setModalDocId(d.id)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter" || e.key === " ") {
+                        e.preventDefault();
+                        setModalDocId(d.id);
+                      }
+                    }}
+                    className={`transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/50 ${isExpanded ? "bg-primary/5" : "hover:bg-muted/30"}`}
+                    title="Open invoice details"
                   >
                     <td className="px-2 py-1.5 text-xs text-muted-foreground">{idx + 1}</td>
-                    <td className="px-1 py-1.5 text-muted-foreground">
+                    <td className="px-1 py-1.5 text-muted-foreground" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         aria-label={isExpanded ? "Collapse row" : "Expand row"}
@@ -526,11 +545,11 @@ export function RecordsScreen({
                       {Math.abs(docOtherCharges(d)) > 0.005 ? INR(docOtherCharges(d)) : "—"}
                     </td>
                     <td className="px-2 py-1.5 font-mono text-xs font-bold text-right text-foreground whitespace-nowrap tabular-nums">{INR(d.total)}</td>
-                    <td className="px-2 py-1.5 text-right">
+                    <td className="px-2 py-1.5 text-right" onClick={(e) => e.stopPropagation()}>
                       <button
                         type="button"
                         title="Open invoice details"
-                        onClick={() => onReview(d.id)}
+                        onClick={() => setModalDocId(d.id)}
                         className="inline-flex items-center gap-1 px-2 py-1 rounded text-[11px] bg-primary/10 border border-primary/30 text-primary hover:bg-primary/20 font-medium transition-colors"
                       >
                         <Eye size={12} /> View

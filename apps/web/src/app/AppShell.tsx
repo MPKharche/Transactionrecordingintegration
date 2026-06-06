@@ -208,7 +208,11 @@ export function AppShell() {
           />
         )}
         {screen === "registers" && (
-          <GstRegistersScreen clients={clients} isDark={isDark} />
+          <GstRegistersScreen
+            clients={clients}
+            isDark={isDark}
+            onReview={openReview}
+          />
         )}
         {screen === "audit" && <AuditLogScreen />}
         {screen === "settings" && <PreferencesScreen />}

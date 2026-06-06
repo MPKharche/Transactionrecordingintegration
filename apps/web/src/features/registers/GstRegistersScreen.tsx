@@ -1,7 +1,8 @@
-import { useState, useEffect, useMemo } from "react";
-import type { Client, GstRegisterRow, RegisterKind } from "@ca-suite/shared";
+import { useState, useEffect, useMemo, useCallback } from "react";
+import type { Client, GSTDocument, GstRegisterRow, RegisterKind } from "@ca-suite/shared";
 import { financialYearFromIsoDate, REGISTER_KINDS, registerExportType, registerKindMeta } from "@ca-suite/shared";
 import { DocTypeBadge } from "../../components/badges/DocTypeBadge";
+import { InvoiceDetailModal } from "../../components/documents/InvoiceDetailModal";
 import { INR, INR_SIGNED } from "../../lib/format";
 import { api, currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
 import { exportRegistersAsJSON, downloadGSTRJSON } from "../../lib/gstr-export";
@@ -13,9 +14,11 @@ const FY_OPTIONS = listIndianFinancialYears(2016);
 export function GstRegistersScreen({
   clients,
   isDark,
+  onReview,
 }: {
   clients: Client[];
   isDark: boolean;
+  onReview?: (id: string) => void;
 }) {
   const [kind, setKind] = useState<RegisterKind>("purchase");
   const [clientId, setClientId] = useState(clients[0]?.id ?? "");
@@ -25,6 +28,29 @@ export function GstRegistersScreen({
   const [fetchError, setFetchError] = useState<string | null>(null);
   const [lastFetched, setLastFetched] = useState({ kind: "", clientId: "", fy: "" });
   const [exporting, setExporting] = useState(false);
+  const [selectedDocId, setSelectedDocId] = useState<string | null>(null);
+  const [detailDoc, setDetailDoc] = useState<GSTDocument | null>(null);
+  const [detailLoading, setDetailLoading] = useState(false);
+  const [detailError, setDetailError] = useState<string | null>(null);
+
+  const openDetail = useCallback((documentId: string) => {
+    setSelectedDocId(documentId);
+    setDetailDoc(null);
+    setDetailError(null);
+    setDetailLoading(true);
+    api.documents
+      .get(documentId)
+      .then(setDetailDoc)
+      .catch((e: Error) => setDetailError(e.message || "Failed to load invoice"))
+      .finally(() => setDetailLoading(false));
+  }, []);
+
+  const closeDetail = useCallback(() => {
+    setSelectedDocId(null);
+    setDetailDoc(null);
+    setDetailError(null);
+    setDetailLoading(false);
+  }, []);
 
   // Fetch register rows whenever filter changes
   useEffect(() => {
@@ -91,6 +117,14 @@ export function GstRegistersScreen({
 
   return (
     <div className="space-y-5">
+      <InvoiceDetailModal
+        doc={detailDoc}
+        client={client}
+        loading={detailLoading && !!selectedDocId}
+        error={detailError}
+        onClose={closeDetail}
+        onOpenReview={onReview}
+      />
       {/* Header */}
       <div className="flex items-start justify-between gap-2 flex-wrap">
         <div>
@@ -263,7 +297,20 @@ export function GstRegistersScreen({
                   const effectiveFy = (r.doc_date ? financialYearFromIsoDate(r.doc_date) : null) ?? r.financial_year;
                   const fyMismatch = effectiveFy && effectiveFy !== fy;
                   return (
-                    <tr key={r.document_id} className="hover:bg-muted/20 transition-colors">
+                    <tr
+                      key={r.document_id}
+                      role="button"
+                      tabIndex={0}
+                      onClick={() => openDetail(r.document_id)}
+                      onKeyDown={(e) => {
+                        if (e.key === "Enter" || e.key === " ") {
+                          e.preventDefault();
+                          openDetail(r.document_id);
+                        }
+                      }}
+                      className="hover:bg-muted/30 transition-colors cursor-pointer focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary/50"
+                      title="Open invoice details"
+                    >
                       <td className="px-3 py-2 text-xs text-muted-foreground">{idx + 1}</td>
                       <td className="px-3 py-2 font-mono text-xs whitespace-nowrap">
                         {r.doc_date}

@@ -19,7 +19,17 @@ test.describe("User stories — GST Registers", () => {
     await expect(page.getByRole("button", { name: /Zoho CSV/i })).toBeVisible();
   });
 
-  test("US-GST-02: zoho export download", async ({ page }) => {
+  test("US-GST-02: register row opens invoice detail modal", async ({ page }) => {
+    await page.goto("/registers");
+    const row = page.locator("tbody tr[role='button']").first();
+    if (await row.count()) {
+      await row.click();
+      await expect(page.getByRole("dialog")).toBeVisible({ timeout: 10_000 });
+      await expect(page.getByRole("button", { name: "Download PDF" })).toBeVisible();
+    }
+  });
+
+  test("US-GST-03: zoho export download", async ({ page }) => {
     await page.goto("/registers");
     const downloadPromise = page.waitForEvent("download", { timeout: 30_000 });
     await page.getByRole("button", { name: /Zoho CSV/i }).click();
