@@ -17,11 +17,11 @@ let zohoReconcileQueue: Queue | null = null;
 let zohoTokenRefreshQueue: Queue | null = null;
 
 export function isZohoSyncEnabled(tenantId?: string): boolean {
-  if (process.env.FEATURE_ZOHO_SYNC_ENABLED === "false") return false;
   if (process.env.FEATURE_ZOHO_SYNC_ENABLED === "true") return true;
+  if (process.env.FEATURE_ZOHO_SYNC_ENABLED === "false") return false;
   const pilot = process.env.FEATURE_ZOHO_SYNC_PILOT_TENANT_ID;
   if (pilot && tenantId) return pilot === tenantId;
-  return process.env.FEATURE_ZOHO_SYNC_ENABLED !== "false";
+  return false;
 }
 
 export function getZohoPushQueue(): Queue<ZohoPushJobData> {
