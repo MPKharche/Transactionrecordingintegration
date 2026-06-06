@@ -1,0 +1,48 @@
+name: Deploy VPS
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+    branches: [main]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-vps-production
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    if: >
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.workflow_run.conclusion == 'success' &&
+       github.event.workflow_run.head_branch == 'main')
+    runs-on: ubuntu-latest
+    environment: production
+    steps:
+      - name: Checkout (for scripts reference)
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.VPS_HOST }}
+          username: ${{ secrets.VPS_USER }}
+          key: ${{ secrets.VPS_SSH_KEY }}
+          port: ${{ secrets.VPS_SSH_PORT || 22 }}
+          script_stop: true
+          command_timeout: 45m
+          script: |
+            set -euo pipefail
+            REPO="${{ secrets.VPS_REPO_DIR || '/root/ca-saas' }}"
+            cd "$REPO"
+            git fetch origin main
+            git reset --hard origin/main
+            export VPS_REPO_DIR="$REPO"
+            export VPS_HEALTH_URL="${{ secrets.VPS_HEALTH_URL || 'https://practice.planetfinance.cloud/api/health' }}"
+            bash scripts/vps-remote-update.sh
+
+      - name: Summary
+        run: |
+          echo "VPS deploy finished. UI: https://ca-suite-web.vercel.app"
+          echo "API: https://practice.planetfinance.cloud/api/health"

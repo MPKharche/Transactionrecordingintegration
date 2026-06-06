@@ -1,0 +1,57 @@
+---
+description: Default agent delivery — always test, commit, push; VPS auto-deploys via GitHub Actions
+alwaysApply: true
+---
+
+# Ship and deploy (default for all dev work)
+
+After **any** implementation, bug fix, or config change in this repo, the agent **must** complete the full loop without waiting for the user to ask:
+
+## 1. Test (pick the right gate)
+
+| Change scope | Minimum verification |
+|--------------|---------------------|
+| Web UI only | `pnpm test` + `pnpm --filter @ca-suite/web build` |
+| API / worker / shared / db | above + `pnpm test:api` |
+| Migrations / infra / extractor | above + `pnpm test:migrate` if schema changed |
+| Large / risky | `pnpm test:regression:ci` or `pnpm test:regression` if local stack up |
+
+Do **not** end with “please run tests” or “commit when ready” — run them yourself.
+
+## 2. Commit and push (default)
+
+Unless the user explicitly says **not** to commit in that message:
+
+1. Stage relevant files (never `.env`, credentials, or build artifacts).
+2. Write a clear commit message (why, not just what).
+3. `git push origin HEAD`
+
+Use `node scripts/ship.mjs "your message"` to run test + commit + push in one step.
+
+## 3. Deploy (automatic — do not ask user to SSH)
+
+| Layer | Trigger |
+|-------|---------|
+| **Web (Vercel)** | Push to `main` |
+| **API / worker / extractor (VPS)** | Push to `main` → **CI passes** → `.github/workflows/deploy-vps.yml` SSHs to VPS and runs `scripts/vps-remote-update.sh` |
+
+After push, run `pnpm prod:health --remote` (or check Vercel MCP) and report green/red.
+
+## 4. One-time VPS setup (human only)
+
+GitHub repo **Settings → Secrets → Actions** (environment `production`):
+
+- `VPS_HOST` — e.g. VPS IP or `practice.planetfinance.cloud`
+- `VPS_USER` — e.g. `root`
+- `VPS_SSH_KEY` — private key with access to `/root/ca-saas`
+- Optional: `VPS_REPO_DIR`, `VPS_HEALTH_URL`, `VPS_SSH_PORT`
+
+VPS must have: Docker, git clone at `/root/ca-saas`, `.env` with production secrets, `DEPLOY_TARGET=vps`.
+
+See `docs/DEPLOY.md` and `docs/GITHUB-DEPLOY-SECRETS.md`.
+
+## 5. Never
+
+- Leave fixes uncommitted after a dev task.
+- Tell the user to manually `git pull && ./scripts/deploy.sh` on VPS (CI does this).
+- Deploy API to Vercel (frontend only).

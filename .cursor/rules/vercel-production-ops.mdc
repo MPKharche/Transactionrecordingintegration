@@ -43,8 +43,9 @@ Interpret results in plain language: green = OK, red = which service failed and 
 ## 4. GitHub-linked deploy flow
 
 - Push to `main` → Vercel production deploy (web)
+- Push to `main` → CI passes → **Deploy VPS** workflow (`deploy-vps.yml`) runs `scripts/vps-remote-update.sh` on the server
 - Pull requests → Vercel preview URLs
-- Full stack on VPS: merge → SSH/`deploy-prod.sh` or Hostinger MCP — not automatic via Vercel
+- Manual VPS fallback: `ssh root@VPS 'bash /root/ca-saas/scripts/vps-remote-update.sh'` — see `docs/GITHUB-DEPLOY-SECRETS.md`
 
 When a Vercel preview works but production API fails, triage **VPS/Docker** (worker, extractor, postgres), not Vercel build logs.
 
