@@ -59,6 +59,8 @@ export const clients = pgTable("clients", {
   email: text("email"),
   /** GST portal snapshot: nature of business, HSN/SAC codes, trade name, etc. */
   gstProfile: jsonb("gst_profile"),
+  /** Zoho Books organization id for this MSME (e.g. 60040612019) */
+  zohoBooksOrgId: text("zoho_books_org_id"),
   createdAt: timestamp("created_at").defaultNow().notNull(),
   updatedAt: timestamp("updated_at").defaultNow().notNull(),
 }, (t) => ({

@@ -609,8 +609,13 @@ export async function buildApp() {
         mobile: b.mobile,
         email: b.email,
         gstProfile: b.gst_profile ?? null,
+        zohoBooksOrgId: b.zoho_books_org_id?.trim() || null,
       })
       .returning();
+    if (row.zohoBooksOrgId) {
+      const { upsertZohoOrgMapping } = await import("./lib/zoho-org-sync.js");
+      await upsertZohoOrgMapping(tenantId, row.id, row.zohoBooksOrgId);
+    }
     await audit(
       { tenantId, userId } as AuthContext,
       "client.create",
@@ -2101,6 +2106,48 @@ export async function buildApp() {
     return { ...status, daily_budget_usd: parseFloat(saved) };
   });
 
+  app.post("/api/admin/zoho/seed-org-ids", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    if (ctx.role !== "admin") {
+      return reply.status(403).send({ error: "Admin access required" });
+    }
+    const { seedKnownZohoOrgIds } = await import("./lib/zoho-org-sync.js");
+    const result = await seedKnownZohoOrgIds(ctx.tenantId);
+    return { ok: true, ...result };
+  });
+
+  app.post<{ Body: { clientId?: string } }>("/api/admin/zoho/sync-organizations", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    if (ctx.role !== "admin") {
+      return reply.status(403).send({ error: "Admin access required" });
+    }
+    const anchorClientId = req.body?.clientId?.trim();
+    let tokenClientId = anchorClientId;
+    if (!tokenClientId) {
+      const [siddhi] = await db
+        .select({ id: clients.id })
+        .from(clients)
+        .where(and(eq(clients.tenantId, ctx.tenantId), eq(clients.gstin, "27FNZPP3642G1Z9")))
+        .limit(1);
+      tokenClientId = siddhi?.id;
+    }
+    if (!tokenClientId) {
+      return reply.status(400).send({ error: "No client with OAuth tokens — connect Zoho first" });
+    }
+    const connected = await zohoTokenManager.isConnected(tokenClientId, ctx.tenantId);
+    if (!connected) {
+      return reply.status(400).send({
+        error: "Zoho OAuth not connected for anchor client",
+        clientId: tokenClientId,
+        hint: `/integrations/zoho?clientId=${tokenClientId}`,
+      });
+    }
+    const accessToken = await zohoTokenManager.getValidToken(tokenClientId, ctx.tenantId);
+    const { syncZohoOrganizationsToClients } = await import("./lib/zoho-org-sync.js");
+    const result = await syncZohoOrganizationsToClients(ctx.tenantId, accessToken);
+    return { ok: true, ...result };
+  });
+
   app.get("/api/audit-log", async (req) => {
     const ctx = (req as unknown as { auth: AuthContext }).auth;
     const rows = await db
@@ -3105,13 +3152,31 @@ export async function buildApp() {
         `${process.env.API_PUBLIC_URL ?? "http://localhost:3000"}/api/oauth/zoho/callback`;
 
       const tokens = await zohoTokenManager.exchangeCodeForTokens(code, ctx.tenantId, redirectUri);
+      const [clientRow] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
       const [tenant] = await db.select().from(tenants).where(eq(tenants.id, ctx.tenantId)).limit(1);
+      const orgId =
+        clientRow?.zohoBooksOrgId ??
+        tenant?.zohoOrgId ??
+        process.env.ZOHO_ORG_ID ??
+        "";
       await zohoTokenManager.storeTokens(clientId, ctx.tenantId, {
         accessToken: tokens.accessToken,
         refreshToken: tokens.refreshToken,
         expiresIn: tokens.expiresIn,
-        orgId: tenant?.zohoOrgId ?? process.env.ZOHO_ORG_ID ?? "",
+        orgId,
       });
+
+      try {
+        const { syncZohoOrganizationsToClients } = await import("./lib/zoho-org-sync.js");
+        const syncResult = await syncZohoOrganizationsToClients(ctx.tenantId, tokens.accessToken);
+        req.log.info({ syncResult }, "Zoho org → client sync after OAuth");
+      } catch (syncErr) {
+        req.log.warn({ err: syncErr }, "Zoho org sync after OAuth failed (OAuth still connected)");
+      }
 
       const webBase = process.env.WEB_PUBLIC_URL ?? "http://localhost:5173";
       return reply.redirect(
