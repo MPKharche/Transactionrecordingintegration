@@ -847,20 +847,35 @@ export async function buildApp() {
         return reply.status(400).send({ error: "Invalid GSTIN format" });
       }
 
-      // Check if already in party master for this tenant
+      // Known party master or existing client for this tenant
       const existing = await db
         .select()
         .from(partyMaster)
         .where(and(eq(partyMaster.tenantId, tenantId), eq(partyMaster.gstin, gstin)))
         .limit(1);
+      const [existingClient] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.tenantId, tenantId), eq(clients.gstin, gstin)))
+        .limit(1);
       const known = existing[0] ?? null;
+      const knownFromClient = existingClient
+        ? {
+            name: existingClient.name,
+            address: existingClient.address,
+            city: null,
+            stateCode: existingClient.stateCode,
+          }
+        : null;
 
-      const info = await lookupGstin(gstin, known ? {
-        name: known.name,
-        address: known.address,
-        city: known.city,
-        stateCode: known.stateCode,
-      } : null);
+      const info = await lookupGstin(gstin, known
+        ? {
+            name: known.name,
+            address: known.address,
+            city: known.city,
+            stateCode: known.stateCode,
+          }
+        : knownFromClient);
 
       if (!info) {
         return reply.status(404).send({ error: "GSTIN not found or GST portal unavailable" });

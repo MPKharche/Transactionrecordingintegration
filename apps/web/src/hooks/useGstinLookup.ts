@@ -4,7 +4,7 @@ import { api } from "../lib/api";
 import type { GstinLookupResult } from "../lib/gstin-utils";
 
 export function useGstinLookup() {
-  const [state, setState] = useState<"idle" | "loading" | "ok" | "error">("idle");
+  const [state, setState] = useState<"idle" | "loading" | "ok" | "warn" | "error">("idle");
   const [message, setMessage] = useState("");
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -20,14 +20,23 @@ export function useGstinLookup() {
     setMessage("");
     try {
       const info = await api.gstin.lookup(g);
-      setState("ok");
-      setMessage(
-        info.source === "master"
-          ? "Filled from your master"
-          : info.tradeName && info.tradeName !== info.legalName
-          ? `Trade: ${info.tradeName}`
-          : `Status: ${info.status || "Active"}`
-      );
+      if (info.source === "derived" || info.portalAvailable === false) {
+        setState("warn");
+        setMessage(
+          info.legalName
+            ? "GST portal unreachable — using saved details; verify before saving"
+            : "GST portal unreachable — enter legal name and address manually"
+        );
+      } else {
+        setState("ok");
+        setMessage(
+          info.source === "master"
+            ? "Filled from your master"
+            : info.tradeName && info.tradeName !== info.legalName
+              ? `Trade: ${info.tradeName}`
+              : `Status: ${info.status || "Active"}`
+        );
+      }
       return info;
     } catch (err) {
       setState("error");

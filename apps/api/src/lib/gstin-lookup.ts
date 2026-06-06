@@ -30,7 +30,9 @@ export interface GstinInfo {
   hsnCodes: string[];
   /** Registered SAC codes for services. */
   sacCodes: string[];
-  source: "cache" | "master" | "portal" | "api";
+  source: "cache" | "master" | "portal" | "api" | "derived";
+  /** False when GST portal WAF/network blocked — user should enter legal name manually. */
+  portalAvailable?: boolean;
 }
 
 // ─── Simple in-process LRU cache (no extra dependency) ─────────────────────
@@ -78,6 +80,31 @@ function stateCodeFromGstin(gstin: string): string {
 
 function panFromGstin(gstin: string): string {
   return gstin.length >= 12 ? gstin.slice(2, 12) : "";
+}
+
+/** Minimal fields parsed from GSTIN when portal/API are unreachable. */
+export function buildDerivedGstinInfo(gstin: string): GstinInfo {
+  const g = gstin.toUpperCase().trim();
+  const stateCode = stateCodeFromGstin(g);
+  return {
+    gstin: g,
+    legalName: "",
+    tradeName: "",
+    status: "",
+    registrationDate: "",
+    stateCode,
+    state: STATE_MAP[stateCode] ?? "",
+    address: "",
+    city: "",
+    pincode: "",
+    pan: panFromGstin(g),
+    constitutionOfBusiness: "",
+    natureOfBusiness: [],
+    hsnCodes: [],
+    sacCodes: [],
+    source: "derived",
+    portalAvailable: false,
+  };
 }
 
 function uniqueStrings(values: string[]): string[] {
@@ -320,9 +347,11 @@ export async function lookupGstin(
   // 4. GST portal
   const fromPortal = await fetchFromPortal(g);
   if (fromPortal) {
+    fromPortal.portalAvailable = true;
     cacheSet(g, fromPortal);
     return fromPortal;
   }
 
-  return null;
+  // 5. Portal blocked or GSTIN not published — still return state/PAN so manual entry works
+  return buildDerivedGstinInfo(g);
 }

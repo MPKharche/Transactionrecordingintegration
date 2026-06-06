@@ -74,7 +74,7 @@ function GstinField({
   gstin: string;
   onChange: (gstin: string) => void;
   onLookup: () => void;
-  lookupState: "idle" | "loading" | "ok" | "error";
+  lookupState: "idle" | "loading" | "ok" | "warn" | "error";
   lookupMsg: string;
 }) {
   const valid = gstin ? isValidGSTIN(gstin) : null;
@@ -104,6 +104,8 @@ function GstinField({
             <Loader2 size={16} className="animate-spin text-primary" />
           ) : lookupState === "ok" ? (
             <CheckCircle2 size={16} className="text-emerald-600" />
+          ) : lookupState === "warn" ? (
+            <AlertCircle size={16} className="text-amber-500" />
           ) : lookupState === "error" ? (
             <AlertCircle size={16} className="text-red-500" />
           ) : (
@@ -115,7 +117,15 @@ function GstinField({
         <p className="text-xs text-red-500 mt-1">Invalid GSTIN checksum or format</p>
       )}
       {lookupMsg && (
-        <p className={`text-xs mt-1 ${lookupState === "error" ? "text-red-500" : "text-muted-foreground"}`}>
+        <p
+          className={`text-xs mt-1 ${
+            lookupState === "error"
+              ? "text-red-500"
+              : lookupState === "warn"
+                ? "text-amber-600"
+                : "text-muted-foreground"
+          }`}
+        >
           {lookupMsg}
         </p>
       )}

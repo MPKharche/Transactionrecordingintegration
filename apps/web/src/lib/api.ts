@@ -365,7 +365,8 @@ export const api = {
         natureOfBusiness: string[];
         hsnCodes: string[];
         sacCodes: string[];
-        source: "cache" | "master" | "portal" | "api";
+        source: "cache" | "master" | "portal" | "api" | "derived";
+        portalAvailable?: boolean;
       }>(`/gstin/lookup/${encodeURIComponent(gstin)}`),
   },
   authConfig: () =>
