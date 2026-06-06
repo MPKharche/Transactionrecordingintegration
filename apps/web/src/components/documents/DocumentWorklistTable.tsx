@@ -34,6 +34,9 @@ export function DocumentWorklistTable({
   onRetry,
   emptyMessage = "No documents match your filter",
   showAdminCost = false,
+  selectableIds,
+  selectedIds,
+  onToggleSelect,
 }: {
   docs: GSTDocument[];
   clients: Client[];
@@ -42,6 +45,9 @@ export function DocumentWorklistTable({
   onRetry?: (id: string) => void;
   emptyMessage?: string;
   showAdminCost?: boolean;
+  selectableIds?: string[];
+  selectedIds?: Set<string>;
+  onToggleSelect?: (id: string) => void;
 }) {
   const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const clientById = (id: string) => clientByIdFrom(clients, id);
@@ -65,6 +71,9 @@ export function DocumentWorklistTable({
     });
   }
 
+  const selectable = Boolean(selectableIds?.length && selectedIds && onToggleSelect);
+  const selectableSet = useMemo(() => new Set(selectableIds ?? []), [selectableIds]);
+
   return (
     <div className="space-y-2">
       <GstrSummaryBar reports={reports} docCount={docs.length} />
@@ -73,6 +82,7 @@ export function DocumentWorklistTable({
         <table className="w-full border-collapse text-xs">
           <thead>
             <tr className="border-b border-border bg-muted/50">
+              {selectable ? <th className={`${HEAD} w-8`} aria-label="Select" /> : null}
               <th className={`${HEAD} w-6`} aria-label="Expand" />
               <th className={HEAD}>Filename</th>
               <th className={HEAD}>Client</th>
@@ -112,6 +122,19 @@ export function DocumentWorklistTable({
                       open ? "bg-muted/30" : ""
                     }`}
                   >
+                    {selectable ? (
+                      <td className={CELL} onClick={(e) => e.stopPropagation()}>
+                        {selectableSet.has(d.id) ? (
+                          <input
+                            type="checkbox"
+                            checked={selectedIds!.has(d.id)}
+                            onChange={() => onToggleSelect!(d.id)}
+                            aria-label={`Select ${title}`}
+                            className="rounded border-border"
+                          />
+                        ) : null}
+                      </td>
+                    ) : null}
                     <td className={CELL}>
                       <ChevronRight
                         size={14}
@@ -201,7 +224,7 @@ export function DocumentWorklistTable({
                   </tr>
                   {open && (
                     <tr className="border-b border-border/60">
-                      <td colSpan={showAdminCost ? 13 : 12} className="p-0">
+                      <td colSpan={(showAdminCost ? 13 : 12) + (selectable ? 1 : 0)} className="p-0">
                         <DocumentExpandedDetail
                           doc={d}
                           client={clientById(d.client_id)}
@@ -216,7 +239,7 @@ export function DocumentWorklistTable({
             })}
             {docs.length === 0 && (
               <tr>
-                <td colSpan={11} className="px-2 py-8 text-center text-sm text-muted-foreground">
+                <td colSpan={(showAdminCost ? 12 : 11) + (selectable ? 1 : 0)} className="px-2 py-8 text-center text-sm text-muted-foreground">
                   {emptyMessage}
                 </td>
               </tr>

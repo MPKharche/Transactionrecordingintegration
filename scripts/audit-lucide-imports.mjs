@@ -1,17 +1,12 @@
 #!/usr/bin/env node
 /**
- * Ensures every Lucide icon used in feature TSX files is imported from lucide-react.
+ * Ensures Lucide icons used in feature TSX files are imported from lucide-react.
+ * Uses the `size={` prop heuristic (all Lucide icons in this codebase pass size).
  */
 import fs from "fs";
 import path from "path";
 
 const ROOT = path.join("apps", "web", "src", "features");
-const BUILTIN = new Set([
-  "PageHeader", "KpiCard", "DocTypeBadge", "StageBadge", "CopyBtn", "PartyPanel",
-  "AuthGate", "LoginPage", "UploadScreen", "Dashboard", "RecordsScreen",
-  "ReviewScreen", "ClientsScreen", "ClientDetailScreen",
-  "EmptyState", "StatusBanner",
-]);
 
 function walk(dir, out = []) {
   for (const ent of fs.readdirSync(dir, { withFileTypes: true })) {
@@ -23,37 +18,41 @@ function walk(dir, out = []) {
 }
 
 function parseLucideImports(src) {
+  const names = new Set();
   const m = src.match(/import\s*\{([^}]+)\}\s*from\s*["']lucide-react["']/);
-  if (!m) return new Set();
-  return new Set(
-    m[1]
-      .split(",")
-      .map((s) => s.trim().split(/\s+as\s+/)[0].trim())
-      .filter(Boolean)
-  );
+  if (!m) return names;
+  for (const part of m[1].split(",")) {
+    const trimmed = part.trim();
+    if (!trimmed) continue;
+    const alias = trimmed.split(/\s+as\s+/);
+    names.add(alias[0].trim());
+    if (alias[1]) names.add(alias[1].trim());
+  }
+  return names;
 }
 
-function parseJsxComponents(src) {
+function parseLocalIconVars(src) {
+  const names = new Set();
+  for (const m of src.matchAll(/const\s+(\w+)\s*=\s*\w+\.icon\b/g)) names.add(m[1]);
+  return names;
+}
+
+/** Lucide-style usage: <IconName size={...} or size="..." */
+function parseLucideUsages(src) {
   const tags = new Set();
-  // JSX only — exclude TS generics like useState<AuditLogEntry[]>
-  const re = /<([A-Z][a-zA-Z0-9]*)(?:\s|\/|>)/g;
+  const re = /<([A-Z][a-zA-Z0-9]*)\s+[^>]*\bsize=\{/g;
   let match;
   while ((match = re.exec(src))) tags.add(match[1]);
   return tags;
 }
 
-const IGNORE_TAGS = new Set([
-  "DocType", "DocStage", "GSTDocument", "Party", "LineItem", "FieldWarning",
-  "Client", "Screen", "HTMLInputElement", "Partial", "MemoryRouter",
-  "AuditLogEntry", "GstRegisterRow",
-]);
-
 let failed = false;
 for (const file of walk(ROOT)) {
   const src = fs.readFileSync(file, "utf8");
   const imported = parseLucideImports(src);
-  const used = [...parseJsxComponents(src)].filter((t) => !BUILTIN.has(t));
-  const missing = used.filter((t) => !imported.has(t) && !IGNORE_TAGS.has(t));
+  const localIcons = parseLocalIconVars(src);
+  const used = [...parseLucideUsages(src)];
+  const missing = used.filter((t) => !imported.has(t) && !localIcons.has(t));
   if (missing.length) {
     failed = true;
     console.error(`${file}: missing lucide imports: ${missing.join(", ")}`);

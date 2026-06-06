@@ -97,7 +97,7 @@
       "objective": "Bulk approve (lock) reviewed documents",
       "acceptance": "Select multiple ready_for_review rows and bulk lock via API",
       "layer": "ui",
-      "test": "RecordsScreen.tsx"
+      "test": "UploadScreen.tsx"
     },
     {
       "id": "US-REVIEW-01",

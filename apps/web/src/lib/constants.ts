@@ -12,6 +12,24 @@ export const DOC_TYPE_META: Record<DocType, { label: string; short: string; text
   delivery_challan:     { label: "Delivery Challan",       short: "Challan",  textColor: "#4b5563", lightBg: "#f3f4f6", darkBg: "rgba(75,85,99,0.18)",   darkText: "#d1d5db" },
 };
 
+/** Shown when API returns an unknown or legacy doc_type — avoids render crash. */
+export const FALLBACK_DOC_TYPE_META = {
+  label: "Other",
+  short: "Other",
+  textColor: "#4b5563",
+  lightBg: "#f3f4f6",
+  darkBg: "rgba(75,85,99,0.18)",
+  darkText: "#d1d5db",
+} as const;
+
+export const FALLBACK_STAGE_META = {
+  label: "Unknown",
+  lightText: "#4b5563",
+  darkText: "#9ca3af",
+  lightBg: "#f3f4f6",
+  darkBg: "rgba(156,163,175,0.12)",
+} as const;
+
 export const STAGE_META: Record<DocStage, { label: string; lightText: string; darkText: string; lightBg: string; darkBg: string }> = {
   stored:           { label: "Received",           lightText: "#4b5563", darkText: "#9ca3af", lightBg: "#f3f4f6", darkBg: "rgba(156,163,175,0.12)" },
   ocr:              { label: "Reading invoice",    lightText: "#1d6af5", darkText: "#60a5fa", lightBg: "#eff6ff", darkBg: "rgba(96,165,250,0.12)"  },

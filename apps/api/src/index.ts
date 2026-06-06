@@ -55,6 +55,7 @@ import {
   isOutwardRegisterDocType,
   parseUserPreferences,
   mergeUserPreferences,
+  normalizeDocType,
   type GstRegisterRow,
 } from "@ca-suite/shared";
 import { mapClient, mapDocument, lineToDb } from "./lib/mappers.js";
@@ -352,6 +353,13 @@ export async function buildApp() {
       preferences: parseUserPreferences(user.preferences),
       authProvider: googleOAuthConfigured() ? "google" : "dev",
     };
+  });
+
+  app.get("/api/users/me/preferences", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const [user] = await db.select().from(users).where(eq(users.id, ctx.userId)).limit(1);
+    if (!user) return reply.status(404).send({ error: "User not found" });
+    return { preferences: parseUserPreferences(user.preferences) };
   });
 
   app.patch<{ Body: Record<string, unknown> }>("/api/users/me/preferences", async (req, reply) => {
@@ -1881,7 +1889,7 @@ export async function buildApp() {
       const party = isSales ? rec : sup;
       return {
         document_id: r.id,
-        doc_type: r.docType,
+        doc_type: normalizeDocType(r.docType),
         doc_number: r.docNumber ?? "",
         doc_date: r.docDate ?? "",
         party_name: String(party.name ?? ""),
@@ -3339,11 +3347,6 @@ export async function buildApp() {
       return csv;
     }
   );
-
-  app.get("/api/compliance/calendar", async () => {
-    // TODO: Implement compliance calendar endpoint
-    return { calendars: [] };
-  });
 
   return app;
 }

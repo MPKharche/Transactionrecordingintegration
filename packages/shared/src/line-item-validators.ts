@@ -112,8 +112,8 @@ export function computeLineItemIssues(
     });
   }
 
-  // Check missing tax (warning, only if HSN is present and taxable)
-  if (lineItem.hsn_sac && isMissingTax(lineItem)) {
+  // Check missing tax (warning on taxable items with no tax)
+  if (isMissingTax(lineItem)) {
     issues.push({
       type: "missing_tax",
       severity: "warning",

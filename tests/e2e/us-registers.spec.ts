@@ -7,8 +7,17 @@ test.describe("User stories — GST Registers", () => {
   });
 
   test("US-GST-01: registers screen loads with FY selector and note filters", async ({ page }) => {
+    const errors: string[] = [];
+    page.on("pageerror", (err) => errors.push(err.message));
+    page.on("console", (msg) => {
+      if (msg.type() === "error") errors.push(msg.text());
+    });
+
     await page.goto("/registers");
-    await expect(page.getByRole("heading", { name: "GST Registers" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "GST Registers" })).toBeVisible({ timeout: 15_000 });
+
+    const crash = errors.find((e) => e.includes("textColor") || e.includes("Cannot read properties"));
+    expect(crash, `Registers page must not crash: ${errors.join("; ")}`).toBeUndefined();
     const fySelect = page.locator("select").filter({ has: page.locator('option[value="2016-17"]') });
     await expect(fySelect).toBeVisible();
     await expect(fySelect.locator('option[value="all"]')).toHaveCount(1);

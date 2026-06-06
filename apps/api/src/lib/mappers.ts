@@ -1,4 +1,5 @@
 import type { Client, ClientGstProfile, GSTDocument, LineItem, Party, CaptureSource } from "@ca-suite/shared";
+import { normalizeDocType } from "@ca-suite/shared";
 import {
   clients,
   documentIssues,
@@ -63,7 +64,7 @@ export function mapDocument(
     id: row.id,
     filename: row.filename,
     client_id: row.clientId,
-    doc_type: row.docType as GSTDocument["doc_type"],
+    doc_type: normalizeDocType(row.docType),
     doc_number: row.docNumber ?? "",
     doc_date: row.docDate ?? "",
     recorded_at: row.recordedAt ?? "",

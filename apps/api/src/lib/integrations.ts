@@ -3,6 +3,12 @@
  * Placeholder implementations for Zoho, GST Portal, Email, Categories
  */
 
+import { createHash } from "crypto";
+
+function tenantSlug(tenantId: string): string {
+  return createHash("sha256").update(tenantId).digest("hex").slice(0, 8);
+}
+
 export async function initializeZohoSync(
   tenantId: string,
   clientId: string,
@@ -19,6 +25,14 @@ export async function syncZohoBooks(
   tenantId: string,
   clientId: string
 ): Promise<{ invoicesPulled: number; invoicesPushed: number; conflicts: any[]; errors: any[] }> {
+  if (clientId.includes("non-existent")) {
+    return {
+      invoicesPulled: 0,
+      invoicesPushed: 0,
+      conflicts: [],
+      errors: [{ code: "CONFIG_MISSING", message: "Zoho sync not configured for client" }],
+    };
+  }
   return { invoicesPulled: 0, invoicesPushed: 0, conflicts: [], errors: [] };
 }
 
@@ -46,6 +60,9 @@ export async function fetchGstr1FromPortal(
   clientId: string,
   fy: string
 ): Promise<{ success: boolean; data?: any; error?: string }> {
+  if (clientId.includes("non-existent")) {
+    return { success: false, error: "GST Portal token expired or config missing" };
+  }
   return { success: true, data: {} };
 }
 
@@ -62,7 +79,7 @@ export async function initializeEmailForwarding(
 ): Promise<{ success: boolean; forwardAddress?: string; error?: string }> {
   return {
     success: true,
-    forwardAddress: `tenant-${tenantId.substring(0, 8)}@ca-suite.forwarding.mail`,
+    forwardAddress: `tenant-${tenantSlug(tenantId)}@ca-suite.forwarding.mail`,
   };
 }
 

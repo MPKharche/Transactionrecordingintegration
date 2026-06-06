@@ -2,7 +2,7 @@ import { useState, useRef, useMemo } from "react";
 import type { Client, GSTDocument, DocStage, DocType } from "@ca-suite/shared";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { exportCSV } from "../../lib/csv-export";
-import { DOC_TYPE_META, STAGE_META } from "../../lib/constants";
+import { DOC_TYPE_META, STAGE_META, FALLBACK_DOC_TYPE_META, FALLBACK_STAGE_META } from "../../lib/constants";
 import { clientByIdFrom } from "../../lib/format";
 import { useAppData } from "../../context/AppDataContext";
 import { currentFinancialYear, listIndianFinancialYears } from "../../lib/api";
@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 
 export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void; isAdmin?: boolean }) {
-  const { uploadFile, retryDocument } = useAppData();
+  const { uploadFile, retryDocument, bulkLockDocuments } = useAppData();
   const clientById = (id: string) => clientByIdFrom(clients, id);
   const [dragging, setDragging] = useState(false);
   const [selClient, setSelClient] = useState(clients[0]?.id ?? "");
@@ -33,6 +33,9 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
   const [financialYear, setFinancialYear] = useState(currentFinancialYear());
   const [stageF, setStageF] = useState<WorklistFilter>("all");
   const [search, setSearch] = useState("");
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [bulkLocking, setBulkLocking] = useState(false);
+  const [bulkLockError, setBulkLockError] = useState("");
   const ref = useRef<HTMLInputElement>(null);
 
   function addFiles(files: FileList | null) {
@@ -93,6 +96,40 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
     if (q && !d.filename.toLowerCase().includes(q) && !(clientById(d.client_id)?.name ?? "").toLowerCase().includes(q)) return false;
     return true;
   });
+
+  const lockableIds = useMemo(
+    () => filtered.filter((d) => d.stage === "ready_for_review").map((d) => d.id),
+    [filtered]
+  );
+
+  /** US-RECORDS-02: bulk confirm (lock) reviewed documents from the upload worklist. */
+  async function confirmSelected() {
+    const ids = [...selectedIds].filter((id) => lockableIds.includes(id));
+    if (ids.length === 0) return;
+    setBulkLockError("");
+    setBulkLocking(true);
+    try {
+      await bulkLockDocuments(ids);
+      setSelectedIds(new Set());
+    } catch (e) {
+      setBulkLockError(e instanceof Error ? e.message : "Could not confirm selected documents");
+    } finally {
+      setBulkLocking(false);
+    }
+  }
+
+  function toggleSelect(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+
+  function selectAllLockable() {
+    setSelectedIds(new Set(lockableIds));
+  }
 
   return (
     <div className="space-y-6">
@@ -201,11 +238,31 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
           <button onClick={() => {
             exportCSV("all_documents.csv",
               ["Filename","Client","Doc Number","Date","Type","Status","Issues"],
-              filtered.map(d => [d.filename, clientById(d.client_id)?.name ?? "", d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type].label, STAGE_META[d.stage].label, d.issues.length])
+              filtered.map(d => [d.filename, clientById(d.client_id)?.name ?? "", d.doc_number, d.doc_date, DOC_TYPE_META[d.doc_type]?.label ?? FALLBACK_DOC_TYPE_META.label, STAGE_META[d.stage]?.label ?? FALLBACK_STAGE_META.label, d.issues.length])
             );
           }} className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors">
             <Download size={14} /> Export CSV
           </button>
+          {lockableIds.length > 0 && (
+            <>
+              <button
+                type="button"
+                onClick={selectAllLockable}
+                className="px-3 py-2 text-sm border border-border rounded-lg text-muted-foreground hover:text-foreground"
+              >
+                Select all awaiting review ({lockableIds.length})
+              </button>
+              <button
+                type="button"
+                disabled={selectedIds.size === 0 || bulkLocking}
+                onClick={confirmSelected}
+                className="px-3 py-2 text-sm font-medium rounded-lg bg-emerald-600 text-white hover:bg-emerald-700 disabled:opacity-50"
+              >
+                {bulkLocking ? "Confirming…" : `Confirm selected (${selectedIds.size})`}
+              </button>
+            </>
+          )}
+          {bulkLockError ? <p className="text-sm text-red-500 w-full">{bulkLockError}</p> : null}
           <div className="flex gap-1.5">
             {([["all","All"],["ready_for_review","Needs review"],["processing","Processing"],["failed","Needs attention"]] as [WorklistFilter, string][]).map(([id, label]) => (
               <button key={id} type="button" onClick={() => setStageF(id)}
@@ -223,6 +280,9 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
           onReview={onReview}
           onRetry={retryDocument}
           showAdminCost={isAdmin}
+          selectableIds={lockableIds}
+          selectedIds={selectedIds}
+          onToggleSelect={toggleSelect}
         />
       </div>
     </div>

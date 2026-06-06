@@ -7,6 +7,7 @@ import { describe, it, expect, beforeEach, vi } from "vitest";
 import {
   initializeZohoSync,
   syncZohoBooks,
+  pullInvoicesFromZoho,
   initializeGstPortalSync,
   fetchGstr1FromPortal,
   fetchGstr2bFromPortal,
@@ -16,7 +17,7 @@ import {
   autoSuggestCategory,
   encryptSensitiveData,
   decryptSensitiveData,
-} from "../src/lib/integrations";
+} from "../apps/api/src/lib/integrations";
 
 describe("TIER 3: Integrations", () => {
   const testTenantId = "tenant-123";
