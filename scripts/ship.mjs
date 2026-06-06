@@ -76,6 +76,14 @@ try {
 
 run("git push origin HEAD", "Push to origin");
 
+try {
+  run("pnpm prod:health --remote", "Production health check");
+  run("node scripts/verify-vercel-sync.mjs", "Vercel ↔ GitHub sync check");
+} catch {
+  console.warn("\n⚠ Push succeeded but live verification failed — check Vercel dashboard.\n");
+  process.exit(1);
+}
+
 console.log("\n✅ Shipped to GitHub.");
 console.log("   • Vercel deploys apps/web on main automatically");
 console.log("   • GitHub CI runs tests; deploy-vps.yml updates the VPS when CI passes");
