@@ -7,12 +7,15 @@ import { devLogin, trySession, api } from "../../lib/api";
 const GOOGLE_AUTH_HREF = `${import.meta.env.VITE_API_URL ?? "/api"}/auth/google`;
 
 const ERROR_MESSAGES: Record<string, string> = {
-  oauth: "Google sign-in was cancelled or denied.",
+  oauth: "Google sign-in was cancelled or denied. Please try again.",
   oauth_state: "Sign-in session expired. Please try again.",
-  oauth_failed: "Google sign-in failed. Check server OAuth credentials and redirect URI.",
-  no_membership: "Your Google account is not invited to this practice. Contact your admin.",
+  oauth_failed:
+    "Google sign-in failed — the server could not complete authentication. " +
+    "Please try again in a moment. If this persists, contact support at mayurk.2707@gmail.com.",
+  no_membership:
+    "Your Google account is not linked to any practice. Contact your admin to get invited.",
   access_denied:
-    "This application is in private testing. Only approved accounts can sign in. Contact your administrator.",
+    "Access is currently restricted to approved accounts. Contact your administrator to request access.",
 };
 
 export function LoginPage() {

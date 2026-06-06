@@ -15,11 +15,12 @@ import {
   getPipelineQueueMetrics,
 } from "./lib/pipeline-queue.js";
 import { MAX_UPLOAD_BYTES } from "@ca-suite/shared/server";
-import { eq, and, desc, inArray, max, sql, or } from "drizzle-orm";
+import { eq, and, desc, inArray, lt, max, sql, or } from "drizzle-orm";
 import { randomUUID } from "crypto";
 import { db } from "@ca-suite/db/client";
 import {
   auditLog,
+  authSessions,
   clientAssignments,
   clients,
   documentIssues,
@@ -299,6 +300,10 @@ export async function buildApp() {
       service: "ca-suite-api",
       time: new Date().toISOString(),
       pipeline,
+      oauth: {
+        googleConfigured: googleOAuthConfigured(),
+        redirectUri: process.env.GOOGLE_REDIRECT_URI ?? "(derived from WEB_ORIGIN/x-forwarded-host)",
+      },
     };
   });
 
@@ -3353,9 +3358,22 @@ export async function buildApp() {
 
 const port = parseInt(process.env.API_PORT ?? "4000", 10);
 
+async function cleanExpiredSessions() {
+  try {
+    await db.delete(authSessions).where(lt(authSessions.expires, new Date()));
+  } catch (err) {
+    console.warn("[auth] Failed to clean expired sessions:", err);
+  }
+}
+
 export async function startServer() {
   const app = await buildApp();
   await app.listen({ port, host: "0.0.0.0" });
+
+  // Clean up expired sessions on startup and every 24 hours to prevent DB bloat
+  cleanExpiredSessions();
+  setInterval(cleanExpiredSessions, 24 * 60 * 60 * 1000);
+
   return app;
 }
 
