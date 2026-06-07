@@ -51,6 +51,11 @@ describe("document export helpers", () => {
 
   it("passes through rgb colors unchanged", () => {
     expect(resolveColorForHtml2Canvas("rgb(17, 24, 39)")).toBe("rgb(17, 24, 39)");
-    expect(() => resolveColorForHtml2Canvas("oklab(0.5 0.1 0.2)")).not.toThrow();
+  });
+
+  it("resolves oklab to rgb for html2canvas", () => {
+    const resolved = resolveColorForHtml2Canvas("oklab(0.5 0.1 0.2)");
+    expect(resolved).not.toMatch(/oklab|oklch|color-mix/i);
+    expect(resolved).toMatch(/^(rgb|rgba|#[0-9a-f]{3,8}|transparent)$/i);
   });
 });

@@ -9,6 +9,7 @@ test.describe("User stories — Auth", () => {
       page
         .getByRole("button", { name: /Continue with Google/i })
         .or(page.getByLabel(/^email$/i))
+        .or(page.getByRole("button", { name: /Dev login/i }))
     ).toBeVisible();
   });
 

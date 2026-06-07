@@ -71,6 +71,25 @@ const HTML2CANVAS_COLOR_PROPS = [
 
 const MODERN_COLOR_RE = /okl(ch|ab)|color-mix|lab\(|lch\(/i;
 
+function colorViaCanvasPixel(value: string): string | null {
+  const canvas = document.createElement("canvas");
+  canvas.width = 1;
+  canvas.height = 1;
+  const ctx = canvas.getContext("2d");
+  if (!ctx) return null;
+  try {
+    ctx.clearRect(0, 0, 1, 1);
+    ctx.fillStyle = value;
+    ctx.fillRect(0, 0, 1, 1);
+    const [r, g, b, a] = ctx.getImageData(0, 0, 1, 1).data;
+    if (a === 0) return "transparent";
+    if (a === 255) return `rgb(${r}, ${g}, ${b})`;
+    return `rgba(${r}, ${g}, ${b}, ${(a / 255).toFixed(3)})`;
+  } catch {
+    return null;
+  }
+}
+
 /** Chrome may serialize getComputedStyle() colors as oklab — html2canvas cannot parse them. */
 export function resolveColorForHtml2Canvas(value: string, prop = "color"): string {
   if (!value || value === "transparent" || value === "rgba(0, 0, 0, 0)") return value;
@@ -84,9 +103,12 @@ export function resolveColorForHtml2Canvas(value: string, prop = "color"): strin
       ctx.fillStyle = value;
       if (!MODERN_COLOR_RE.test(ctx.fillStyle)) return ctx.fillStyle;
     } catch {
-      /* probe fallback below */
+      /* pixel readback below */
     }
   }
+
+  const fromPixel = colorViaCanvasPixel(value);
+  if (fromPixel && !MODERN_COLOR_RE.test(fromPixel)) return fromPixel;
 
   const probe = document.createElement("span");
   probe.style.display = "none";
@@ -99,7 +121,10 @@ export function resolveColorForHtml2Canvas(value: string, prop = "color"): strin
   probe.remove();
   if (resolved && !MODERN_COLOR_RE.test(resolved)) return resolved;
 
-  return value;
+  const fromProbePixel = colorViaCanvasPixel(resolved || value);
+  if (fromProbePixel) return fromProbePixel;
+
+  return prop.includes("background") ? "#ffffff" : "#171717";
 }
 
 /** Tailwind v4 may emit oklch/oklab in bundled CSS — html2canvas 1.x cannot parse those rules. */
@@ -121,7 +146,7 @@ export function applyHtml2CanvasColorOverrides(root: HTMLElement): () => void {
     const props: string[] = [];
     for (const prop of HTML2CANVAS_COLOR_PROPS) {
       const raw = computed.getPropertyValue(prop);
-      if (!raw || !MODERN_COLOR_RE.test(raw)) continue;
+      if (!raw || raw === "transparent" || raw === "rgba(0, 0, 0, 0)") continue;
       const safe = resolveColorForHtml2Canvas(raw, prop);
       if (safe && safe !== raw) {
         node.style.setProperty(prop, safe);

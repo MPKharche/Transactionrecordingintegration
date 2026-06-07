@@ -2,7 +2,7 @@ import { test, expect } from "@playwright/test";
 import {
   requireDevLogin,
   uploadDocument,
-  ensureClientOnPage,
+  ensureFreshClientOnPage,
   selectRecordsClient,
   currentFinancialYearLabel,
   waitForRecordsData,
@@ -17,7 +17,7 @@ test.describe("User stories — Records", () => {
   });
 
   test("US-RECORDS-01: records tabs, FY filter, and capture columns", async ({ page }) => {
-    const client = await ensureClientOnPage(page);
+    const client = await ensureFreshClientOnPage(page);
     const fy = currentFinancialYearLabel();
 
     const docId = await uploadDocument(page, { clientName: client.name, financialYear: fy });
@@ -80,7 +80,7 @@ test.describe("User stories — Records", () => {
   });
 
   test("US-RECORDS-01b: FY filter hides documents from other years", async ({ page }) => {
-    const client = await ensureClientOnPage(page);
+    const client = await ensureFreshClientOnPage(page);
     const currentFy = currentFinancialYearLabel();
 
     const docId = await uploadDocument(page, { clientName: client.name, financialYear: currentFy });

@@ -75,6 +75,33 @@ export async function ensureClientViaApi(
   return created.id;
 }
 
+/** Always create a new client — avoids cross-test pollution on shared dev tenants. */
+export async function ensureFreshClientOnPage(
+  page: Page
+): Promise<{ id: string; name: string }> {
+  const gstin = uniqueGstin();
+  const name = `E2E Client ${Date.now()}`;
+  return page.evaluate(
+    async ({ name, gstin }) => {
+      const r = await fetch("/api/clients", {
+        method: "POST",
+        credentials: "include",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          gstin,
+          state: "Maharashtra",
+          state_code: "27",
+          active: true,
+        }),
+      });
+      if (!r.ok) throw new Error(`create client: ${r.status} ${await r.text()}`);
+      return (await r.json()) as { id: string; name: string };
+    },
+    { name, gstin }
+  );
+}
+
 /** Create a client via API when the UI has none (no demo seed required). */
 export async function ensureClientOnPage(
   page: Page
@@ -151,7 +178,14 @@ export async function waitForPipelineOutcome(
       { id: docId, pending: [...PIPELINE_PENDING_STAGES] },
       { timeout: timeoutMs }
     );
-    return (await handle.jsonValue()) as { stage: PipelineFinishedStage; doc_number: string };
+    const result = (await handle.jsonValue()) as {
+      stage: PipelineFinishedStage;
+      doc_number: string;
+    } | null;
+    if (!result?.stage) {
+      throw new Error(`Pipeline outcome missing for document ${docId}`);
+    }
+    return result;
   } catch {
     const stuck = await page.evaluate(async (id) => {
       const r = await fetch("/api/documents", { credentials: "include" });
@@ -201,23 +235,28 @@ export async function uploadDocument(
   const pdfPath = await writeTempPdf();
   await page.locator('input[type="file"]').setInputFiles(pdfPath);
   await expect(page.getByText(/ready to upload/i)).toBeVisible({ timeout: 8_000 });
+
+  const uploadResponse = page.waitForResponse(
+    (res) =>
+      res.request().method() === "POST" &&
+      res.url().includes("/api/documents/upload") &&
+      res.status() < 500,
+    { timeout: 45_000 }
+  );
   await page.getByRole("button", { name: "Start upload" }).click();
-  await expect(page.getByText(/upload failed/i)).not.toBeVisible({ timeout: 45_000 });
+  const uploadRes = await uploadResponse;
+  expect(
+    uploadRes.ok(),
+    `upload failed: ${uploadRes.status()} ${await uploadRes.text()}`
+  ).toBeTruthy();
+  await expect(page.getByText(/upload failed/i)).not.toBeVisible({ timeout: 5_000 });
 
-  const doc = await page.evaluate(async (financialYear) => {
-    const r = await fetch("/api/documents", { credentials: "include" });
-    if (!r.ok) throw new Error(`documents list failed: ${r.status}`);
-    const docs = (await r.json()) as { id: string; financial_year?: string; stage: string }[];
-    return (
-      docs.find((d) => d.financial_year === financialYear) ??
-      docs[docs.length - 1]
-    );
-  }, fy);
-  if (!doc?.id) throw new Error("upload did not create a document (check MinIO/worker)");
+  const created = (await uploadRes.json()) as { id: string };
+  if (!created?.id) throw new Error("upload response missing document id (check MinIO/worker)");
 
-  await waitForPipelineOutcome(page, doc.id);
+  await waitForPipelineOutcome(page, created.id);
 
-  return doc.id;
+  return created.id;
 }
 
 /** Upload one PDF if needed; returns document id for review tests. */
