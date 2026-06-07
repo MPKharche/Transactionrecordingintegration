@@ -109,9 +109,13 @@ test.describe("Production Standard QA", () => {
       timeout: 15_000,
     });
     await page.getByLabel(/client \(msme\)/i).selectOption({ label: "SIDDHIVINYAK CONTRACTOR" });
-    await expect(page.getByRole("button", { name: /connect to zoho/i })).toBeVisible({
-      timeout: 10_000,
-    });
+    // Prod may already have Zoho connected for this client — connect CTA or dashboard both valid.
+    await expect(
+      page
+        .getByRole("button", { name: /connect to zoho/i })
+        .or(page.getByRole("button", { name: /sync now/i }))
+        .or(page.getByText("Connected", { exact: true }))
+    ).toBeVisible({ timeout: 15_000 });
   });
 
   test("QA-05: registers export controls visible", async ({ page }) => {

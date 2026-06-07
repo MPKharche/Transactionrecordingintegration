@@ -52,9 +52,14 @@ jobs:
       MINIO_ACCESS_KEY: minioadmin
       MINIO_SECRET_KEY: minioadmin
       MINIO_BUCKET: ca-uploads
+      AUTH_SECRET: ci-e2e-auth-secret-at-least-32-chars-long
+      EXTRACTOR_SHARED_SECRET: ci-e2e-extractor-shared-secret
+      EXTRACTOR_URL: http://127.0.0.1:8011
     steps:
       - uses: actions/checkout@v4
       - uses: pnpm/action-setup@v4
+        with:
+          packageManager: pnpm@9.15.0
       - uses: actions/setup-node@v4
         with:
           node-version: "22"
@@ -62,6 +67,9 @@ jobs:
       - run: pnpm install
       - run: pnpm db:push
       - run: pnpm db:seed
+      - run: pnpm --filter @ca-suite/web build
+        env:
+          VITE_ALLOW_DEV_LOGIN: "true"
       - run: npx playwright install chromium --with-deps
       - run: pnpm exec playwright test --reporter=github,list
         env:

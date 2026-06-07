@@ -55,6 +55,57 @@ export function injectHtml2CanvasSafeColors(doc: Document, dark = false): void {
   doc.head.appendChild(style);
 }
 
+const HTML2CANVAS_COLOR_PROPS = [
+  "color",
+  "background-color",
+  "border-color",
+  "border-top-color",
+  "border-right-color",
+  "border-bottom-color",
+  "border-left-color",
+  "outline-color",
+  "text-decoration-color",
+  "fill",
+  "stroke",
+] as const;
+
+/** Tailwind v4 may emit oklch/oklab in bundled CSS — html2canvas 1.x cannot parse those rules. */
+export function stripHtml2CanvasUnsafeStylesheets(doc: Document): void {
+  doc.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => node.remove());
+}
+
+/** Copy browser-resolved RGB colors from the live DOM onto the html2canvas clone. */
+export function mirrorComputedColorsForHtml2Canvas(
+  sourceRoot: HTMLElement,
+  cloneRoot: HTMLElement
+): void {
+  const sourceNodes = [sourceRoot, ...Array.from(sourceRoot.querySelectorAll<HTMLElement>("*"))];
+  const cloneNodes = [cloneRoot, ...Array.from(cloneRoot.querySelectorAll<HTMLElement>("*"))];
+  const limit = Math.min(sourceNodes.length, cloneNodes.length);
+  for (let i = 0; i < limit; i++) {
+    const source = sourceNodes[i]!;
+    const clone = cloneNodes[i]!;
+    const computed = window.getComputedStyle(source);
+    for (const prop of HTML2CANVAS_COLOR_PROPS) {
+      const value = computed.getPropertyValue(prop);
+      if (!value || value === "transparent" || value === "rgba(0, 0, 0, 0)") continue;
+      if (/okl(ch|ab)|color-mix/i.test(value)) continue;
+      clone.style.setProperty(prop, value);
+    }
+  }
+}
+
+export function prepareHtml2CanvasClone(
+  clonedDoc: Document,
+  clonedRoot: HTMLElement,
+  sourceRoot: HTMLElement,
+  dark = false
+): void {
+  stripHtml2CanvasUnsafeStylesheets(clonedDoc);
+  injectHtml2CanvasSafeColors(clonedDoc, dark);
+  mirrorComputedColorsForHtml2Canvas(sourceRoot, clonedRoot);
+}
+
 const BASE = import.meta.env.VITE_API_URL ?? "/api";
 
 /** Download the original uploaded file (PDF/image) for a document. */
@@ -87,8 +138,8 @@ export async function downloadElementAsPng(
     scale: Math.min(2, window.devicePixelRatio || 1),
     useCORS: true,
     logging: false,
-    onclone: (clonedDoc) => {
-      injectHtml2CanvasSafeColors(clonedDoc, dark);
+    onclone: (clonedDoc, clonedElement) => {
+      prepareHtml2CanvasClone(clonedDoc, clonedElement, element, dark);
     },
   });
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));

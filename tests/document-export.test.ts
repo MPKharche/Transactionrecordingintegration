@@ -4,6 +4,8 @@ import {
   safeFilename,
   injectHtml2CanvasSafeColors,
   HTML2CANVAS_LIGHT_THEME,
+  stripHtml2CanvasUnsafeStylesheets,
+  mirrorComputedColorsForHtml2Canvas,
 } from "../apps/web/src/lib/document-export";
 
 describe("document export helpers", () => {
@@ -20,5 +22,29 @@ describe("document export helpers", () => {
     expect(style?.textContent).toContain("#ffffff");
     expect(style?.textContent).not.toMatch(/oklch|oklab/i);
     expect(HTML2CANVAS_LIGHT_THEME).not.toMatch(/oklch|oklab/i);
+  });
+
+  it("strips bundled stylesheets and mirrors computed RGB onto clone nodes", () => {
+    const doc = document.implementation.createHTMLDocument("export");
+    const badStyle = doc.createElement("style");
+    badStyle.textContent = ".x { color: oklab(0.5 0.1 0.2); }";
+    doc.head.appendChild(badStyle);
+
+    const source = document.createElement("div");
+    source.className = "source";
+    source.textContent = "Invoice";
+    document.body.appendChild(source);
+    source.style.color = "rgb(17, 24, 39)";
+
+    const clone = source.cloneNode(true) as HTMLDivElement;
+    doc.body.appendChild(clone);
+
+    stripHtml2CanvasUnsafeStylesheets(doc);
+    expect(doc.querySelectorAll("style")).toHaveLength(0);
+
+    mirrorComputedColorsForHtml2Canvas(source, clone);
+    expect(clone.style.color).toBe("rgb(17, 24, 39)");
+
+    source.remove();
   });
 });

@@ -6,14 +6,19 @@ const webHost = process.env.E2E_WEB_HOST ?? "127.0.0.1";
 const baseURL = `http://${webHost}:${webPort}`;
 /** When true, Playwright starts fresh servers even if ports are busy (GitHub CI). */
 const reuseExistingServer = process.env.PLAYWRIGHT_FORCE_NEW_SERVER !== "true";
+const isCi = !!process.env.CI;
+const serverTimeout = isCi ? 300_000 : 120_000;
 
 const e2eEnv = {
   ...process.env,
-  NODE_ENV: "development",
+  NODE_ENV: isCi ? "production" : "development",
   DATABASE_URL:
     process.env.DATABASE_URL ??
     "postgresql://ca_user:ca_pass@localhost:5433/ca_saas",
   AUTH_DEV_BYPASS: "true",
+  AUTH_SECRET: process.env.AUTH_SECRET ?? "ci-e2e-auth-secret-at-least-32-chars-long",
+  EXTRACTOR_SHARED_SECRET:
+    process.env.EXTRACTOR_SHARED_SECRET ?? "ci-e2e-extractor-shared-secret",
   MINIO_ENDPOINT: process.env.MINIO_ENDPOINT ?? "localhost",
   MINIO_PORT: process.env.MINIO_PORT ?? "9000",
   MINIO_ACCESS_KEY: process.env.MINIO_ACCESS_KEY ?? "minioadmin",
@@ -25,8 +30,20 @@ const e2eEnv = {
   VITE_ALLOW_DEV_LOGIN: "true",
 };
 
+/** CI uses built web preview + tsx (no watch) for faster, reliable startup on GitHub runners. */
+const apiCmd = isCi
+  ? "pnpm --filter @ca-suite/api exec tsx src/index.ts"
+  : "pnpm --filter @ca-suite/api dev";
+const webCmd = isCi
+  ? `pnpm --filter @ca-suite/web exec vite preview -- --port ${webPort} --strictPort --host ${webHost}`
+  : `pnpm --filter @ca-suite/web dev -- --port ${webPort} --strictPort --host ${webHost}`;
+const workerCmd = isCi
+  ? "pnpm --filter @ca-suite/worker exec tsx src/index.ts"
+  : "pnpm --filter @ca-suite/worker dev";
+
 export default defineConfig({
   testDir: "tests/e2e",
+  testIgnore: ["**/prod-standard-qa.spec.ts"],
   fullyParallel: true,
   forbidOnly: !!process.env.CI,
   retries: process.env.CI ? 2 : 0,
@@ -46,25 +63,25 @@ export default defineConfig({
       timeout: 30_000,
     },
     {
-      command: "pnpm --filter @ca-suite/api dev",
+      command: apiCmd,
       url: "http://127.0.0.1:4000/api/health",
       reuseExistingServer,
-      timeout: 120_000,
+      timeout: serverTimeout,
       cwd: ".",
       env: e2eEnv,
     },
     {
-      command: `pnpm --filter @ca-suite/web dev -- --port ${webPort} --strictPort --host ${webHost}`,
+      command: webCmd,
       url: baseURL,
       reuseExistingServer,
-      timeout: 120_000,
+      timeout: serverTimeout,
       env: e2eEnv,
     },
     {
-      command: "pnpm --filter @ca-suite/worker dev",
+      command: workerCmd,
       stdout: /\[worker\] Started/,
       reuseExistingServer,
-      timeout: 120_000,
+      timeout: serverTimeout,
       cwd: ".",
       env: e2eEnv,
     },
