@@ -17,6 +17,8 @@ const DOC_TYPE_ALIASES: Record<string, DocType> = {
   purchase_bill: "purchase_invoice",
   sales_bill: "sales_invoice",
   unknown: "quotation",
+  debit_note: "debit_note_received",
+  credit_note: "credit_note_received",
 };
 
 /** Normalize API/DB doc_type values for UI and validation. */

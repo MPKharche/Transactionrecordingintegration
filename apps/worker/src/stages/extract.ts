@@ -265,7 +265,12 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
     }
 
     await db.update(uploads).set({ docType: "sales_invoice", currentStage: "extracted", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
-  } else if (result.docType === "purchase_bill" && result.purchaseBill) {
+  } else if (
+    (result.docType === "purchase_bill" ||
+      result.docType === "debit_note" ||
+      result.docType === "credit_note") &&
+    result.purchaseBill
+  ) {
     const bill = result.purchaseBill as any;
     const lines = bill.lines ?? [];
     const computedSub =
@@ -357,7 +362,13 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
       );
     }
 
-    await db.update(uploads).set({ docType: "purchase_bill", currentStage: "extracted", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
+    const uploadDocType =
+      result.docType === "debit_note"
+        ? "debit_note_received"
+        : result.docType === "credit_note"
+          ? "credit_note_received"
+          : "purchase_bill";
+    await db.update(uploads).set({ docType: uploadDocType, currentStage: "extracted", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
   } else {
     await db.update(uploads).set({ docType: "unknown", currentStage: "extracted", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
   }
