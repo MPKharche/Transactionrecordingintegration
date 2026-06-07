@@ -1,4 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
+import { createConnection } from "net";
 import type { HSNRecord } from "../apps/web/src/lib/api";
 import { lookupHsnRate } from "@ca-suite/shared";
 
@@ -106,8 +107,25 @@ describe("HSN Master Client Scope", () => {
   });
 });
 
+function dbReachable(): Promise<boolean> {
+  return new Promise((resolve) => {
+    const port = Number(process.env.PG_PORT ?? "5433");
+    const s = createConnection({ host: "127.0.0.1", port, timeout: 2000 }, () => {
+      s.end();
+      resolve(true);
+    });
+    s.on("error", () => resolve(false));
+    s.on("timeout", () => {
+      s.destroy();
+      resolve(false);
+    });
+  });
+}
+
+const integrationEnabled = await dbReachable();
+
 // Integration tests would go below, requiring database
-describe.skipIf(!process.env.DATABASE_URL)("HSN Client Scope API (integration)", () => {
+describe.skipIf(!integrationEnabled)("HSN Client Scope API (integration)", () => {
   let app: Awaited<ReturnType<typeof import("../apps/api/src/index.js").buildApp>>;
   let tenantId: string;
   let userId: string;
@@ -140,13 +158,15 @@ describe.skipIf(!process.env.DATABASE_URL)("HSN Client Scope API (integration)",
       headers: authHeaders(),
       payload: {
         name: "HSN Test Client",
-        gstin: "27HSNTEST0000A1Z5",
-        pan: "HSNTEST0000",
+        gstin: "27AAAAA0000A1Z5",
+        pan: "AAAAA0000A",
         state: "Maharashtra",
         state_code: "27",
       },
     });
+    expect(res.statusCode, `create client: ${res.body}`).toBe(200);
     clientId = res.json().id ?? res.json().existingId;
+    expect(clientId).toBeTruthy();
   });
 
   it("should get empty HSN list for new client", async () => {
@@ -278,8 +298,8 @@ describe.skipIf(!process.env.DATABASE_URL)("HSN Client Scope API (integration)",
       headers: authHeaders(),
       payload: {
         name: "HSN Test Client 2",
-        gstin: "27HSNTEST2000A1Z5",
-        pan: "HSNTEST2000",
+        gstin: "29BBBBB1111B1Z6",
+        pan: "BBBBB1111B",
         state: "Maharashtra",
         state_code: "27",
       },
