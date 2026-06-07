@@ -238,7 +238,20 @@ export async function ensureDocumentForReview(page: Page): Promise<string> {
   return id;
 }
 
-/** Wait until documents list includes at least one row for client + FY. */
+/** Lock a reviewed document so it appears on Records (locked-only scope). */
+export async function lockDocumentForRecords(page: Page, docId: string): Promise<void> {
+  const res = await page.evaluate(async (id) => {
+    const r = await fetch(`/api/documents/${id}/lock`, {
+      method: "POST",
+      credentials: "include",
+      headers: { "Content-Type": "application/json" },
+    });
+    return { ok: r.ok, status: r.status, text: await r.text() };
+  }, docId);
+  expect(res.ok, `lock document: ${res.status} ${res.text}`).toBeTruthy();
+}
+
+/** Wait until documents list includes at least one locked row for client + FY. */
 export async function waitForRecordsData(
   page: Page,
   opts: { clientId: string; financialYear: string; minCount?: number }
@@ -247,10 +260,15 @@ export async function waitForRecordsData(
     async ({ clientId, financialYear, minCount }) => {
       const r = await fetch("/api/documents", { credentials: "include" });
       if (!r.ok) return false;
-      const docs = (await r.json()) as { client_id: string; financial_year?: string }[];
+      const docs = (await r.json()) as {
+        client_id: string;
+        financial_year?: string;
+        stage: string;
+      }[];
       const n = docs.filter(
         (d) =>
           d.client_id === clientId &&
+          d.stage === "locked" &&
           (!d.financial_year || d.financial_year === financialYear)
       ).length;
       return n >= minCount;

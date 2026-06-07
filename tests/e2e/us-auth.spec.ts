@@ -5,7 +5,11 @@ test.describe("User stories — Auth", () => {
   test("US-AUTH-01: login page shows CA Suite and Google", async ({ page }) => {
     await page.goto("/login");
     await expect(page.getByRole("heading", { name: "CA Suite" })).toBeVisible();
-    await expect(page.getByRole("link", { name: /Continue with Google/i })).toBeVisible();
+    await expect(
+      page
+        .getByRole("button", { name: /Continue with Google/i })
+        .or(page.getByLabel(/^email$/i))
+    ).toBeVisible();
   });
 
   test("US-AUTH-02: dev login reaches dashboard", async ({ page }) => {

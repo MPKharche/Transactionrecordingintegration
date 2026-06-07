@@ -5,9 +5,9 @@ test.describe("User stories — Audit", () => {
   test("US-AUDIT-01: audit log page loads", async ({ page }) => {
     await requireDevLogin(page);
     await page.goto("/audit");
-    await expect(page.getByRole("heading", { name: "Audit log" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Activity log" })).toBeVisible();
     await expect(
-      page.getByText(/No audit entries|document\.|client\.|When/i).first()
+      page.getByText(/No audit entries yet|document\.|client\.|When/i).first()
     ).toBeVisible({ timeout: 15_000 });
   });
 });

@@ -20,9 +20,9 @@ test.describe("User stories — Clients", () => {
     const name = `Regression Client ${Date.now()}`;
     const gstin = uniqueGstin();
     const form = page.locator("form").filter({ hasText: "New client" });
-    await form.getByPlaceholder("Legal name").fill(name);
-    await form.getByPlaceholder("GSTIN").fill(gstin);
-    await form.locator("select").selectOption({ value: "27" });
+    await form.getByPlaceholder("15-char GSTIN").fill(gstin);
+    await form.getByPlaceholder(/From GST portal or enter manually/i).fill(name);
+    await form.locator("select").filter({ has: page.locator('option[value="27"]') }).selectOption({ value: "27" });
     await form.getByRole("button", { name: /Save client/i }).click();
     await expect(page.getByText(/Name and valid GSTIN/i)).not.toBeVisible();
     await expect(page.getByText(name)).toBeVisible({ timeout: 15_000 });
