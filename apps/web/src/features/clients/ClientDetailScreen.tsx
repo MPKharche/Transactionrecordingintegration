@@ -247,6 +247,7 @@ export function ClientDetailScreen({
 
       {/* Table */}
       {activeTab !== "hsn" && (
+        <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-muted/50">
