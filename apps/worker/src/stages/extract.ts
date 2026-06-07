@@ -362,13 +362,10 @@ export async function extractStage(uploadId: string, tenantId: string, job: Job)
       );
     }
 
-    const uploadDocType =
-      result.docType === "debit_note"
-        ? "debit_note_received"
-        : result.docType === "credit_note"
-          ? "credit_note_received"
-          : "purchase_bill";
-    await db.update(uploads).set({ docType: uploadDocType, currentStage: "extracted", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
+    // uploads.docType only supports ["sales_invoice", "purchase_bill", "unknown"].
+    // debit/credit notes use the purchaseBill data shape so map to purchase_bill here;
+    // the more specific type (debit_note_received / credit_note_received) lives on gst_documents.
+    await db.update(uploads).set({ docType: "purchase_bill", currentStage: "extracted", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
   } else {
     await db.update(uploads).set({ docType: "unknown", currentStage: "extracted", updatedAt: new Date() }).where(eq(uploads.id, uploadId));
   }
