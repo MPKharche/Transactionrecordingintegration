@@ -40,6 +40,12 @@ export default defineConfig({
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
   webServer: [
     {
+      command: "node scripts/e2e-extractor-stub.mjs",
+      url: "http://127.0.0.1:8011/health",
+      reuseExistingServer,
+      timeout: 30_000,
+    },
+    {
       command: "pnpm --filter @ca-suite/api dev",
       url: "http://127.0.0.1:4000/api/health",
       reuseExistingServer,
