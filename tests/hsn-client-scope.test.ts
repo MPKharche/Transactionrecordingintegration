@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeAll } from "vitest";
-import type { HSNRecord } from "../../apps/web/src/lib/api";
+import type { HSNRecord } from "../apps/web/src/lib/api";
 import { lookupHsnRate } from "@ca-suite/shared";
 
 describe("HSN Master Client Scope", () => {
@@ -108,14 +108,14 @@ describe("HSN Master Client Scope", () => {
 
 // Integration tests would go below, requiring database
 describe.skipIf(!process.env.DATABASE_URL)("HSN Client Scope API (integration)", () => {
-  let app: Awaited<ReturnType<typeof import("../../apps/api/src/index.js").buildApp>>;
+  let app: Awaited<ReturnType<typeof import("../apps/api/src/index.js").buildApp>>;
   let tenantId: string;
   let userId: string;
   let clientId: string;
 
   beforeAll(async () => {
     process.env.AUTH_DEV_BYPASS = "true";
-    const { buildApp } = await import("../../apps/api/src/index.js");
+    const { buildApp } = await import("../apps/api/src/index.js");
     app = await buildApp();
     await app.ready();
 
