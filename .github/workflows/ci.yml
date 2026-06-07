@@ -45,6 +45,7 @@ jobs:
       REDIS_HOST: localhost
       REDIS_PORT: "6379"
       AUTH_DEV_BYPASS: "true"
+      SEED_DEMO: "true"
       MINIO_ENDPOINT: localhost
       MINIO_PORT: "9000"
       MINIO_ACCESS_KEY: minioadmin
