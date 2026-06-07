@@ -62,7 +62,15 @@ jobs:
       - run: pnpm db:push
       - run: pnpm db:seed
       - run: npx playwright install chromium --with-deps
-      - run: pnpm test:regression:ci
+      - run: pnpm test:audit
+      - run: pnpm test
+        env:
+          CI: "true"
+      - run: pnpm --filter @ca-suite/web build
+      - run: node scripts/verify-story-coverage.mjs
+      - run: pnpm test:e2e
         env:
           CI: "true"
           VITE_ALLOW_DEV_LOGIN: "true"
+          E2E_WEB_PORT: "5180"
+          PLAYWRIGHT_FORCE_NEW_SERVER: "true"
