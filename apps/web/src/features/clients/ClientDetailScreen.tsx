@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from "react";
+import { useState, useRef, useMemo, useEffect, useCallback } from "react";
 import type { Client, GSTDocument, DocStage, DocType, Party, LineItem, FieldWarning } from "@ca-suite/shared";
 import { PageHeader, KpiCard } from "../../components/layout/PageHeader";
 import { DocTypeBadge, StageBadge } from "../../components/badges/DocTypeBadge";
@@ -9,6 +9,10 @@ import { DOC_TYPE_META, STAGE_META } from "../../lib/constants";
 import { INDIAN_STATES, GST_SLABS } from "../../lib/validators-local";
 import { isValidGSTIN, isValidPAN } from "../../lib/validators-local";
 import type { Screen } from "../../components/layout/Sidebar";
+import { HSNMasterTable } from "../../components/clients/HSNMasterTable";
+import type { HSNRecord } from "../../components/clients/HSNMasterTable";
+import { api } from "../../lib/api";
+import { toast } from "sonner";
 
 import {
   ArrowLeft, Search, Filter, Download, Eye, ChevronRight, Building2, Phone, Mail, ExternalLink,
@@ -48,13 +52,32 @@ export function ClientDetailScreen({
 }) {
   const client = clients.find(c => c.id === clientId)!;
   const clientById = (id: string) => clientByIdFrom(clients, id);
-  const [activeTab, setActiveTab] = useState<DocType | "all">("all");
+  const [activeTab, setActiveTab] = useState<DocType | "all" | "hsn">("all");
   const [stageF, setStageF] = useState<"all" | "locked" | "pending">("all");
   const [search, setSearch] = useState("");
+  const [hsnList, setHsnList] = useState<HSNRecord[]>([]);
+  const [hsnLoading, setHsnLoading] = useState(false);
+
+  const loadHsn = useCallback(async () => {
+    setHsnLoading(true);
+    try {
+      const res = await api.clients.hsn.list(clientId);
+      setHsnList(res.hsn as HSNRecord[]);
+    } catch {
+      toast.error("Failed to load HSN master");
+    } finally {
+      setHsnLoading(false);
+    }
+  }, [clientId]);
+
+  useEffect(() => {
+    if (activeTab === "hsn") loadHsn();
+  }, [activeTab, loadHsn]);
 
   const allClientDocs = docs.filter(d => d.client_id === clientId);
 
   const filtered = useMemo(() => {
+    if (activeTab === "hsn") return [];
     const tabTypes = CLIENT_DETAIL_TABS.find(t => t.id === activeTab)?.types ?? [];
     return allClientDocs.filter(d => {
       if (activeTab !== "all" && !tabTypes.includes(d.doc_type)) return false;
@@ -169,7 +192,16 @@ export function ClientDetailScreen({
               </button>
             );
           })}
+          <button
+            onClick={() => setActiveTab("hsn")}
+            className={`px-4 py-2.5 text-sm font-medium rounded-t-lg border-b-2 transition-colors whitespace-nowrap ${
+              activeTab === "hsn" ? "border-primary text-primary" : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            HSN Master
+          </button>
         </div>
+        {activeTab !== "hsn" && (
         <div className="flex items-center gap-2 ml-auto">
           <Filter size={14} className="text-muted-foreground" />
           <select value={stageF} onChange={e => setStageF(e.target.value as typeof stageF)}
@@ -184,10 +216,37 @@ export function ClientDetailScreen({
               className="bg-card border border-border rounded-lg pl-9 pr-3 py-2 text-sm text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary w-56" />
           </div>
         </div>
+        )}
       </div>
 
+      {/* HSN Master tab */}
+      {activeTab === "hsn" && (
+        <HSNMasterTable
+          hsns={hsnList}
+          isLoading={hsnLoading}
+          isReadonly={!client.active}
+          onAdd={async (code, description, rate) => {
+            await api.clients.hsn.upsert(clientId, { code, description, default_gst_rate: rate ?? undefined });
+            await loadHsn();
+          }}
+          onDelete={async (code) => {
+            await api.clients.hsn.remove(clientId, code);
+            await loadHsn();
+          }}
+          onRateChange={async (code, rate) => {
+            const existing = hsnList.find(h => h.code === code);
+            await api.clients.hsn.upsert(clientId, {
+              code,
+              description: existing?.description,
+              default_gst_rate: rate ?? undefined,
+            });
+            await loadHsn();
+          }}
+        />
+      )}
+
       {/* Table */}
-      <div className="bg-card border border-border rounded-xl overflow-hidden shadow-sm">
+      {activeTab !== "hsn" && (
         <table className="w-full">
           <thead>
             <tr className="border-b border-border bg-muted/50">
@@ -263,6 +322,7 @@ export function ClientDetailScreen({
           )}
         </table>
       </div>
+      )}
     </div>
   );
 }

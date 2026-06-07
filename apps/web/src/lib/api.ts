@@ -162,6 +162,21 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ user_ids: userIds }),
       }),
+    hsn: {
+      list: (clientId: string) =>
+        request<{ hsn: { code: string; description: string; default_gst_rate?: number; use_count: number; is_client_specific?: boolean }[] }>(
+          `/clients/${clientId}/masters/hsn`
+        ),
+      upsert: (clientId: string, body: { code: string; description?: string; default_gst_rate?: number }) =>
+        request<{ code: string; description: string; default_gst_rate?: number; use_count: number }>(
+          `/clients/${clientId}/masters/hsn`,
+          { method: "POST", body: JSON.stringify(body) }
+        ),
+      remove: (clientId: string, code: string) =>
+        request<{ ok: boolean }>(`/clients/${clientId}/masters/hsn/${encodeURIComponent(code)}`, {
+          method: "DELETE",
+        }),
+    },
   },
   parties: {
     list: () => request<Record<string, Party>>("/parties"),

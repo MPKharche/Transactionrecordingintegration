@@ -9,7 +9,8 @@ import {
   type ReactNode,
 } from "react";
 import { toast } from "sonner";
-import type { Client, GSTDocument, MastersBundle, Party } from "@ca-suite/shared";
+import type { Client, GSTDocument, MastersBundle, Party, LineItemIssue } from "@ca-suite/shared";
+import { computeLineItemIssues } from "@ca-suite/shared";
 import { api, getAuth, trySession, type AuthHeaders } from "../lib/api";
 
 type Ctx = {
@@ -17,6 +18,8 @@ type Ctx = {
   clients: Client[];
   partyByGstin: Record<string, Party>;
   masters: MastersBundle;
+  /** Per-document memoized line item issues keyed by doc id. */
+  lineItemFlagsMap: Map<string, LineItemIssue[]>;
   session: AuthHeaders | null;
   loading: boolean;
   error: string | null;
@@ -242,12 +245,21 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const lineItemFlagsMap = useMemo(() => {
+    const map = new Map<string, LineItemIssue[]>();
+    for (const doc of docs) {
+      map.set(doc.id, computeLineItemIssues(doc.lines ?? [], masters.hsn ?? []));
+    }
+    return map;
+  }, [docs, masters.hsn]);
+
   const value = useMemo(
     () => ({
       docs,
       clients,
       partyByGstin,
       masters,
+      lineItemFlagsMap,
       session,
       loading,
       error,
@@ -271,6 +283,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       clients,
       partyByGstin,
       masters,
+      lineItemFlagsMap,
       session,
       loading,
       error,

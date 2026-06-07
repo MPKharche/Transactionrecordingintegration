@@ -3,6 +3,7 @@ import type { Client, GSTDocument } from "@ca-suite/shared";
 import { computeGstrReadiness, isValidEInvoiceIRN } from "@ca-suite/shared";
 import { DocTypeBadge, StageBadge } from "../badges/DocTypeBadge";
 import { EInvoiceBadge } from "../badges/EInvoiceBadge";
+import { RCITCBadge } from "../badges/RCITCBadge";
 import { LlmCostBadge, BudgetQueuedBadge } from "./LlmCostBadge";
 import { clientByIdFrom, INR } from "../../lib/format";
 import { GstrKpiCell, GstrSummaryBar } from "./GstrKpiCell";
@@ -87,7 +88,7 @@ export function DocumentWorklistTable({
               <th className={HEAD}>Filename</th>
               <th className={HEAD}>Client</th>
               <th className={HEAD}>Doc #</th>
-              <th className={HEAD}>E-Invoice</th>
+              <th className={HEAD}>E-Invoice / RC</th>
               <th className={HEAD}>Date</th>
               <th className={`${HEAD} text-right`}>Amount</th>
               <th className={HEAD}>Type</th>
@@ -157,7 +158,14 @@ export function DocumentWorklistTable({
                     </td>
                     <td className={`${CELL} font-mono whitespace-nowrap`}>{d.doc_number || "—"}</td>
                     <td className={CELL}>
-                      <EInvoiceBadge isValid={d.irn_hash ? isValidEInvoiceIRN(d.irn_hash) : null} />
+                      <div className="flex flex-wrap items-center gap-1">
+                        <EInvoiceBadge isValid={d.irn_hash ? isValidEInvoiceIRN(d.irn_hash) : null} />
+                        <RCITCBadge
+                          reverseChargeApplicable={d.reverseChargeApplicable}
+                          itcEligible={d.itcEligible}
+                          itcIneligibleReason={d.itcIneligibleReason}
+                        />
+                      </div>
                     </td>
                     <td className={`${CELL} font-mono whitespace-nowrap`}>{d.doc_date || "—"}</td>
                     <td className={`${CELL} font-mono text-right whitespace-nowrap tabular-nums`}>

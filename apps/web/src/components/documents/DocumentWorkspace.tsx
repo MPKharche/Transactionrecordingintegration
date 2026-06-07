@@ -4,6 +4,7 @@ import { isValidEInvoiceIRN } from "@ca-suite/shared";
 import { DocTypeBadge, StageBadge } from "../badges/DocTypeBadge";
 import { ZohoSyncBadge } from "../../features/zoho/ZohoSyncBadge";
 import { EInvoiceBadge } from "../badges/EInvoiceBadge";
+import { RCITCBadge } from "../badges/RCITCBadge";
 import { LlmCostBadge } from "../documents/LlmCostBadge";
 import { DocumentLineItemsEditor } from "./DocumentLineItemsEditor";
 import { DOC_TYPE_META } from "../../lib/constants";
@@ -239,6 +240,11 @@ export function DocumentWorkspace({
                 syncedAt={doc.zoho_synced_at}
               />
               {isAdmin ? <LlmCostBadge costUsd={doc.llm_cost_usd} /> : null}
+              <RCITCBadge
+                reverseChargeApplicable={doc.reverseChargeApplicable}
+                itcEligible={doc.itcEligible}
+                itcIneligibleReason={doc.itcIneligibleReason}
+              />
               {!form.locked && form.gstrReadiness.overall_score >= 0 && (
                 <span className="px-2 py-0.5 rounded-full text-[10px] font-bold tabular-nums border border-border">
                   {form.gstrReadiness.overall_score}% GST ready

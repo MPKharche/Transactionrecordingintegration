@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { AlertCircle, RotateCcw } from "lucide-react";
-import { RCITCModal } from "../review/RCITCModal";
+import { RCITCModal } from "../../features/review/RCITCModal";
 
 interface RCITCBadgeProps {
   reverseChargeApplicable?: boolean;
