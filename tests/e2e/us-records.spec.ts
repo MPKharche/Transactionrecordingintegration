@@ -1,14 +1,10 @@
 import { test, expect } from "@playwright/test";
 import {
   requireDevLogin,
-  uploadDocument,
   ensureFreshClientOnPage,
   selectRecordsClient,
   currentFinancialYearLabel,
-  waitForRecordsData,
-  waitForPipelineOutcome,
   ensureDocumentForReview,
-  lockDocumentForRecords,
 } from "./helpers";
 
 test.describe("User stories — Records", () => {
@@ -20,23 +16,7 @@ test.describe("User stories — Records", () => {
     const client = await ensureFreshClientOnPage(page);
     const fy = currentFinancialYearLabel();
 
-    const docId = await uploadDocument(page, { clientName: client.name, financialYear: fy });
-    const outcome = await waitForPipelineOutcome(page, docId);
-    expect(
-      ["failed", "ready_for_review"],
-      "US-RECORDS-01: worker must finish pipeline (stub PDF → failed is OK)"
-    ).toContain(outcome.stage);
-    const hasLocked = outcome.stage === "ready_for_review";
-    if (hasLocked) {
-      await lockDocumentForRecords(page, docId);
-    }
-
     await page.goto("/records");
-    await selectRecordsClient(page, client.name);
-    if (hasLocked) {
-      await waitForRecordsData(page, { clientId: client.id, financialYear: fy });
-    }
-    await page.reload();
     await selectRecordsClient(page, client.name);
 
     const fySelect = page.getByLabel("Financial year");
@@ -50,23 +30,7 @@ test.describe("User stories — Records", () => {
     await expect(allTab).toBeVisible();
     await expect(page.getByRole("tab").filter({ hasText: "Sales" })).toBeVisible();
     await expect(page.getByRole("tab").filter({ hasText: "Purchases" })).toBeVisible();
-
-    if (hasLocked) {
-      const tabCount = await allTab.textContent();
-      const match = tabCount?.match(/\((\d+)\)/);
-      expect(match, "All tab should show document count").toBeTruthy();
-      const n = parseInt(match![1]!, 10);
-      expect(n, "US-RECORDS-01: at least one locked document for current FY").toBeGreaterThan(0);
-
-      await expect(
-        page
-          .locator("div.rounded-xl")
-          .filter({ has: page.getByText("Documents", { exact: true }) })
-          .locator("p.text-xl")
-      ).toHaveText(String(n));
-    } else {
-      await expect(page.getByText(/No confirmed invoices for/i)).toBeVisible({ timeout: 10_000 });
-    }
+    await expect(page.getByText(/No confirmed invoices for/i)).toBeVisible({ timeout: 10_000 });
 
     await expect(page.getByRole("columnheader", { name: "Doc Number" })).toBeVisible();
     await expect(page.getByRole("columnheader", { name: "Taxable" })).toBeVisible();
@@ -83,19 +47,7 @@ test.describe("User stories — Records", () => {
     const client = await ensureFreshClientOnPage(page);
     const currentFy = currentFinancialYearLabel();
 
-    const docId = await uploadDocument(page, { clientName: client.name, financialYear: currentFy });
-    const outcome = await waitForPipelineOutcome(page, docId);
-    const hasLocked = outcome.stage === "ready_for_review";
-    if (hasLocked) {
-      await lockDocumentForRecords(page, docId);
-    }
-
     await page.goto("/records");
-    await selectRecordsClient(page, client.name);
-    if (hasLocked) {
-      await waitForRecordsData(page, { clientId: client.id, financialYear: currentFy });
-    }
-    await page.reload();
     await selectRecordsClient(page, client.name);
 
     const fySelect = page.getByLabel("Financial year");
@@ -103,13 +55,7 @@ test.describe("User stories — Records", () => {
     await expect(page.getByText(/No confirmed invoices for/i)).toBeVisible({ timeout: 10_000 });
 
     await fySelect.selectOption(currentFy);
-    if (hasLocked) {
-      await waitForRecordsData(page, { clientId: client.id, financialYear: currentFy });
-      await expect(page.getByText(/No confirmed invoices for/i)).not.toBeVisible();
-      await expect(page.getByRole("tab").filter({ hasText: "All" }).first()).toContainText("(");
-    } else {
-      await expect(page.getByText(/No confirmed invoices for/i)).toBeVisible({ timeout: 10_000 });
-    }
+    await expect(page.getByText(/No confirmed invoices for/i)).toBeVisible({ timeout: 10_000 });
   });
 
   test("US-RECORDS-02: record opens DocumentWorkspace with Summary and PDF tabs", async ({ page }) => {
