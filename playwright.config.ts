@@ -41,6 +41,8 @@ const workerCmd = isCi
   ? "pnpm --filter @ca-suite/worker exec tsx src/index.ts"
   : "pnpm --filter @ca-suite/worker dev";
 
+const managedStack = process.env.E2E_MANAGED_STACK === "true";
+
 export default defineConfig({
   testDir: "tests/e2e",
   testIgnore: ["**/prod-standard-qa.spec.ts"],
@@ -55,7 +57,7 @@ export default defineConfig({
     trace: "on-first-retry",
   },
   projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
-  webServer: [
+  webServer: managedStack ? undefined : [
     {
       command: "node scripts/e2e-extractor-stub.mjs",
       url: "http://127.0.0.1:8011/health",

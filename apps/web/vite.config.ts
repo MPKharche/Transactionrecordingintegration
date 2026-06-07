@@ -29,6 +29,17 @@ export default defineConfig({
       },
     },
   },
+  preview: {
+    host: '127.0.0.1',
+    port: 5180,
+    strictPort: true,
+    proxy: {
+      "/api": {
+        target: "http://localhost:4000",
+        changeOrigin: true,
+      },
+    },
+  },
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if
