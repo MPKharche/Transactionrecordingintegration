@@ -44,5 +44,11 @@ export default defineConfig({
     testTimeout: 60_000,
     hookTimeout: 60_000,
     pool: "forks",
+    // Workspace packages export .ts paths; inline so Vite (not Node) resolves subpath exports in CI.
+    server: {
+      deps: {
+        inline: [/@ca-suite\//],
+      },
+    },
   },
 });
