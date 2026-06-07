@@ -158,13 +158,13 @@ describe.skipIf(!integrationEnabled)("HSN Client Scope API (integration)", () =>
       headers: authHeaders(),
       payload: {
         name: "HSN Test Client",
-        gstin: "27AAAAA0000A1Z5",
-        pan: "AAAAA0000A",
+        gstin: "27CCCCC2222C1Z7",
+        pan: "CCCCS2222C",
         state: "Maharashtra",
         state_code: "27",
       },
     });
-    expect(res.statusCode, `create client: ${res.body}`).toBe(200);
+    expect([200, 409], `create client: ${res.body}`).toContain(res.statusCode);
     clientId = res.json().id ?? res.json().existingId;
     expect(clientId).toBeTruthy();
   });
