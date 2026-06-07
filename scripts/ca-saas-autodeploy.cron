@@ -1,0 +1,3 @@
+SHELL=/bin/bash
+PATH=/usr/local/sbin:/usr/local/bin:/sbin:/bin:/usr/sbin:/usr/bin
+*/10 * * * * root cd /root/apps/ca-saas && /usr/bin/flock -n /var/lock/ca-saas-autodeploy.lock bash -c 'git fetch origin main -q && cur=$(git rev-parse HEAD) && new=$(git rev-parse origin/main) && if [ "$cur" != "$new" ]; then VPS_REPO_DIR=/root/apps/ca-saas bash scripts/vps-remote-update.sh >> /var/log/ca-saas-autodeploy.log 2>&1; fi'
