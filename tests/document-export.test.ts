@@ -6,6 +6,7 @@ import {
   HTML2CANVAS_LIGHT_THEME,
   stripHtml2CanvasUnsafeStylesheets,
   mirrorComputedColorsForHtml2Canvas,
+  resolveColorForHtml2Canvas,
 } from "../apps/web/src/lib/document-export";
 
 describe("document export helpers", () => {
@@ -46,5 +47,10 @@ describe("document export helpers", () => {
     expect(clone.style.color).toBe("rgb(17, 24, 39)");
 
     source.remove();
+  });
+
+  it("passes through rgb colors unchanged", () => {
+    expect(resolveColorForHtml2Canvas("rgb(17, 24, 39)")).toBe("rgb(17, 24, 39)");
+    expect(() => resolveColorForHtml2Canvas("oklab(0.5 0.1 0.2)")).not.toThrow();
   });
 });

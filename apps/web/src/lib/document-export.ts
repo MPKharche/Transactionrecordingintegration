@@ -69,9 +69,72 @@ const HTML2CANVAS_COLOR_PROPS = [
   "stroke",
 ] as const;
 
+const MODERN_COLOR_RE = /okl(ch|ab)|color-mix|lab\(|lch\(/i;
+
+/** Chrome may serialize getComputedStyle() colors as oklab — html2canvas cannot parse them. */
+export function resolveColorForHtml2Canvas(value: string, prop = "color"): string {
+  if (!value || value === "transparent" || value === "rgba(0, 0, 0, 0)") return value;
+  if (!MODERN_COLOR_RE.test(value)) return value;
+
+  const canvas = document.createElement("canvas");
+  const ctx = canvas.getContext("2d");
+  if (ctx) {
+    try {
+      ctx.fillStyle = "#000000";
+      ctx.fillStyle = value;
+      if (!MODERN_COLOR_RE.test(ctx.fillStyle)) return ctx.fillStyle;
+    } catch {
+      /* probe fallback below */
+    }
+  }
+
+  const probe = document.createElement("span");
+  probe.style.display = "none";
+  if (prop.includes("background")) probe.style.backgroundColor = value;
+  else probe.style.color = value;
+  document.body.appendChild(probe);
+  const resolved = getComputedStyle(probe).getPropertyValue(
+    prop.includes("background") ? "background-color" : "color"
+  );
+  probe.remove();
+  if (resolved && !MODERN_COLOR_RE.test(resolved)) return resolved;
+
+  return value;
+}
+
 /** Tailwind v4 may emit oklch/oklab in bundled CSS — html2canvas 1.x cannot parse those rules. */
 export function stripHtml2CanvasUnsafeStylesheets(doc: Document): void {
   doc.querySelectorAll('style, link[rel="stylesheet"]').forEach((node) => node.remove());
+}
+
+function setResolvedColorProp(el: HTMLElement, prop: string, value: string): void {
+  if (!value || value === "transparent" || value === "rgba(0, 0, 0, 0)") return;
+  el.style.setProperty(prop, resolveColorForHtml2Canvas(value, prop));
+}
+
+/** html2canvas copies getComputedStyle() inline before onclone — pre-resolve on the live DOM. */
+export function applyHtml2CanvasColorOverrides(root: HTMLElement): () => void {
+  const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
+  const touched = new Map<HTMLElement, string[]>();
+  for (const node of nodes) {
+    const computed = window.getComputedStyle(node);
+    const props: string[] = [];
+    for (const prop of HTML2CANVAS_COLOR_PROPS) {
+      const raw = computed.getPropertyValue(prop);
+      if (!raw || !MODERN_COLOR_RE.test(raw)) continue;
+      const safe = resolveColorForHtml2Canvas(raw, prop);
+      if (safe && safe !== raw) {
+        node.style.setProperty(prop, safe);
+        props.push(prop);
+      }
+    }
+    if (props.length) touched.set(node, props);
+  }
+  return () => {
+    for (const [node, props] of touched) {
+      for (const prop of props) node.style.removeProperty(prop);
+    }
+  };
 }
 
 /** Copy browser-resolved RGB colors from the live DOM onto the html2canvas clone. */
@@ -87,10 +150,19 @@ export function mirrorComputedColorsForHtml2Canvas(
     const clone = cloneNodes[i]!;
     const computed = window.getComputedStyle(source);
     for (const prop of HTML2CANVAS_COLOR_PROPS) {
-      const value = computed.getPropertyValue(prop);
-      if (!value || value === "transparent" || value === "rgba(0, 0, 0, 0)") continue;
-      if (/okl(ch|ab)|color-mix/i.test(value)) continue;
-      clone.style.setProperty(prop, value);
+      setResolvedColorProp(clone, prop, computed.getPropertyValue(prop));
+    }
+  }
+}
+
+/** Sanitize inline styles html2canvas copied before onclone runs. */
+export function sanitizeHtml2CanvasInlineColors(root: HTMLElement): void {
+  const nodes = [root, ...Array.from(root.querySelectorAll<HTMLElement>("*"))];
+  for (const node of nodes) {
+    for (const prop of HTML2CANVAS_COLOR_PROPS) {
+      const inline = node.style.getPropertyValue(prop);
+      if (!inline || !MODERN_COLOR_RE.test(inline)) continue;
+      node.style.setProperty(prop, resolveColorForHtml2Canvas(inline));
     }
   }
 }
@@ -103,6 +175,7 @@ export function prepareHtml2CanvasClone(
 ): void {
   stripHtml2CanvasUnsafeStylesheets(clonedDoc);
   injectHtml2CanvasSafeColors(clonedDoc, dark);
+  sanitizeHtml2CanvasInlineColors(clonedRoot);
   mirrorComputedColorsForHtml2Canvas(sourceRoot, clonedRoot);
 }
 
@@ -133,15 +206,21 @@ export async function downloadElementAsPng(
 ): Promise<void> {
   const { default: html2canvas } = await import("html2canvas");
   const dark = options?.dark ?? document.documentElement.classList.contains("dark");
-  const canvas = await html2canvas(element, {
-    backgroundColor: dark ? "#171717" : "#ffffff",
-    scale: Math.min(2, window.devicePixelRatio || 1),
-    useCORS: true,
-    logging: false,
-    onclone: (clonedDoc, clonedElement) => {
-      prepareHtml2CanvasClone(clonedDoc, clonedElement, element, dark);
-    },
-  });
+  const cleanupOverrides = applyHtml2CanvasColorOverrides(element);
+  let canvas;
+  try {
+    canvas = await html2canvas(element, {
+      backgroundColor: dark ? "#171717" : "#ffffff",
+      scale: Math.min(2, window.devicePixelRatio || 1),
+      useCORS: true,
+      logging: false,
+      onclone: (clonedDoc, clonedElement) => {
+        prepareHtml2CanvasClone(clonedDoc, clonedElement, element, dark);
+      },
+    });
+  } finally {
+    cleanupOverrides();
+  }
   const blob = await new Promise<Blob | null>((resolve) => canvas.toBlob(resolve, "image/png"));
   if (!blob) throw new Error("PNG export failed");
   const url = URL.createObjectURL(blob);
