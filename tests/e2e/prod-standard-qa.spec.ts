@@ -109,12 +109,11 @@ test.describe("Production Standard QA", () => {
       timeout: 15_000,
     });
     await page.getByLabel(/client \(msme\)/i).selectOption({ label: "SIDDHIVINYAK CONTRACTOR" });
-    // Prod may already have Zoho connected for this client — connect CTA or dashboard both valid.
+    // Prod may already have Zoho connected — connect CTA or Sync Now both valid.
     await expect(
       page
         .getByRole("button", { name: /connect to zoho/i })
         .or(page.getByRole("button", { name: /sync now/i }))
-        .or(page.getByText("Connected", { exact: true }))
     ).toBeVisible({ timeout: 15_000 });
   });
 
