@@ -11,6 +11,7 @@ import {
   ChevronRight,
   Gauge,
   Settings,
+  HelpCircle,
 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import type { ThemeMode } from "../../context/PreferencesContext";
@@ -54,6 +55,7 @@ export function Sidebar({
   userName?: string;
   userRole?: string;
   onOpenSettings?: () => void;
+  onOpenGuide?: () => void;
 }) {
   const navigate = useNavigate();
   const isReview = screen === "review";
@@ -217,6 +219,18 @@ export function Sidebar({
             </button>
           )}
         </div>
+        <button
+          type="button"
+          onClick={onOpenGuide}
+          aria-label="Workflow guide"
+          title="Workflow guide"
+          className={`flex items-center text-sm text-muted-foreground hover:text-foreground border border-border rounded-lg hover:bg-muted transition-colors ${
+            collapsed ? "w-full justify-center p-2.5" : "w-full justify-center gap-2 py-2"
+          }`}
+        >
+          <HelpCircle size={14} />
+          {!collapsed && "Guide"}
+        </button>
         <button
           type="button"
           onClick={signOut}

@@ -64,3 +64,43 @@
 .scrollbar-none::-webkit-scrollbar {
   display: none;
 }
+
+/* ─── Workflow Guide — rich HTML content ─────────────────────────────────── */
+.guide-content strong {
+  font-weight: 600;
+  color: var(--foreground);
+}
+.guide-content code {
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 0.75em;
+  background: var(--muted);
+  border: 1px solid var(--border);
+  border-radius: 0.25rem;
+  padding: 0.1em 0.35em;
+}
+.guide-content em {
+  font-style: italic;
+  color: var(--foreground);
+}
+.guide-content ul {
+  margin-top: 0.5rem;
+  margin-left: 0.25rem;
+  space-y: 0.25rem;
+  list-style: none;
+  padding: 0;
+}
+.guide-content ul li {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  margin-bottom: 0.35rem;
+  font-size: 0.8125rem;
+  line-height: 1.5;
+}
+.guide-content ul li::before {
+  content: "•";
+  color: var(--primary);
+  font-weight: 700;
+  flex-shrink: 0;
+  margin-top: 0.05em;
+}

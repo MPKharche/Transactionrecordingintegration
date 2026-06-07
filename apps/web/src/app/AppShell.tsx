@@ -1,5 +1,5 @@
 import { useNavigate, useParams, useLocation } from "react-router";
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, useState } from "react";
 import { useAppData } from "../context/AppDataContext";
 import { usePreferences } from "../context/PreferencesContext";
 import { useAppKeyboardShortcuts } from "../hooks/useAppKeyboardShortcuts";
@@ -26,6 +26,7 @@ import { GstPortalIntegrationScreen } from "../features/integrations/GstPortalIn
 import { EmailForwardingScreen } from "../features/integrations/EmailForwardingScreen";
 import { AdminObserveScreen } from "../features/admin/AdminObserveScreen";
 import { PreferencesScreen } from "../features/settings/PreferencesScreen";
+import { WorkflowGuide } from "../features/guide/WorkflowGuide";
 
 export function AppShell() {
   const {
@@ -45,6 +46,7 @@ export function AppShell() {
     bulkDeleteDocuments,
   } = useAppData();
   const { mode, setMode, isDark } = usePreferences();
+  const [guideOpen, setGuideOpen] = useState(false);
   const navigate = useNavigate();
   const location = useLocation();
   const { clientId: routeClientId, docId: routeDocId } = useParams();
@@ -251,6 +253,7 @@ export function AppShell() {
           userName={session?.name ?? session?.email}
           userRole={session?.role ?? "operator"}
           onOpenSettings={() => navigate("/settings")}
+          onOpenGuide={() => setGuideOpen(true)}
         />
         <main
           id="main-content"
@@ -263,6 +266,7 @@ export function AppShell() {
           </div>
         </main>
       </div>
+      {guideOpen && <WorkflowGuide onClose={() => setGuideOpen(false)} />}
       {reviewId && (() => {
         const reviewDoc = docs.find((d) => d.id === reviewId);
         if (!reviewDoc) return null;
