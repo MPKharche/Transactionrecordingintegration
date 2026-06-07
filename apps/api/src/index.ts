@@ -86,7 +86,6 @@ import {
   listHsnSacMasters,
   validateHsnRate,
   importHsnSacFromFile,
-  verifyHsnSacAgainstSource,
   deleteHsnSacMaster,
   markHsnSacAsVerified,
   exportHsnSacToCsv,
@@ -1078,24 +1077,6 @@ export async function buildApp() {
       }
 
       const result = await validateHsnRate(ctx.tenantId, code, gstRate, type);
-      return result;
-    }
-  );
-
-  // Verify all HSN/SAC codes against source
-  app.post<{ Body: { type?: "HSN" | "SAC" } }>(
-    "/api/masters/hsn-sac/verify-all",
-    async (req, reply) => {
-      const ctx = (req as unknown as { auth: AuthContext }).auth;
-      const type = ((req.body as any)?.type || "HSN") as "HSN" | "SAC";
-
-      const result = await verifyHsnSacAgainstSource(ctx.tenantId, type);
-
-      await audit(ctx, "hsn_sac.verify_all", "hsn_sac_master", ctx.tenantId, {
-        verified: result.verified,
-        failed: result.failed,
-      });
-
       return result;
     }
   );

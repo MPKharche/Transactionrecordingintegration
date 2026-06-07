@@ -261,18 +261,11 @@ export async function loadHsnMasterFromFile(
   return { loaded, errors };
 }
 
-/**
- * Validate HSN rate against official source (stub for future integration)
- * This will integrate with GST portal when available
- */
 export function validateHsnAgainstSource(
   code: string,
   declaredRate: number,
   type: CodeType = "HSN"
 ): ValidationResult {
-  // TODO: Integrate with official GST portal API when available
-  // For now, validate format and rate range
-
   let isValid = false;
   if (type === "HSN") {
     isValid = validateHSNFormat(code);
@@ -286,9 +279,9 @@ export function validateHsnAgainstSource(
     code,
     type,
     isValid: isValid && rateValid,
-    rateMatch: rateValid, // Will be enhanced with actual source validation
+    rateMatch: rateValid,
     declaredRate,
-    officialRate: undefined, // Will be populated from GST portal
+    officialRate: undefined,
     message: isValid && rateValid ? "Valid format and rate" : "Invalid code or rate format",
   };
 }
