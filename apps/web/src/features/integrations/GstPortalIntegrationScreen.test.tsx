@@ -1,104 +1,64 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { GstPortalIntegrationScreen } from "./GstPortalIntegrationScreen";
 
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    message: vi.fn(),
   },
 }));
 
 vi.mock("../../context/AppDataContext", () => ({
   useAppData: () => ({
     docs: [],
+    clients: [{ id: "c1", name: "Test Client", gstin: "27AABCT1234A1Z0", active: true }],
   }),
 }));
 
 vi.mock("../../lib/api", () => ({
-  currentFinancialYear: () => "2024-25",
-  listIndianFinancialYears: () => ["2020-21", "2021-22", "2022-23", "2023-24", "2024-25"],
+  currentFinancialYear: () => "2025-26",
+  listIndianFinancialYears: () => ["2024-25", "2025-26"],
+  api: {
+    gstPortal: {
+      returnsHistory: vi.fn().mockResolvedValue({ success: true, financialYear: "2025-26", returns: [] }),
+    },
+  },
 }));
+
+function renderScreen() {
+  return render(
+    <MemoryRouter>
+      <GstPortalIntegrationScreen isDark={false} />
+    </MemoryRouter>
+  );
+}
 
 describe("GstPortalIntegrationScreen", () => {
   beforeEach(() => {
     vi.clearAllMocks();
   });
 
-  it("renders the gst portal integration screen", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
+  it("renders manual GST compliance screen", async () => {
+    renderScreen();
     await waitFor(() => {
-      expect(screen.getByText("GST Portal Integration")).toBeInTheDocument();
+      expect(screen.getByText("GST Compliance")).toBeInTheDocument();
     });
   });
 
-  it("displays GSTIN when connected", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
+  it("prompts to select a client when none selected", async () => {
+    renderScreen();
     await waitFor(() => {
-      expect(screen.getByText("GSTIN")).toBeInTheDocument();
+      expect(screen.getByText(/Select a client to view manually tracked returns/)).toBeInTheDocument();
     });
   });
 
-  it("shows financial year selector", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
+  it("shows manual tracking notice", async () => {
+    renderScreen();
     await waitFor(() => {
-      const fySelect = screen.getByDisplayValue("FY 2024-25");
-      expect(fySelect).toBeInTheDocument();
-    });
-  });
-
-  it("allows selecting GSTR type", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
-    await waitFor(() => {
-      const gstrSelect = screen.getByDisplayValue("GSTR-1 (Outward Supplies)");
-      expect(gstrSelect).toBeInTheDocument();
-    });
-  });
-
-  it("displays fetch button", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
-    await waitFor(() => {
-      expect(screen.getByText(/Fetch.*from Portal/)).toBeInTheDocument();
-    });
-  });
-
-  it("shows filing status cards", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("Filing Status")).toBeInTheDocument();
-    });
-  });
-
-  it("handles fetch operation", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
-    await waitFor(() => {
-      const fetchButton = screen.getByText(/Fetch.*from Portal/);
-      fireEvent.click(fetchButton);
-    });
-  });
-
-  it("displays reconciliation results when mismatches found", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
-    await waitFor(() => {
-      // Results section would appear after fetch
-      const reconcileElement = screen.queryByText("Reconciliation");
-      expect(reconcileElement).toBeDefined();
-    });
-  });
-
-  it("shows help section", async () => {
-    render(<GstPortalIntegrationScreen isDark={false} />);
-
-    await waitFor(() => {
-      expect(screen.getByText("How Portal Integration Works")).toBeInTheDocument();
+      expect(screen.getByText(/GST portal auto-sync is off/)).toBeInTheDocument();
     });
   });
 });

@@ -82,14 +82,16 @@ test.describe("Production Standard QA", () => {
     expect(session.body.email).toBeTruthy();
   });
 
-  test("QA-03: clients GSTIN lookup warns (not 404) when portal blocked", async ({ page }) => {
+  test("QA-03: clients GSTIN lookup prompts manual entry (no external API)", async ({ page }) => {
     await prodLogin(page);
     await page.getByRole("button", { name: "Clients" }).click();
     await page.getByRole("button", { name: /add client/i }).first().click();
 
     const gstinInput = page.getByPlaceholder("15-char GSTIN");
     await gstinInput.fill("27AACCT2725Q1Z6");
-    await expect(page.getByText(/portal unreachable|Filled from your master|Status:/i).first()).toBeVisible({
+    await expect(
+      page.getByText(/Enter legal name and address manually|Filled from your saved client/i).first()
+    ).toBeVisible({
       timeout: 12_000,
     });
     await expect(page.getByText(/GSTIN not found or GST portal unavailable/i)).not.toBeVisible();

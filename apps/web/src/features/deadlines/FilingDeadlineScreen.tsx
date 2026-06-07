@@ -1,100 +1,102 @@
-import { useState, useEffect, useMemo } from "react";
+import { useState, useEffect, useMemo, useCallback } from "react";
 import { toast } from "sonner";
 import { PageHeader, KpiCard } from "../../components/layout/PageHeader";
 import { useAppData } from "../../context/AppDataContext";
-import { api } from "../../lib/api";
-import { INR } from "../../lib/format";
+import { api, currentFinancialYear } from "../../lib/api";
 import { Button } from "../../app/components/ui/button";
 import { Input } from "../../app/components/ui/input";
 import { Card } from "../../app/components/ui/card";
-import { AlertDialog, AlertDialogAction, AlertDialogCancel, AlertDialogContent, AlertDialogDescription, AlertDialogTitle, AlertDialogTrigger } from "../../app/components/ui/alert-dialog";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogTitle,
+  AlertDialogTrigger,
+} from "../../app/components/ui/alert-dialog";
 import { Calendar, Trash2, CheckCircle2, AlertCircle, Clock, X } from "lucide-react";
 
-interface FilingDeadline {
-  id: string;
-  filingType: string;
-  dueDate: string;
-  status: "pending" | "filed" | "overdue";
-  docsLocked: number;
-  clientsRegistered: number;
-  issuesFixed: number;
-  totalDocs: number;
-  totalClients: number;
-  totalIssues: number;
-  createdAt: string;
-}
+type DeadlineRow = Awaited<ReturnType<typeof api.filingDeadlines.list>>["deadlines"][number];
+
+const FILING_TYPE_OPTIONS = [
+  { value: "GSTR1", label: "GSTR-1 (Outward Supplies)" },
+  { value: "GSTR2B", label: "GSTR-2B (Inward Supplies)" },
+  { value: "GSTR3B", label: "GSTR-3B (Monthly Returns)" },
+] as const;
 
 export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
-  const { docs, clients } = useAppData();
-  const [deadlines, setDeadlines] = useState<FilingDeadline[]>([]);
+  const { clients } = useAppData();
+  const [deadlines, setDeadlines] = useState<DeadlineRow[]>([]);
+  const [readiness, setReadiness] = useState({
+    docsLocked: 0,
+    totalDocs: 0,
+    issuesFixed: 0,
+    totalIssues: 0,
+    clientsRegistered: 0,
+    totalClients: 0,
+  });
   const [loading, setLoading] = useState(true);
   const [formOpen, setFormOpen] = useState(false);
+  const [selectedClientId, setSelectedClientId] = useState("");
+  const [filterClientId, setFilterClientId] = useState("");
+  const [financialYear, setFinancialYear] = useState(currentFinancialYear());
   const [formData, setFormData] = useState({ filingType: "", dueDate: "" });
   const [submitting, setSubmitting] = useState(false);
+  const [syncing, setSyncing] = useState(false);
 
-  useEffect(() => {
-    loadDeadlines();
-  }, []);
-
-  async function loadDeadlines() {
+  const loadDeadlines = useCallback(async () => {
     try {
       setLoading(true);
-      // Mock data - in production, fetch from API
-      const mockDeadlines: FilingDeadline[] = [
-        {
-          id: "1",
-          filingType: "GSTR-1",
-          dueDate: new Date(Date.now() + 5 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-          status: "pending",
-          docsLocked: 45,
-          clientsRegistered: 8,
-          issuesFixed: 128,
-          totalDocs: 50,
-          totalClients: 10,
-          totalIssues: 135,
-          createdAt: new Date().toISOString(),
-        },
-        {
-          id: "2",
-          filingType: "GSTR-2B",
-          dueDate: new Date(Date.now() + 20 * 24 * 60 * 60 * 1000).toISOString().split("T")[0],
-          status: "pending",
-          docsLocked: 30,
-          clientsRegistered: 5,
-          issuesFixed: 85,
-          totalDocs: 35,
-          totalClients: 10,
-          totalIssues: 92,
-          createdAt: new Date().toISOString(),
-        },
-      ];
-      setDeadlines(mockDeadlines);
+      const data = await api.filingDeadlines.list({
+        financialYear,
+        clientId: filterClientId || undefined,
+      });
+      setDeadlines(data.deadlines);
+      setReadiness(data.readiness);
     } catch (error) {
-      toast.error("Failed to load deadlines");
+      toast.error(error instanceof Error ? error.message : "Failed to load deadlines");
     } finally {
       setLoading(false);
     }
-  }
+  }, [financialYear, filterClientId]);
 
-  function getDaysUntilDue(dueDate: string): number {
-    const due = new Date(dueDate);
-    const today = new Date();
-    const diff = Math.ceil((due.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
-    return diff;
+  useEffect(() => {
+    void loadDeadlines();
+  }, [loadDeadlines]);
+
+  async function handleSeedDeadlines() {
+    const clientId = filterClientId || clients[0]?.id;
+    if (!clientId) {
+      toast.error("Add a client first");
+      return;
+    }
+    try {
+      setSyncing(true);
+      const result = await api.filingDeadlines.seed(clientId, financialYear);
+      toast.success(
+        result.created > 0
+          ? `Seeded ${result.created} deadline(s) from compliance calendar`
+          : "Deadlines already up to date"
+      );
+      await loadDeadlines();
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Seed failed");
+    } finally {
+      setSyncing(false);
+    }
   }
 
   function getStatusColor(status: string, daysLeft: number): string {
     if (status === "filed") return "text-green-600";
-    if (status === "overdue") return "text-red-600";
-    if (daysLeft < 0) return "text-red-600";
+    if (status === "overdue" || daysLeft < 0) return "text-red-600";
     if (daysLeft <= 7) return "text-amber-600";
     return "text-green-600";
   }
 
   function getStatusBg(status: string, daysLeft: number): string {
     if (status === "filed") return "bg-green-50 border-green-200";
-    if (status === "overdue") return "bg-red-50 border-red-200";
-    if (daysLeft < 0) return "bg-red-50 border-red-200";
+    if (status === "overdue" || daysLeft < 0) return "bg-red-50 border-red-200";
     if (daysLeft <= 7) return "bg-amber-50 border-amber-200";
     return "bg-green-50 border-green-200";
   }
@@ -107,33 +109,24 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
 
   async function handleAddDeadline(e: React.FormEvent) {
     e.preventDefault();
-    if (!formData.filingType || !formData.dueDate) {
-      toast.error("Please fill all fields");
+    if (!selectedClientId || !formData.filingType || !formData.dueDate) {
+      toast.error("Select client, filing type, and due date");
       return;
     }
 
     try {
       setSubmitting(true);
-      const newDeadline: FilingDeadline = {
-        id: Math.random().toString(36).substr(2, 9),
-        filingType: formData.filingType,
-        dueDate: formData.dueDate,
-        status: "pending",
-        docsLocked: 0,
-        clientsRegistered: 0,
-        issuesFixed: 0,
-        totalDocs: docs.length,
-        totalClients: clients.length,
-        totalIssues: 0,
-        createdAt: new Date().toISOString(),
-      };
-
-      setDeadlines((prev) => [newDeadline, ...prev]);
+      await api.filingDeadlines.create(selectedClientId, {
+        financial_year: financialYear,
+        filing_type: formData.filingType as "GSTR1" | "GSTR2B" | "GSTR3B",
+        due_date: new Date(formData.dueDate).toISOString(),
+      });
       setFormData({ filingType: "", dueDate: "" });
       setFormOpen(false);
-      toast.success("Deadline added successfully");
+      toast.success("Deadline added");
+      await loadDeadlines();
     } catch (error) {
-      toast.error("Failed to add deadline");
+      toast.error(error instanceof Error ? error.message : "Failed to add deadline");
     } finally {
       setSubmitting(false);
     }
@@ -141,42 +134,34 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
 
   async function handleDeleteDeadline(id: string) {
     try {
-      setDeadlines((prev) => prev.filter((d) => d.id !== id));
+      await api.filingDeadlines.delete(id);
       toast.success("Deadline deleted");
+      await loadDeadlines();
     } catch (error) {
-      toast.error("Failed to delete deadline");
+      toast.error(error instanceof Error ? error.message : "Failed to delete");
     }
   }
 
   async function handleMarkFiled(id: string) {
     try {
-      setDeadlines((prev) =>
-        prev.map((d) => (d.id === id ? { ...d, status: "filed" } : d))
-      );
-      toast.success("Deadline marked as filed");
+      await api.filingDeadlines.patch(id, { status: "filed" });
+      toast.success("Marked as filed");
+      await loadDeadlines();
     } catch (error) {
-      toast.error("Failed to update deadline");
+      toast.error(error instanceof Error ? error.message : "Failed to update");
     }
   }
 
   const readyStats = useMemo(() => {
-    const allDeadlines = deadlines;
-    const avgLocked = Math.round(
-      allDeadlines.reduce((s, d) => s + d.docsLocked, 0) / Math.max(allDeadlines.length, 1)
-    );
-    const totalRegistered = allDeadlines.reduce((s, d) => s + d.clientsRegistered, 0);
-    const totalIssuesFixed = allDeadlines.reduce((s, d) => s + d.issuesFixed, 0);
-
-    return { avgLocked, totalRegistered, totalIssuesFixed };
+    const filedCount = deadlines.filter((d) => d.status === "filed").length;
+    const overdueCount = deadlines.filter((d) => d.isOverdue && d.status !== "filed").length;
+    return { filedCount, overdueCount };
   }, [deadlines]);
 
   if (loading) {
     return (
       <div className="p-6">
-        <PageHeader
-          title="Filing Deadlines"
-          subtitle="Track GST filing deadlines and compliance status"
-        />
+        <PageHeader title="Filing Deadlines" subtitle="Track GST filing deadlines and compliance status" />
         <div className="space-y-4">
           {[1, 2, 3].map((i) => (
             <div key={i} className="h-24 bg-muted animate-pulse rounded-lg" />
@@ -191,100 +176,115 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
       <div className="p-6 border-b border-border">
         <PageHeader
           title="Filing Deadlines"
-          subtitle="Track GST filing deadlines and compliance status"
+          subtitle="Track GST filing deadlines — mark returns filed manually after GST portal submission"
           action={
-            <Button onClick={() => setFormOpen(!formOpen)} className="gap-2">
-              <Calendar className="w-4 h-4" />
-              Add Deadline
-            </Button>
+            <div className="flex gap-2 flex-wrap">
+              <Button variant="outline" onClick={() => void handleSeedDeadlines()} disabled={syncing} className="gap-2">
+                <Calendar className="w-4 h-4" />
+                Seed calendar
+              </Button>
+              <Button onClick={() => setFormOpen(!formOpen)} className="gap-2">
+                <Calendar className="w-4 h-4" />
+                Add deadline
+              </Button>
+            </div>
           }
         />
       </div>
 
       <div className="flex-1 overflow-auto">
         <div className="p-6 space-y-6">
-          {/* Summary KPIs */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <KpiCard
-              label="Avg invoices confirmed"
-              value={readyStats.avgLocked}
-              color="#10b981"
-            />
-            <KpiCard
-              label="Total Registered"
-              value={readyStats.totalRegistered}
-              color="#3b82f6"
-            />
-            <KpiCard
-              label="Issues Fixed"
-              value={readyStats.totalIssuesFixed}
-              color="#8b5cf6"
-            />
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 block">
+                Financial year
+              </label>
+              <Input
+                value={financialYear}
+                onChange={(e) => setFinancialYear(e.target.value)}
+                placeholder="2025-26"
+              />
+            </div>
+            <div>
+              <label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-1 block">
+                Filter by client
+              </label>
+              <select
+                value={filterClientId}
+                onChange={(e) => setFilterClientId(e.target.value)}
+                className="w-full px-3 py-2 border border-input rounded-md bg-background text-sm"
+              >
+                <option value="">All clients</option>
+                {clients.map((c) => (
+                  <option key={c.id} value={c.id}>
+                    {c.name} ({c.gstin})
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
 
-          {/* Add Deadline Form */}
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+            <KpiCard label="Invoices locked" value={readiness.docsLocked} color="#10b981" />
+            <KpiCard label="Returns filed" value={readyStats.filedCount} color="#3b82f6" />
+            <KpiCard label="Overdue" value={readyStats.overdueCount} color="#ef4444" />
+          </div>
+
           {formOpen && (
             <Card className="p-6 bg-muted/50">
               <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold">Add New Deadline</h3>
-                <button
-                  onClick={() => setFormOpen(false)}
-                  className="text-muted-foreground hover:text-foreground"
-                >
+                <h3 className="text-lg font-semibold">Add new deadline</h3>
+                <button type="button" onClick={() => setFormOpen(false)} className="text-muted-foreground hover:text-foreground">
                   <X className="w-4 h-4" />
                 </button>
               </div>
               <form onSubmit={handleAddDeadline} className="space-y-4">
                 <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Filing Type
-                  </label>
+                  <label className="block text-sm font-medium mb-2">Client</label>
                   <select
-                    value={formData.filingType}
-                    onChange={(e) =>
-                      setFormData({ ...formData, filingType: e.target.value })
-                    }
+                    required
+                    value={selectedClientId}
+                    onChange={(e) => setSelectedClientId(e.target.value)}
                     className="w-full px-3 py-2 border border-input rounded-md bg-background"
                   >
-                    <option value="">Select filing type</option>
-                    <option value="GSTR-1">GSTR-1 (Outward Supplies)</option>
-                    <option value="GSTR-2B">GSTR-2B (Inward Supplies)</option>
-                    <option value="GSTR-3B">GSTR-3B (Monthly Returns)</option>
-                    <option value="GSTR-9">GSTR-9 (Annual Returns)</option>
-                    <option value="ITC-04">ITC-04 (Input Credit)</option>
+                    <option value="">Select client</option>
+                    {clients.map((c) => (
+                      <option key={c.id} value={c.id}>
+                        {c.name}
+                      </option>
+                    ))}
                   </select>
                 </div>
-
                 <div>
-                  <label className="block text-sm font-medium mb-2">
-                    Due Date
-                  </label>
+                  <label className="block text-sm font-medium mb-2">Filing type</label>
+                  <select
+                    value={formData.filingType}
+                    onChange={(e) => setFormData({ ...formData, filingType: e.target.value })}
+                    className="w-full px-3 py-2 border border-input rounded-md bg-background"
+                    required
+                  >
+                    <option value="">Select filing type</option>
+                    {FILING_TYPE_OPTIONS.map((o) => (
+                      <option key={o.value} value={o.value}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium mb-2">Due date</label>
                   <Input
                     type="date"
                     value={formData.dueDate}
-                    onChange={(e) =>
-                      setFormData({ ...formData, dueDate: e.target.value })
-                    }
+                    onChange={(e) => setFormData({ ...formData, dueDate: e.target.value })}
                     required
                   />
                 </div>
-
                 <div className="flex gap-2 pt-2">
-                  <Button
-                    type="submit"
-                    disabled={submitting}
-                    className="flex-1"
-                  >
-                    {submitting ? "Adding..." : "Add Deadline"}
+                  <Button type="submit" disabled={submitting} className="flex-1">
+                    {submitting ? "Adding..." : "Add deadline"}
                   </Button>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => {
-                      setFormOpen(false);
-                      setFormData({ filingType: "", dueDate: "" });
-                    }}
-                  >
+                  <Button type="button" variant="outline" onClick={() => setFormOpen(false)}>
                     Cancel
                   </Button>
                 </div>
@@ -292,19 +292,21 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
             </Card>
           )}
 
-          {/* Deadlines List */}
           <div className="space-y-3">
             {deadlines.length === 0 ? (
               <Card className="p-12 text-center">
                 <Calendar className="w-12 h-12 mx-auto mb-4 text-muted-foreground" />
-                <p className="text-muted-foreground">No deadlines yet. Add one to get started.</p>
+                <p className="text-muted-foreground mb-4">No deadlines yet.</p>
+                <Button variant="outline" onClick={() => void handleSeedDeadlines()}>
+                  Seed from compliance calendar
+                </Button>
               </Card>
             ) : (
               deadlines.map((deadline) => {
-                const daysLeft = getDaysUntilDue(deadline.dueDate);
+                const daysLeft = deadline.daysUntilDue;
                 const isReady =
-                  deadline.docsLocked >= deadline.totalDocs * 0.9 &&
-                  deadline.issuesFixed >= deadline.totalIssues * 0.95;
+                  readiness.docsLocked >= Math.max(readiness.totalDocs * 0.9, 1) &&
+                  readiness.issuesFixed >= Math.max(readiness.totalIssues * 0.95, 0);
 
                 return (
                   <Card
@@ -313,14 +315,13 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
                   >
                     <div className="flex items-start justify-between gap-4">
                       <div className="flex gap-3 flex-1 min-w-0">
-                        <div className="mt-0.5">
-                          {getStatusIcon(deadline.status, daysLeft)}
-                        </div>
+                        <div className="mt-0.5">{getStatusIcon(deadline.status, daysLeft)}</div>
                         <div className="flex-1 min-w-0">
                           <div className="flex items-center gap-2 flex-wrap">
-                            <h4 className="font-semibold text-foreground">
-                              {deadline.filingType}
-                            </h4>
+                            <h4 className="font-semibold text-foreground">{deadline.filingTypeLabel}</h4>
+                            {!filterClientId && (
+                              <span className="text-xs text-muted-foreground">{deadline.clientName}</span>
+                            )}
                             {isReady && deadline.status !== "filed" && (
                               <span className="text-xs bg-green-100 text-green-800 px-2 py-1 rounded-full">
                                 Ready to file
@@ -346,63 +347,38 @@ export function FilingDeadlineScreen({ isDark }: { isDark: boolean }) {
                               day: "numeric",
                             })}
                           </p>
-
-                          {/* Checklist */}
-                          <div className="mt-3 space-y-1 text-xs">
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-                              <span className="text-muted-foreground">
-                                {deadline.docsLocked} / {deadline.totalDocs} invoices confirmed
-                              </span>
+                          <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                            <div>
+                              {readiness.docsLocked} / {readiness.totalDocs} invoices locked
                             </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-                              <span className="text-muted-foreground">
-                                {deadline.clientsRegistered} / {deadline.totalClients} clients registered
-                              </span>
-                            </div>
-                            <div className="flex items-center gap-2">
-                              <div className="w-2 h-2 rounded-full bg-muted-foreground" />
-                              <span className="text-muted-foreground">
-                                {deadline.issuesFixed} / {deadline.totalIssues} issues fixed
-                              </span>
+                            <div>
+                              {readiness.issuesFixed} / {readiness.totalIssues} issues resolved
                             </div>
                           </div>
                         </div>
                       </div>
-
-                      {/* Actions */}
                       <div className="flex gap-2 flex-shrink-0">
                         {deadline.status !== "filed" && (
-                          <Button
-                            size="sm"
-                            variant="outline"
-                            onClick={() => handleMarkFiled(deadline.id)}
-                            className="gap-1"
-                          >
+                          <Button size="sm" variant="outline" onClick={() => void handleMarkFiled(deadline.id)} className="gap-1">
                             <CheckCircle2 className="w-4 h-4" />
-                            Mark Filed
+                            Mark filed
                           </Button>
                         )}
                         <AlertDialog>
                           <AlertDialogTrigger asChild>
-                            <Button
-                              size="sm"
-                              variant="ghost"
-                              className="text-destructive hover:text-destructive"
-                            >
+                            <Button size="sm" variant="ghost" className="text-destructive hover:text-destructive">
                               <Trash2 className="w-4 h-4" />
                             </Button>
                           </AlertDialogTrigger>
                           <AlertDialogContent>
-                            <AlertDialogTitle>Delete Deadline</AlertDialogTitle>
+                            <AlertDialogTitle>Delete deadline</AlertDialogTitle>
                             <AlertDialogDescription>
-                              Are you sure you want to delete this deadline? This action cannot be undone.
+                              Remove this filing deadline? This cannot be undone.
                             </AlertDialogDescription>
                             <div className="flex gap-2 justify-end">
                               <AlertDialogCancel>Cancel</AlertDialogCancel>
                               <AlertDialogAction
-                                onClick={() => handleDeleteDeadline(deadline.id)}
+                                onClick={() => void handleDeleteDeadline(deadline.id)}
                                 className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
                               >
                                 Delete

@@ -96,9 +96,20 @@ import { putObject, sha256, storagePath } from "./lib/minio.js";
 import { deleteGstDocument } from "./lib/delete-document.js";
 import { lookupGstin } from "./lib/gstin-lookup.js";
 import {
+  seedFilingDeadlinesForClient,
+  computeClientReadiness,
+  filingTypeLabel,
+} from "./lib/filing-deadline-helpers.js";
+import {
   initializeZohoSync,
   syncZohoBooks,
-  initializeGstPortalSync,
+  connectGstPortal,
+  disconnectGstPortal,
+  getGstPortalStatus,
+  syncGstPortalReturnStatus,
+  requestGstPortalOtp,
+  verifyGstPortalOtpAndConnect,
+  fetchGstReturnHistory,
   fetchGstr1FromPortal,
   fetchGstr2bFromPortal,
   initializeEmailForwarding,
@@ -2385,6 +2396,83 @@ export async function buildApp() {
 
   // ─── TIER 2: Filing Deadline Tracker ──────────────────────────────────────
 
+  app.get("/api/filing-deadlines", async (req) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+    const q = req.query as { financial_year?: string; client_id?: string };
+    const fy = q.financial_year ?? currentIndianFinancialYear();
+
+    const whereConditions = [eq(filingDeadlines.tenantId, ctx.tenantId)];
+    if (q.client_id) {
+      whereConditions.push(eq(filingDeadlines.clientId, q.client_id));
+    }
+    if (q.financial_year) {
+      whereConditions.push(eq(filingDeadlines.financialYear, q.financial_year));
+    }
+
+    const rows = await db
+      .select({
+        deadline: filingDeadlines,
+        clientName: clients.name,
+        clientGstin: clients.gstin,
+      })
+      .from(filingDeadlines)
+      .innerJoin(clients, eq(clients.id, filingDeadlines.clientId))
+      .where(and(...whereConditions))
+      .orderBy(desc(filingDeadlines.dueDate));
+
+    const now = new Date();
+    const deadlines = rows.map(({ deadline: d, clientName, clientGstin }) => ({
+      id: d.id,
+      clientId: d.clientId,
+      clientName,
+      clientGstin,
+      financialYear: d.financialYear,
+      filingType: d.filingType,
+      filingTypeLabel: filingTypeLabel(d.filingType),
+      dueDate: d.dueDate.toISOString(),
+      status: d.status,
+      filedDate: d.filedDate?.toISOString() ?? null,
+      notes: d.notes,
+      daysUntilDue: Math.ceil(
+        (d.dueDate.getTime() - now.getTime()) / (1000 * 60 * 60 * 24)
+      ),
+      isOverdue:
+        d.status === "overdue" || (d.dueDate < now && d.status === "pending"),
+    }));
+
+    const readiness = await computeClientReadiness(
+      db,
+      ctx.tenantId,
+      q.client_id
+    );
+
+    return { financialYear: fy, deadlines, readiness };
+  });
+
+  app.post<{ Params: { clientId: string } }>(
+    "/api/filing-deadlines/:clientId/seed",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const q = req.query as { financial_year?: string };
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const result = await seedFilingDeadlinesForClient(
+        db,
+        ctx.tenantId,
+        clientId,
+        q.financial_year
+      );
+      return { ok: true, created: result.created };
+    }
+  );
+
   app.get<{ Params: { clientId: string } }>(
     "/api/filing-deadlines/:clientId",
     async (req, reply) => {
@@ -3562,10 +3650,152 @@ export async function buildApp() {
     return { plan, status: sub.status, trialEnd: sub.trialEnd, periodEnd: sub.currentPeriodEnd };
   });
 
-  // Legacy API-key connect (kept for backward compatibility)
+  app.post<{ Params: { clientId: string }; Body: { username: string } }>(
+    "/api/integrations/gst-portal/otp/request/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const body = req.body ?? {};
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const result = await requestGstPortalOtp(ctx.tenantId, clientId, body.username ?? "");
+      if (!result.success) return reply.status(400).send({ error: result.error });
+      return { success: true, message: "OTP sent to GSTN-registered mobile and email" };
+    }
+  );
+
+  app.post<{ Params: { clientId: string }; Body: { username: string; otp: string } }>(
+    "/api/integrations/gst-portal/otp/verify/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+      const body = req.body ?? {};
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      if (!body.username || !body.otp) {
+        return reply.status(400).send({ error: "username and otp required" });
+      }
+
+      const result = await verifyGstPortalOtpAndConnect(
+        ctx.tenantId,
+        clientId,
+        body.username,
+        body.otp
+      );
+      if (!result.success) return reply.status(400).send({ error: result.error });
+
+      await seedFilingDeadlinesForClient(db, ctx.tenantId, clientId);
+      await audit(ctx, "gst-portal.otp-verify", "integration", result.configId as string, {
+        clientId,
+      });
+
+      const history = await fetchGstReturnHistory(ctx.tenantId, clientId);
+
+      return {
+        success: true,
+        config_id: result.configId,
+        token_expires_at: result.tokenExpiresAt,
+        returns_filed: history.returns,
+      };
+    }
+  );
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/integrations/gst-portal/returns-history/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { fy?: string };
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const history = await fetchGstReturnHistory(ctx.tenantId, clientId, q.fy, true);
+      if (!history.success) return reply.status(400).send({ error: history.error });
+
+      await audit(ctx, "gst-portal.returns-history", "integration", clientId, { fy: q.fy });
+
+      return history;
+    }
+  );
+
+  app.get<{ Params: { clientId: string } }>(
+    "/api/integrations/gst-portal/status/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { fy?: string };
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const status = await getGstPortalStatus(ctx.tenantId, clientId, q.fy);
+      return { ...status, clientGstin: client.gstin, clientName: client.name };
+    }
+  );
+
+  app.post<{ Params: { clientId: string } }>(
+    "/api/integrations/gst-portal/sync-status/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const q = req.query as { fy?: string };
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      const status = await syncGstPortalReturnStatus(ctx.tenantId, clientId, q.fy);
+      await audit(ctx, "gst-portal.sync-status", "integration", clientId, { fy: q.fy });
+      return status;
+    }
+  );
+
+  app.delete<{ Params: { clientId: string } }>(
+    "/api/integrations/gst-portal/disconnect/:clientId",
+    async (req, reply) => {
+      const ctx = (req as unknown as { auth: AuthContext }).auth;
+      const { clientId } = req.params;
+
+      const [client] = await db
+        .select()
+        .from(clients)
+        .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+        .limit(1);
+      if (!client) return reply.status(404).send({ error: "Client not found" });
+
+      await disconnectGstPortal(ctx.tenantId, clientId);
+      await audit(ctx, "gst-portal.disconnect", "integration", clientId);
+      return { success: true };
+    }
+  );
+
   app.post<{
     Params: { clientId: string };
-    Body: { portal_token: string; refresh_token?: string };
+    Body: { portal_token: string; refresh_token?: string; gstn_username?: string };
   }>(
     "/api/integrations/gst-portal/connect/:clientId",
     async (req, reply) => {
@@ -3585,11 +3815,15 @@ export async function buildApp() {
         return reply.status(400).send({ error: "portal_token required" });
       }
 
-      const result = await initializeGstPortalSync(
+      const result = await connectGstPortal(
         ctx.tenantId,
         clientId,
         client.gstin as string,
-        body.portal_token as string
+        body.portal_token as string,
+        {
+          refreshToken: body.refresh_token,
+          gstnUsername: body.gstn_username,
+        }
       );
 
       if (!result.success) {
@@ -3606,7 +3840,7 @@ export async function buildApp() {
     "/api/integrations/gst-portal/gstr/:clientId",
     async (req, reply) => {
       const ctx = (req as unknown as { auth: AuthContext }).auth;
-      const q = req.query as { type?: "gstr1" | "gstr2b"; fy?: string };
+      const q = req.query as { type?: "gstr1" | "gstr2b" | "gstr3b"; fy?: string };
       const { clientId } = req.params;
 
       const [client] = await db
@@ -3630,7 +3864,11 @@ export async function buildApp() {
 
       await audit(ctx, `gst-portal.fetch-${gstrType}`, "integration", clientId, { fy });
 
-      return { success: true, data: result.data };
+      return {
+        success: true,
+        data: result.data,
+        mismatches: result.mismatches ?? [],
+      };
     }
   );
 

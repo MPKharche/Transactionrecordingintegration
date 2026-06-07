@@ -4,6 +4,43 @@
  */
 
 import { describe, it, expect, beforeEach, vi } from "vitest";
+
+const dbChain = {
+  from: vi.fn(function (this: unknown) {
+    return this;
+  }),
+  where: vi.fn(function (this: unknown) {
+    return this;
+  }),
+  orderBy: vi.fn(function (this: unknown) {
+    return this;
+  }),
+  innerJoin: vi.fn(function (this: unknown) {
+    return this;
+  }),
+  limit: vi.fn().mockResolvedValue([]),
+  returning: vi.fn().mockResolvedValue([]),
+  values: vi.fn(function (this: unknown) {
+    return this;
+  }),
+  set: vi.fn(function (this: unknown) {
+    return this;
+  }),
+};
+
+vi.mock("@ca-suite/db", () => ({
+  db: {
+    select: vi.fn(() => dbChain),
+    insert: vi.fn(() => dbChain),
+    update: vi.fn(() => dbChain),
+    delete: vi.fn(() => dbChain),
+  },
+  clients: {},
+  filingDeadlines: {},
+  gstPortalConfig: {},
+  itcReconciliationSnapshots: {},
+  gstDocuments: {},
+}));
 import {
   initializeZohoSync,
   syncZohoBooks,
@@ -92,18 +129,6 @@ describe("TIER 3: Integrations", () => {
   // ============ GST Portal Integration Tests ============
 
   describe("GST Portal Integration", () => {
-    it("should initialize GST Portal sync", async () => {
-      const result = await initializeGstPortalSync(
-        testTenantId,
-        testClientId,
-        "27AAPCT1234A1Z0",
-        "test-token"
-      );
-
-      expect(result.success).toBe(true);
-      expect(result.configId).toBeDefined();
-    });
-
     it("should fail without portal token", async () => {
       const result = await initializeGstPortalSync(
         testTenantId,
@@ -113,26 +138,21 @@ describe("TIER 3: Integrations", () => {
       );
 
       expect(result.success).toBe(false);
+      expect(result.error).toContain("portal_token");
     });
 
-    it("should fetch GSTR-1 from portal", async () => {
-      // Setup
-      await initializeGstPortalSync(testTenantId, testClientId, "27AAPCT1234A1Z0", "token");
-
+    it("should reject GSTR-1 fetch in manual-only mode", async () => {
       const result = await fetchGstr1FromPortal(testTenantId, testClientId, "2024-25");
 
-      expect(result.success).toBe(true);
-      expect(result.data).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/manual|disabled|filing deadlines/i);
     });
 
-    it("should fetch GSTR-2B from portal", async () => {
-      // Setup
-      await initializeGstPortalSync(testTenantId, testClientId, "27AAPCT1234A1Z0", "token");
-
+    it("should reject GSTR-2B fetch in manual-only mode", async () => {
       const result = await fetchGstr2bFromPortal(testTenantId, testClientId, "2024-25");
 
-      expect(result.success).toBe(true);
-      expect(result.data).toBeDefined();
+      expect(result.success).toBe(false);
+      expect(result.error).toMatch(/manual|disabled|filing deadlines/i);
     });
   });
 
@@ -282,12 +302,9 @@ describe("TIER 3: Integrations", () => {
 
     it("GST Portal fetch should complete within 2 minutes", async () => {
       const startTime = Date.now();
-
-      await initializeGstPortalSync(testTenantId, testClientId, "gstin", "token");
-      const result = await fetchGstr1FromPortal(testTenantId, testClientId, "2024-25");
-
+      await fetchGstr1FromPortal(testTenantId, testClientId, "2024-25");
       const duration = Date.now() - startTime;
-      expect(duration).toBeLessThan(120000); // 2 minutes in ms
+      expect(duration).toBeLessThan(120000);
     });
 
     it("Email parsing should complete within 1 minute", async () => {

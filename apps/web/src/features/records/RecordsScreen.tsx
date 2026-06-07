@@ -20,7 +20,7 @@ import { CAPTURE_SOURCE_LABELS, formatCapturedAt } from "../../lib/capture-meta"
 import { api } from "../../lib/api";
 import {
   Search, Download, Building2, ChevronDown,
-  History, Eye,
+  History, Eye, X,
   AlertTriangle,
 } from "lucide-react";
 import { handleTabListKeyDown } from "../../lib/a11y";

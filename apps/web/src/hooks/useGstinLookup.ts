@@ -20,27 +20,24 @@ export function useGstinLookup() {
     setMessage("");
     try {
       const info = await api.gstin.lookup(g);
-      if (info.source === "derived" || info.portalAvailable === false) {
+      if (info.source === "master") {
+        setState("ok");
+        setMessage("Filled from your saved client/party master");
+      } else if (info.source === "derived" || !info.legalName) {
         setState("warn");
-        setMessage(
-          info.legalName
-            ? "GST portal unreachable — using saved details; verify before saving"
-            : "GST portal unreachable — enter legal name and address manually"
-        );
+        setMessage("Enter legal name and address manually (state and PAN derived from GSTIN)");
       } else {
         setState("ok");
         setMessage(
-          info.source === "master"
-            ? "Filled from your master"
-            : info.tradeName && info.tradeName !== info.legalName
-              ? `Trade: ${info.tradeName}`
-              : `Status: ${info.status || "Active"}`
+          info.tradeName && info.tradeName !== info.legalName
+            ? `Trade: ${info.tradeName}`
+            : `Status: ${info.status || "Active"}`
         );
       }
       return info;
     } catch (err) {
       setState("error");
-      setMessage(err instanceof Error ? err.message : "GST portal lookup failed");
+      setMessage(err instanceof Error ? err.message : "GSTIN lookup failed");
       return null;
     }
   }, []);

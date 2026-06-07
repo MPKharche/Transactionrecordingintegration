@@ -1,21 +1,60 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { FilingDeadlineScreen } from "./FilingDeadlineScreen";
 
-// Mock dependencies
 vi.mock("sonner", () => ({
   toast: {
     success: vi.fn(),
     error: vi.fn(),
+    message: vi.fn(),
   },
 }));
 
 vi.mock("../../context/AppDataContext", () => ({
   useAppData: () => ({
     docs: [],
-    clients: [],
+    clients: [{ id: "c1", name: "Test Client", gstin: "27AABCT1234A1Z0", active: true }],
   }),
+}));
+
+vi.mock("../../lib/api", () => ({
+  currentFinancialYear: () => "2025-26",
+  api: {
+    filingDeadlines: {
+      list: vi.fn().mockResolvedValue({
+        financialYear: "2025-26",
+        deadlines: [
+          {
+            id: "d1",
+            clientId: "c1",
+            clientName: "Test Client",
+            clientGstin: "27AABCT1234A1Z0",
+            financialYear: "2025-26",
+            filingType: "GSTR1",
+            filingTypeLabel: "GSTR-1",
+            dueDate: new Date(Date.now() + 5 * 86400000).toISOString(),
+            status: "pending",
+            filedDate: null,
+            notes: "",
+            daysUntilDue: 5,
+            isOverdue: false,
+          },
+        ],
+        readiness: {
+          docsLocked: 2,
+          totalDocs: 5,
+          issuesFixed: 1,
+          totalIssues: 2,
+          clientsRegistered: 1,
+          totalClients: 1,
+        },
+      }),
+      seed: vi.fn().mockResolvedValue({ ok: true, created: 3 }),
+      create: vi.fn().mockResolvedValue({}),
+      patch: vi.fn().mockResolvedValue({}),
+      delete: vi.fn().mockResolvedValue({ ok: true }),
+    },
+  },
 }));
 
 describe("FilingDeadlineScreen", () => {
@@ -23,67 +62,35 @@ describe("FilingDeadlineScreen", () => {
     vi.clearAllMocks();
   });
 
-  it("renders the filing deadline screen", () => {
+  it("renders the filing deadline screen", async () => {
     render(<FilingDeadlineScreen isDark={false} />);
-    expect(screen.getByText("Filing Deadlines")).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("Filing Deadlines")).toBeInTheDocument();
+    });
   });
 
-  it("displays the add deadline button", () => {
+  it("loads deadlines from API", async () => {
     render(<FilingDeadlineScreen isDark={false} />);
-    const addButton = screen.getByText("Add Deadline");
-    expect(addButton).toBeInTheDocument();
+    await waitFor(() => {
+      expect(screen.getByText("GSTR-1")).toBeInTheDocument();
+    });
   });
 
   it("shows form when add deadline button is clicked", async () => {
     render(<FilingDeadlineScreen isDark={false} />);
-    const addButton = screen.getByText("Add Deadline");
-    fireEvent.click(addButton);
-
+    await waitFor(() => screen.getByText("Add deadline"));
+    fireEvent.click(screen.getByText("Add deadline"));
     await waitFor(() => {
-      expect(screen.getByText("Add New Deadline")).toBeInTheDocument();
-    });
-  });
-
-  it("allows selecting filing type", async () => {
-    render(<FilingDeadlineScreen isDark={false} />);
-    const addButton = screen.getByText("Add Deadline");
-    fireEvent.click(addButton);
-
-    const filingTypeSelect = screen.getByDisplayValue("Select filing type");
-    fireEvent.change(filingTypeSelect, { target: { value: "GSTR-1" } });
-
-    expect(filingTypeSelect).toHaveValue("GSTR-1");
-  });
-
-  it("validates required fields", async () => {
-    const { toast } = await import("sonner");
-    render(<FilingDeadlineScreen isDark={false} />);
-
-    const addButton = screen.getByText("Add Deadline");
-    fireEvent.click(addButton);
-
-    const submitButton = screen.getByText("Add Deadline", { selector: "button" });
-    fireEvent.click(submitButton);
-
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Please fill all fields");
+      expect(screen.getByText("Add new deadline")).toBeInTheDocument();
     });
   });
 
   it("displays summary KPI cards", async () => {
     render(<FilingDeadlineScreen isDark={false} />);
-
     await waitFor(() => {
-      expect(screen.getByText("Avg invoices confirmed")).toBeInTheDocument();
-      expect(screen.getByText("Total Registered")).toBeInTheDocument();
-      expect(screen.getByText("Issues Fixed")).toBeInTheDocument();
+      expect(screen.getByText("Invoices locked")).toBeInTheDocument();
+      expect(screen.getByText("Returns filed")).toBeInTheDocument();
+      expect(screen.getByText("Overdue")).toBeInTheDocument();
     });
-  });
-
-  it("shows ready to file badge when criteria met", () => {
-    render(<FilingDeadlineScreen isDark={false} />);
-
-    // After loading, should show deadlines with status badges
-    expect(screen.queryByText(/Ready to file|Filed|Pending/)).toBeDefined();
   });
 });

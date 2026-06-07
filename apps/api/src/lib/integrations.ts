@@ -50,36 +50,18 @@ export async function pullInvoicesFromZoho(
   return { success: true, invoices: [] };
 }
 
-export async function initializeGstPortalSync(
-  tenantId: string,
-  clientId: string,
-  gstin: string,
-  portalToken: string
-): Promise<{ success: boolean; configId?: string; error?: string }> {
-  if (!gstin || !portalToken) {
-    return { success: false, error: "gstin and portalToken required" };
-  }
-  return { success: true, configId: `gst-${tenantId}-${clientId}` };
-}
-
-export async function fetchGstr1FromPortal(
-  tenantId: string,
-  clientId: string,
-  fy: string
-): Promise<{ success: boolean; data?: any; error?: string }> {
-  if (clientId.includes("non-existent")) {
-    return { success: false, error: "GST Portal token expired or config missing" };
-  }
-  return { success: true, data: {} };
-}
-
-export async function fetchGstr2bFromPortal(
-  tenantId: string,
-  clientId: string,
-  fy: string
-): Promise<{ success: boolean; data?: any; error?: string }> {
-  return { success: true, data: {} };
-}
+export {
+  initializeGstPortalSync,
+  connectGstPortal,
+  disconnectGstPortal,
+  getGstPortalStatus,
+  syncGstPortalReturnStatus,
+  requestGstPortalOtp,
+  verifyGstPortalOtpAndConnect,
+  fetchGstReturnHistory,
+  fetchGstr1FromPortal,
+  fetchGstr2bFromPortal,
+} from "./gst-portal-sync.js";
 
 export async function initializeEmailForwarding(
   tenantId: string

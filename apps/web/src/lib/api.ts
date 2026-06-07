@@ -305,6 +305,167 @@ export const api = {
         "/compliance/calendar"
       ),
   },
+  filingDeadlines: {
+    list: (opts?: { financialYear?: string; clientId?: string }) => {
+      const params = new URLSearchParams();
+      if (opts?.financialYear) params.set("financial_year", opts.financialYear);
+      if (opts?.clientId) params.set("client_id", opts.clientId);
+      const q = params.toString();
+      return request<{
+        financialYear: string;
+        deadlines: Array<{
+          id: string;
+          clientId: string;
+          clientName: string;
+          clientGstin: string;
+          financialYear: string;
+          filingType: "GSTR1" | "GSTR2B" | "GSTR3B";
+          filingTypeLabel: string;
+          dueDate: string;
+          status: "pending" | "filed" | "overdue";
+          filedDate: string | null;
+          notes: string | null;
+          daysUntilDue: number;
+          isOverdue: boolean;
+        }>;
+        readiness: {
+          docsLocked: number;
+          totalDocs: number;
+          issuesFixed: number;
+          totalIssues: number;
+          clientsRegistered: number;
+          totalClients: number;
+        };
+      }>(`/filing-deadlines${q ? `?${q}` : ""}`);
+    },
+    listForClient: (clientId: string, financialYear?: string) => {
+      const q = financialYear ? `?financial_year=${encodeURIComponent(financialYear)}` : "";
+      return request<{ deadlines: Array<Record<string, unknown>> }>(
+        `/filing-deadlines/${encodeURIComponent(clientId)}${q}`
+      );
+    },
+    create: (
+      clientId: string,
+      body: {
+        financial_year: string;
+        filing_type: "GSTR1" | "GSTR2B" | "GSTR3B";
+        due_date: string;
+        notes?: string;
+      }
+    ) =>
+      request<Record<string, unknown>>(`/filing-deadlines/${encodeURIComponent(clientId)}`, {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    seed: (clientId: string, financialYear?: string) => {
+      const q = financialYear ? `?financial_year=${encodeURIComponent(financialYear)}` : "";
+      return request<{ ok: boolean; created: number }>(
+        `/filing-deadlines/${encodeURIComponent(clientId)}/seed${q}`,
+        { method: "POST" }
+      );
+    },
+    patch: (id: string, body: { status?: "pending" | "filed" | "overdue"; notes?: string }) =>
+      request<Record<string, unknown>>(`/filing-deadlines/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    delete: (id: string) =>
+      request<{ ok: boolean }>(`/filing-deadlines/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+  },
+  gstPortal: {
+    status: (clientId: string, fy?: string) => {
+      const q = fy ? `?fy=${encodeURIComponent(fy)}` : "";
+      return request<{
+        connected: boolean;
+        configId?: string;
+        gstin?: string;
+        gstnUsername?: string;
+        clientGstin?: string;
+        clientName?: string;
+        lastSyncAt?: string;
+        lastGstr1FetchAt?: string;
+        lastGstr2bFetchAt?: string;
+        syncStatus?: string;
+        gstr1Status?: "filed" | "pending";
+        gstr2bStatus?: "filed" | "pending";
+        gstr3bStatus?: "filed" | "pending";
+        gspConfigured: boolean;
+        reconciliationStatus?: "synced" | "mismatched" | "unknown";
+        mismatches?: number;
+        tokenExpiresAt?: string;
+        error?: string;
+      }>(`/integrations/gst-portal/status/${encodeURIComponent(clientId)}${q}`);
+    },
+    requestOtp: (clientId: string, username: string) =>
+      request<{ success: boolean; message: string }>(
+        `/integrations/gst-portal/otp/request/${encodeURIComponent(clientId)}`,
+        { method: "POST", body: JSON.stringify({ username }) }
+      ),
+    verifyOtp: (clientId: string, username: string, otp: string) =>
+      request<{
+        success: boolean;
+        config_id: string;
+        token_expires_at?: string;
+        returns_filed: Array<{
+          returnType: string;
+          period: string;
+          status: string;
+          filedDate: string;
+          arn?: string;
+          filingType?: string;
+        }>;
+      }>(`/integrations/gst-portal/otp/verify/${encodeURIComponent(clientId)}`, {
+        method: "POST",
+        body: JSON.stringify({ username, otp }),
+      }),
+    returnsHistory: (clientId: string, fy?: string) => {
+      const q = fy ? `?fy=${encodeURIComponent(fy)}` : "";
+      return request<{
+        success: boolean;
+        financialYear: string;
+        returns: Array<{
+          returnType: string;
+          period: string;
+          status: string;
+          filedDate: string;
+          arn?: string;
+          mode?: string;
+          filingType?: string;
+        }>;
+        error?: string;
+      }>(`/integrations/gst-portal/returns-history/${encodeURIComponent(clientId)}${q}`);
+    },
+    syncStatus: (clientId: string, fy?: string) => {
+      const q = fy ? `?fy=${encodeURIComponent(fy)}` : "";
+      return request<Record<string, unknown>>(
+        `/integrations/gst-portal/sync-status/${encodeURIComponent(clientId)}${q}`,
+        { method: "POST" }
+      );
+    },
+    connect: (
+      clientId: string,
+      body: { portal_token: string; refresh_token?: string; gstn_username?: string }
+    ) =>
+      request<{ success: boolean; config_id: string }>(
+        `/integrations/gst-portal/connect/${encodeURIComponent(clientId)}`,
+        { method: "POST", body: JSON.stringify(body) }
+      ),
+    disconnect: (clientId: string) =>
+      request<{ success: boolean }>(
+        `/integrations/gst-portal/disconnect/${encodeURIComponent(clientId)}`,
+        { method: "DELETE" }
+      ),
+    fetchGstr: (clientId: string, type: "gstr1" | "gstr2b", fy: string) =>
+      request<{
+        success: boolean;
+        data: Record<string, unknown>;
+        mismatches: Array<{ docNumber: string; message: string }>;
+      }>(
+        `/integrations/gst-portal/gstr/${encodeURIComponent(clientId)}?type=${type}&fy=${encodeURIComponent(fy)}`
+      ),
+  },
   versions: {
     list: (docId: string) =>
       request<
