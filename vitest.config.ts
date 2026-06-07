@@ -11,6 +11,10 @@ export default defineConfig({
         replacement: path.resolve(__dirname, "packages/zoho-sync/src/index.ts"),
       },
       {
+        find: "@ca-suite/db/llm-budget-service",
+        replacement: path.resolve(__dirname, "packages/db/src/llm-budget-service.ts"),
+      },
+      {
         find: "@ca-suite/db/client",
         replacement: path.resolve(__dirname, "packages/db/src/client.ts"),
       },
