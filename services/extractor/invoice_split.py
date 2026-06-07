@@ -15,6 +15,12 @@ HEADER_RE = re.compile(
     r"(tax\s+invoice|bill\s+from|document\s+type\s+invoice|irn\s*[-:])",
     re.I,
 )
+# Broader invoice/bill number patterns for documents that don't use "Document Number:" label
+GENERIC_INVOICE_NO_RE = re.compile(
+    r"(?:invoice\s*(?:no|number|#|num)[\s.:]*|bill\s*(?:no|number|#)[\s.:]*|"
+    r"ref\s*(?:no|number)[\s.:]*)([A-Z0-9][A-Z0-9/_-]{3,})",
+    re.I,
+)
 
 # Table/footer labels that old heuristics mis-read as invoice numbers
 JUNK_BILL = frozenset(
@@ -53,6 +59,11 @@ def _document_number(text: str) -> str:
         candidate = _normalize_bill(m.group(1))
         if len(candidate) >= 10:
             return candidate
+    m = GENERIC_INVOICE_NO_RE.search(head)
+    if m:
+        candidate = _normalize_bill(m.group(1))
+        if len(candidate) >= 4 and candidate not in JUNK_BILL:
+            return candidate
     return ""
 
 
@@ -75,7 +86,11 @@ def _page_starts_invoice(text: str) -> bool:
     head = text[:1200]
     if not HEADER_RE.search(head):
         return False
-    return bool(_document_number(text))
+    # A doc number strongly confirms a new invoice start.
+    if _document_number(text):
+        return True
+    # Header + at least one GSTIN is also sufficient (some formats omit a parseable doc number).
+    return bool(GSTIN_RE.search(head.upper()))
 
 
 def detect_invoice_segments(pages: list[dict[str, Any]]) -> list[dict[str, Any]]:

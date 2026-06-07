@@ -10,6 +10,7 @@ import { activateOnEnterSpace } from "../../lib/a11y";
 import { ALREADY_IN_RECORDS } from "../../lib/user-copy";
 import { DocumentWorklistTable } from "../../components/documents/DocumentWorklistTable";
 import { isPipelinePending } from "../../lib/pipeline";
+import { ManualEntryModal } from "./ManualEntryModal";
 
 type WorklistFilter = "all" | "ready_for_review" | "processing" | "failed";
 
@@ -18,11 +19,11 @@ const UPLOAD_BATCH = Math.min(
   Math.max(1, parseInt(import.meta.env.VITE_UPLOAD_CONCURRENCY ?? "5", 10) || 5)
 );
 import {
-  Plus, Search, Download, Upload, ChevronDown, FileText, X,
+  Plus, Search, Download, Upload, ChevronDown, FileText, X, PenLine,
 } from "lucide-react";
 
 export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void; isAdmin?: boolean }) {
-  const { uploadFile, retryDocument, bulkLockDocuments } = useAppData();
+  const { uploadFile, retryDocument, bulkLockDocuments, createManualDocument } = useAppData();
   const clientById = (id: string) => clientByIdFrom(clients, id);
   const [dragging, setDragging] = useState(false);
   const [selClient, setSelClient] = useState(clients[0]?.id ?? "");
@@ -36,6 +37,7 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [bulkLocking, setBulkLocking] = useState(false);
   const [bulkLockError, setBulkLockError] = useState("");
+  const [showManualEntry, setShowManualEntry] = useState(false);
   const ref = useRef<HTMLInputElement>(null);
 
   function addFiles(files: FileList | null) {
@@ -135,10 +137,17 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
     <div className="space-y-6">
       <PageHeader title="Upload Documents" subtitle="Upload invoices and track them until they are confirmed in Records"
         action={
-          <button onClick={() => ref.current?.click()}
-            className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
-            <Plus size={16} /> Upload files
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => setShowManualEntry(true)}
+              className="flex items-center gap-2 px-4 py-2.5 border border-border text-sm font-medium rounded-lg hover:bg-muted/50 transition-colors text-foreground">
+              <PenLine size={16} /> Enter Manually
+            </button>
+            <button onClick={() => ref.current?.click()}
+              className="flex items-center gap-2 px-4 py-2.5 bg-primary text-white text-sm font-medium rounded-lg hover:bg-primary/90 transition-colors shadow-sm">
+              <Plus size={16} /> Upload files
+            </button>
+          </div>
         } />
 
       <div
@@ -285,6 +294,14 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
           onToggleSelect={toggleSelect}
         />
       </div>
+
+      {showManualEntry && (
+        <ManualEntryModal
+          clients={clients}
+          onClose={() => setShowManualEntry(false)}
+          onSave={createManualDocument}
+        />
+      )}
     </div>
   );
 }

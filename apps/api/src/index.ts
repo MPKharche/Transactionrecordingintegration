@@ -1464,6 +1464,116 @@ export async function buildApp() {
     });
   });
 
+  // Manual entry: create a document record without going through the AI pipeline.
+  // Accepts multipart/form-data so an optional attachment file can be included.
+  app.post("/api/documents/manual", async (req, reply) => {
+    const ctx = (req as unknown as { auth: AuthContext }).auth;
+
+    const parts = req.parts();
+    const fields: Record<string, string> = {};
+    let attachmentBuf: Buffer | null = null;
+    let attachmentMime = "";
+    let attachmentFilename = "";
+
+    for await (const part of parts) {
+      if (part.type === "file") {
+        attachmentBuf = await part.toBuffer();
+        attachmentMime = part.mimetype;
+        attachmentFilename = part.filename ?? "attachment";
+      } else {
+        fields[part.fieldname] = (part as unknown as { value: string }).value ?? "";
+      }
+    }
+
+    const clientId = (fields.client_id ?? "").trim();
+    if (!clientId) return reply.status(400).send({ error: "client_id required" });
+
+    const [client] = await db
+      .select()
+      .from(clients)
+      .where(and(eq(clients.id, clientId), eq(clients.tenantId, ctx.tenantId)))
+      .limit(1);
+    if (!client) return reply.status(404).send({ error: "Client not found" });
+
+    const rawDocType = (fields.doc_type ?? "purchase_invoice").trim();
+    const docType = rawDocType as typeof gstDocuments.$inferInsert.docType;
+    const fy = (fields.financial_year ?? "").trim() || currentIndianFinancialYear();
+    const docId = randomUUID();
+
+    // Persist attachment to MinIO if provided, otherwise use a sentinel path.
+    let storagePath_: string;
+    let contentHash: string;
+    if (attachmentBuf && attachmentBuf.length > 0) {
+      const ext = attachmentFilename.split(".").pop() ?? "pdf";
+      storagePath_ = storagePath(client.gstin, fy, rawDocType, docId, ext);
+      await putObject(storagePath_, attachmentBuf, attachmentMime || "application/pdf");
+      contentHash = sha256(attachmentBuf);
+    } else {
+      // No attachment — use a unique placeholder so the unique-index doesn't collide.
+      storagePath_ = `manual/${ctx.tenantId}/${docId}`;
+      contentHash = `manual-${docId}`;
+    }
+
+    function parseParty(prefix: string): Record<string, unknown> {
+      return {
+        name: fields[`${prefix}_name`] ?? "",
+        gstin: fields[`${prefix}_gstin`] ?? "",
+        address: fields[`${prefix}_address`] ?? "",
+        city: fields[`${prefix}_city`] ?? "",
+        state: fields[`${prefix}_state`] ?? "",
+        state_code: fields[`${prefix}_state_code`] ?? "",
+        mobile: fields[`${prefix}_mobile`] ?? "",
+        email: fields[`${prefix}_email`] ?? "",
+        is_registered: true,
+      };
+    }
+
+    const [docRow] = await db
+      .insert(gstDocuments)
+      .values({
+        id: docId,
+        tenantId: ctx.tenantId,
+        clientId,
+        filename: attachmentFilename || `manual-${docId}`,
+        docType,
+        docNumber: (fields.doc_number ?? "").trim(),
+        docDate: (fields.doc_date ?? "").trim(),
+        supplier: parseParty("supplier"),
+        recipient: parseParty("recipient"),
+        supplyType: (fields.supply_type as "intra_state" | "inter_state" | "exempt" | "nil_rated") ?? "intra_state",
+        reverseCharge: fields.reverse_charge === "true",
+        placeOfSupply: (fields.place_of_supply ?? "").trim(),
+        taxableAmount: (fields.taxable_amount ?? "0").trim(),
+        igst: (fields.igst ?? "0").trim(),
+        cgst: (fields.cgst ?? "0").trim(),
+        sgst: (fields.sgst ?? "0").trim(),
+        cess: (fields.cess ?? "0").trim(),
+        total: (fields.total ?? "0").trim(),
+        stage: "ready_for_review",
+        extractionMethod: "manual",
+        financialYear: fy,
+        storagePath: storagePath_,
+        contentSha256: contentHash,
+        segmentIndex: 0,
+        itcEligible: fields.itc_eligible !== "false",
+      })
+      .returning();
+
+    await audit(ctx, "document.manual_entry", "document", docId, { clientId });
+    const [uploader] = ctx.userId
+      ? await db
+          .select({ name: users.name, email: users.email })
+          .from(users)
+          .where(eq(users.id, ctx.userId))
+          .limit(1)
+      : [];
+    return mapDocument(docRow, [], [], {
+      uploaded_by: uploader?.name?.trim() || uploader?.email || undefined,
+      captured_at: docRow.createdAt.toISOString(),
+      capture_source: "web",
+    });
+  });
+
   app.post<{ Params: { id: string } }>(
     "/api/documents/:id/lock",
     async (req, reply) => {

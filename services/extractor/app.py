@@ -306,26 +306,36 @@ async def detect_invoices(req: DetectInvoicesRequest):
     segments: list[dict] = []
     llm_usage: Optional[dict] = None
 
-    if req.prefer_heuristic and pages:
+    # Always run heuristic first — it is fast, free, and reliable for structured GST PDFs.
+    if pages:
         segments = detect_invoice_segments_heuristic(pages)
-        log.info("Heuristic split (requested): %d segment(s)", len(segments))
+        log.info("Heuristic split: %d segment(s) from %d page(s)", len(segments), page_count)
 
-    if not segments and pages and page_count >= split_heuristic_threshold:
-        segments = detect_invoice_segments_heuristic(pages)
-        log.info("Heuristic split (>= %d pages): %d segment(s)", split_heuristic_threshold, len(segments))
+    # For prefer_heuristic mode or large PDFs, heuristic result is final.
+    if req.prefer_heuristic or page_count >= split_heuristic_threshold:
+        if not segments:
+            max_page = max((int(p.get("page") or 1) for p in pages), default=1)
+            segments = [{"pageStart": 1, "pageEnd": max_page, "billNumber": None, "confidence": "low"}]
+        return DetectInvoicesResponse(
+            segments=[InvoiceSegment(**s) for s in segments],
+            llmUsage=None,
+        )
 
-    if not segments and openrouter_only() and OPENROUTER_API_KEY and not req.prefer_heuristic:
+    # For smaller PDFs, try LLM and pick whichever result finds MORE invoices.
+    # This prevents the LLM from collapsing a multi-invoice PDF into a single segment.
+    if openrouter_only() and OPENROUTER_API_KEY:
         try:
-            segments, usage = await llm_detect_segments(pages)
+            llm_segments, usage = await llm_detect_segments(pages)
             llm_usage = usage
-            log.info("LLM split: %d segment(s)", len(segments))
+            log.info("LLM split: %d segment(s)", len(llm_segments))
+            # Prefer result with more segments; on a tie prefer LLM (more context-aware).
+            if len(llm_segments) >= len(segments):
+                segments = llm_segments
+                log.info("Using LLM split result (%d segment(s))", len(segments))
+            else:
+                log.info("Keeping heuristic split (%d > %d LLM segment(s))", len(segments), len(llm_segments))
         except Exception as e:
-            log.error("LLM split failed: %s", e)
-            segments = []
-
-    if not segments and pages:
-        segments = detect_invoice_segments_heuristic(pages)
-        log.info("Heuristic split (fallback): %d segment(s)", len(segments))
+            log.error("LLM split failed, keeping heuristic result: %s", e)
 
     if not segments:
         max_page = max((int(p.get("page") or 1) for p in pages), default=1)

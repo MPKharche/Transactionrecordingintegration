@@ -42,6 +42,10 @@ type Ctx = {
     docType: string,
     fy?: string
   ) => Promise<GSTDocument>;
+  createManualDocument: (
+    fields: Record<string, string>,
+    attachment?: File
+  ) => Promise<GSTDocument>;
 };
 
 const AppDataContext = createContext<Ctx | null>(null);
@@ -229,6 +233,15 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
     []
   );
 
+  const createManualDocument = useCallback(
+    async (fields: Record<string, string>, attachment?: File) => {
+      const created = await api.documents.createManual(fields, attachment);
+      setDocs((prev) => [created, ...prev]);
+      return created;
+    },
+    []
+  );
+
   const value = useMemo(
     () => ({
       docs,
@@ -251,6 +264,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       deleteDocument,
       bulkDeleteDocuments,
       uploadFile,
+      createManualDocument,
     }),
     [
       docs,
@@ -273,6 +287,7 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
       deleteDocument,
       bulkDeleteDocuments,
       uploadFile,
+      createManualDocument,
     ]
   );
 

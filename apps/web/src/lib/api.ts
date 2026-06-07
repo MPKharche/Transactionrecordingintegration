@@ -271,6 +271,23 @@ export const api = {
         waiting: number;
         active: number;
       }>("/pipeline/status"),
+    createManual: async (fields: Record<string, string>, attachment?: File) => {
+      const fd = new FormData();
+      for (const [k, v] of Object.entries(fields)) {
+        if (v !== undefined && v !== null) fd.append(k, v);
+      }
+      if (attachment) fd.append("file", attachment);
+      const res = await fetch(`${BASE}/documents/manual`, {
+        method: "POST",
+        credentials: "include",
+        body: fd,
+      });
+      if (!res.ok) {
+        const body = await res.json().catch(() => ({}));
+        throw new Error((body as { error?: string }).error ?? `HTTP ${res.status}`);
+      }
+      return res.json() as Promise<GSTDocument>;
+    },
   },
   registers: {
     list: (kind: RegisterKind, params?: { client_id?: string; financial_year?: string }) => {
