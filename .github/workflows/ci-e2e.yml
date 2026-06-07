@@ -1,13 +1,14 @@
-name: CI
+name: CI E2E
 
 on:
   push:
     branches: [main]
   pull_request:
     branches: [main]
+  workflow_dispatch:
 
 jobs:
-  test:
+  e2e:
     runs-on: ubuntu-latest
     services:
       postgres:
@@ -62,9 +63,9 @@ jobs:
       - run: pnpm db:push
       - run: pnpm db:seed
       - run: npx playwright install chromium --with-deps
-      - run: pnpm test:audit
-      - run: pnpm test
+      - run: pnpm exec playwright test --reporter=github,list
         env:
           CI: "true"
-      - run: pnpm --filter @ca-suite/web build
-      - run: node scripts/verify-story-coverage.mjs
+          VITE_ALLOW_DEV_LOGIN: "true"
+          E2E_WEB_PORT: "5180"
+          PLAYWRIGHT_FORCE_NEW_SERVER: "true"
