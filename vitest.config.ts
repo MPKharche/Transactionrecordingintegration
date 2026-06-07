@@ -19,7 +19,8 @@ export default defineConfig({
         replacement: path.resolve(__dirname, "packages/db/src/client.ts"),
       },
       {
-        find: "@ca-suite/db",
+        // Exact match only — a plain "@ca-suite/db" prefix would swallow subpath exports.
+        find: /^@ca-suite\/db$/,
         replacement: path.resolve(__dirname, "packages/db/src/index.ts"),
       },
       {
