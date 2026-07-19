@@ -22,8 +22,26 @@ import {
   Plus, Search, Download, Upload, ChevronDown, FileText, X, PenLine,
 } from "lucide-react";
 
-export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false }: { docs: GSTDocument[]; clients: Client[]; isDark: boolean; onReview: (id: string) => void; isAdmin?: boolean }) {
-  const { uploadFile, retryDocument, bulkLockDocuments, createManualDocument } = useAppData();
+export function UploadScreen({
+  docs,
+  clients,
+  isDark,
+  onReview,
+  isAdmin = false,
+  onDelete,
+  retryDocument: retryDocumentProp,
+}: {
+  docs: GSTDocument[];
+  clients: Client[];
+  isDark: boolean;
+  onReview: (id: string) => void;
+  isAdmin?: boolean;
+  onDelete?: (id: string) => Promise<void>;
+  retryDocument?: (id: string) => Promise<void>;
+}) {
+  const { uploadFile, retryDocument: retryDocFromContext, bulkLockDocuments, createManualDocument } = useAppData();
+  const retryDocument = retryDocumentProp || retryDocFromContext;
+  const deleteDocument = onDelete;
   const clientById = (id: string) => clientByIdFrom(clients, id);
   const [dragging, setDragging] = useState(false);
   const [selClient, setSelClient] = useState(clients[0]?.id ?? "");
@@ -288,6 +306,7 @@ export function UploadScreen({ docs, clients, isDark, onReview, isAdmin = false 
           isDark={isDark}
           onReview={onReview}
           onRetry={retryDocument}
+          onDelete={deleteDocument}
           showAdminCost={isAdmin}
           selectableIds={lockableIds}
           selectedIds={selectedIds}

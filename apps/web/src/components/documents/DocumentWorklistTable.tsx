@@ -8,6 +8,8 @@ import { LlmCostBadge, BudgetQueuedBadge } from "./LlmCostBadge";
 import { clientByIdFrom, INR } from "../../lib/format";
 import { GstrKpiCell, GstrSummaryBar } from "./GstrKpiCell";
 import { DocumentExpandedDetail } from "./DocumentExpandedDetail";
+import { api } from "../../lib/api";
+import { toast } from "sonner";
 import {
   ChevronRight,
   FileText,
@@ -15,6 +17,7 @@ import {
   CheckCircle,
   Eye,
   RefreshCw,
+  Trash2,
 } from "lucide-react";
 
 const CELL = "px-2 py-1 align-middle";
@@ -33,6 +36,7 @@ export function DocumentWorklistTable({
   isDark,
   onReview,
   onRetry,
+  onDelete,
   emptyMessage = "No documents match your filter",
   showAdminCost = false,
   selectableIds,
@@ -44,6 +48,7 @@ export function DocumentWorklistTable({
   isDark: boolean;
   onReview: (id: string) => void;
   onRetry?: (id: string) => void;
+  onDelete?: (id: string) => void;
   emptyMessage?: string;
   showAdminCost?: boolean;
   selectableIds?: string[];
@@ -180,11 +185,7 @@ export function DocumentWorklistTable({
                         {d.budget_deferred ? <BudgetQueuedBadge isDark={isDark} /> : null}
                       </div>
                     </td>
-                    {showAdminCost ? (
-                      <td className={`${CELL} text-right`}>
-                        <LlmCostBadge costUsd={d.llm_cost_usd} />
-                      </td>
-                    ) : null}
+                    {/* Removed AI Cost column - not needed for end users */}
                     <td className={CELL}>
                       <GstrKpiCell report={report} />
                     </td>
@@ -228,11 +229,31 @@ export function DocumentWorklistTable({
                           <RefreshCw size={12} />
                         </button>
                       )}
+                      {(d.issues.length > 0 || d.stage === "failed") && d.stage !== "locked" && (
+                        <button
+                          type="button"
+                          title="Delete this document permanently"
+                          aria-label="Delete document"
+                          onClick={async (e) => {
+                            e.stopPropagation();
+                            if (confirm(`Delete "${d.filename}"? This cannot be undone.`)) {
+                              try {
+                                await onDelete?.(d.id);
+                              } catch (err) {
+                                console.error('Delete error:', err);
+                              }
+                            }
+                          }}
+                          className="inline-flex items-center gap-1 text-red-500 hover:text-red-700 transition-colors ml-2"
+                        >
+                          <Trash2 size={12} />
+                        </button>
+                      )}
                     </td>
                   </tr>
                   {open && (
                     <tr className="border-b border-border/60">
-                      <td colSpan={(showAdminCost ? 13 : 12) + (selectable ? 1 : 0)} className="p-0">
+                      <td colSpan={12} className="p-0">
                         <DocumentExpandedDetail
                           doc={d}
                           client={clientById(d.client_id)}

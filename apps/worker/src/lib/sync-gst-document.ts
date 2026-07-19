@@ -49,7 +49,10 @@ function clientAsParty(c: typeof clients.$inferSelect) {
 
 function inferSupplyType(supplierCode: string, recipientCode: string): string {
   if (!supplierCode || !recipientCode) return "intra_state";
-  return supplierCode === recipientCode ? "intra_state" : "inter_state";
+  // Normalize state codes to 2 digits and compare
+  const supCode = supplierCode.trim().padStart(2, "0").slice(0, 2);
+  const recCode = recipientCode.trim().padStart(2, "0").slice(0, 2);
+  return supCode === recCode ? "intra_state" : "inter_state";
 }
 
 const DOC_TYPE_MAP: Record<string, typeof gstDocuments.$inferInsert.docType> = {

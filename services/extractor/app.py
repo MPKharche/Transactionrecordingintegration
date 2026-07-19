@@ -268,6 +268,14 @@ from invoice_split import detect_invoice_segments as detect_invoice_segments_heu
 from openrouter_intel import llm_detect_segments, llm_extract_document, openrouter_only
 from minio_fetch import fetch_object
 
+# Import Claude validator
+try:
+    from claude_validator import apply_claude_corrections
+    HAS_CLAUDE_VALIDATOR = True
+except ImportError:
+    HAS_CLAUDE_VALIDATOR = False
+    log.warning("Claude validator not available - install required dependencies")
+
 # ─── Routes ───────────────────────────────────────────────────────────────────
 
 @app.get("/health")
@@ -432,6 +440,15 @@ async def _extract_impl(req: ExtractRequest) -> ExtractorResponse:
 
         if llm_usage:
             result["llmUsage"] = llm_usage
+
+        # Apply Claude intelligent validation if enabled
+        if HAS_CLAUDE_VALIDATOR and os.environ.get("USE_CLAUDE_VALIDATION", "true").lower() in ("true", "1", "yes"):
+            try:
+                result = await apply_claude_corrections(result)
+                log.info("Claude validation applied successfully")
+            except Exception as e:
+                log.error(f"Claude validation failed: {e}")
+                # Continue with original result if Claude fails
 
         if not use_or_only and result.get("extractionMethod") == "stub":
             from gst_heuristic import heuristic_extract

@@ -97,7 +97,9 @@ confidence: high | medium | low. billNumber null if unknown."""
 
 EXTRACT_SYSTEM_PROMPT = """You are a precision GST document parser for Indian CA/accounting software.
 
-Return ONLY valid JSON (no markdown fences). Use null for unknown fields. Amounts/quantities as strings without commas.
+CRITICAL: Extract ALL visible fields from the document. Do NOT leave fields as null if the value appears in the OCR text.
+
+Return ONLY valid JSON (no markdown fences). Use null ONLY for truly missing fields. Amounts/quantities as strings without commas.
 
 {
   "docType": "sales_invoice" | "purchase_bill" | "credit_note" | "debit_note" | "unknown",
@@ -118,33 +120,88 @@ DOCUMENT TYPE RULES:
 fieldConfidence: map each extracted field key to 0-100 confidence (100=certain from OCR).
 
 Indian GST invoice layout (e-invoice / utility bills):
-- IRN: 64-char hex hash at top-right of e-invoice
+- IRN: 64-char hex hash at top-right of e-invoice (look for 64-character alphanumeric string)
 - Ack Number & Ack Date from e-invoice footer
 - BILL FROM = supplier; BILL TO = recipient/buyer
-- Document Number = billNumber (purchase/credit/debit note) or invoiceNumber (sales)
-- Document Date → YYYY-MM-DD
-- POS / Place of Supply → 2-digit state code (e.g. 27)
-- GSTIN: exactly 15 chars
+- Document Number = billNumber (purchase/credit/debit note) or invoiceNumber (sales) — REQUIRED, search thoroughly
+- Document Date → YYYY-MM-DD format — REQUIRED
+- POS / Place of Supply → 2-digit state code (e.g. 27) — extract from "Place of Supply" field
+- GSTIN: exactly 15 chars — REQUIRED for vendor/supplier
+- Customer/Client GSTIN: 15 chars for buyer — extract if present
 - TCS / Other charges if present
 - Line items: HSN/SAC, itemDescription (full product text e.g. SALE OF POND ASH / FLY ASH), qty, UQC (MTS/PCS/KGS), rate, gross, discount, taxable, CGST/SGST/IGST rates & amounts
 - itemDescription is REQUIRED for every line — never leave description null if any product text appears on the invoice
+- Tax amounts: IGST (inter-state) OR CGST+SGST (intra-state) — extract ALL visible tax fields
+- Total amount: REQUIRED — look for "Total", "Grand Total", "Net Amount", "Amount Payable"
 
 purchaseBill (camelCase) — also used for credit_note and debit_note:
-billNumber, billDate, irnHash, ackNumber, ackDate, transactionType (B2B|B2C|SEZ|Export),
-vendorName, gstin (supplier), customerName, customerGstin,
-sourceOfSupply, destinationOfSupply, supplyType (intra_state|inter_state),
-subtotal, totalTaxableValue, igst, cgst, sgst, cgstRate, sgstRate, igstRate,
-cess, otherChargesTcs, total,
-lines[{ itemName, itemDescription, hsnSac, quantity, uqc, rate, grossValue, discountAmount,
-       taxableValue, taxPercentage, cgstRate, cgstAmount, sgstRate, sgstAmount, igstRate, igstAmount,
-       cessRate, cessAmount, itemTotal }]
+REQUIRED FIELDS (extract if visible):
+- billNumber: Document/Invoice number — look for "Document Number", "Invoice No", "Bill No"
+- billDate: Document date in YYYY-MM-DD format
+- vendorName: Supplier name from "BILL FROM" section — REQUIRED
+- gstin: Supplier GSTIN (15 chars) — REQUIRED
+- customerName: Buyer name from "BILL TO" section
+- customerGstin: Buyer GSTIN if present
+- sourceOfSupply: 2-digit state code of supplier
+- destinationOfSupply: 2-digit state code of buyer — extract from "Place of Supply"
+- supplyType: "intra_state" (same state) or "inter_state" (different states)
+
+AMOUNT FIELDS (extract all visible):
+- subtotal: Subtotal before tax
+- totalTaxableValue: Total taxable amount
+- igst: IGST amount (for inter-state)
+- cgst: CGST amount (for intra-state)
+- sgst: SGST amount (for intra-state)
+- cgstRate: CGST percentage (e.g. "9")
+- sgstRate: SGST percentage (e.g. "9")
+- igstRate: IGST percentage (e.g. "18")
+- cess: Cess amount if present
+- otherChargesTcs: TCS amount if present
+- total: Grand total / Amount payable — REQUIRED
+
+LINE ITEMS (extract all lines):
+lines[{
+  itemName: Product name/code
+  itemDescription: Full product description — REQUIRED
+  hsnSac: HSN/SAC code
+  quantity: Quantity as string
+  uqc: Unit of measurement (MTS/PCS/KGS/etc)
+  rate: Unit price
+  grossValue: Line gross amount
+  discountAmount: Discount on line
+  taxableValue: Taxable amount for line
+  taxPercentage: Total tax percentage
+  cgstRate: CGST rate for line
+  cgstAmount: CGST amount for line
+  sgstRate: SGST rate for line
+  sgstAmount: SGST amount for line
+  igstRate: IGST rate for line
+  igstAmount: IGST amount for line
+  cessRate: Cess rate if applicable
+  cessAmount: Cess amount if applicable
+  itemTotal: Line total amount
+}]
+
+OTHER FIELDS:
+- irnHash: 64-char hex IRN if e-invoice
+- ackNumber: Acknowledgment number for e-invoice
+- ackDate: Acknowledgment date for e-invoice
+- transactionType: B2B (default for most invoices), B2C, SEZ, or Export
 
 salesInvoice: invoiceNumber, invoiceDate, irnHash, ackNumber, ackDate, placeOfSupply, lines[...]
 
-When upload category is PURCHASE: docType MUST be purchase_bill (or credit_note/debit_note if the document header says so); vendor=BILL FROM; buyer=BILL TO.
-If client GSTIN provided, recipient GSTIN should match when visible.
+EXTRACTION RULES:
+1. When upload category is PURCHASE: docType MUST be purchase_bill (or credit_note/debit_note if header says so)
+2. Vendor (BILL FROM) = the entity issuing the invoice = gstin field
+3. Customer (BILL TO) = the entity receiving the invoice = customerGstin field
+4. If client GSTIN provided in context, it should match the buyer/customer GSTIN
+5. Extract EVERY visible field — do not skip fields that appear in the text
+6. For amounts: remove commas, keep numbers only
+7. For dates: convert to YYYY-MM-DD format
+8. For state codes: extract 2-digit code (01-37)
+9. confidence=high ONLY when: billNumber, billDate, vendorName, gstin, and total are ALL present
 
-List issues[] for missing critical fields. confidence=high only when bill number, date, supplier GSTIN, total present."""
+List issues[] for any missing REQUIRED fields (billNumber, billDate, vendorName, gstin, total)."""
 
 MAX_EXTRACT_CHARS = int(os.environ.get("OPENROUTER_EXTRACT_MAX_CHARS", "14000"))
 MAX_SPLIT_PAGE_CHARS = int(os.environ.get("OPENROUTER_SPLIT_PAGE_CHARS", "1800"))

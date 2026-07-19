@@ -12,13 +12,14 @@ import { RecordsScreen } from "../features/records/RecordsScreen";
 import { DocumentWorkspace } from "../components/documents/DocumentWorkspace";
 import { ClientsScreen } from "../features/clients/ClientsScreen";
 import { ClientDetailScreen } from "../features/clients/ClientDetailScreen";
-import { GstRegistersScreen } from "../features/registers/GstRegistersScreen";
-import { AuditLogScreen } from "../features/audit/AuditLogScreen";
-// TIER 2 imports
-import { FilingDeadlineScreen } from "../features/deadlines/FilingDeadlineScreen";
-import { ITCReconciliationScreen } from "../features/reconciliation/ITCReconciliationScreen";
-import { TaxLiabilityScreen } from "../features/tax-liability/TaxLiabilityScreen";
-import { AmendmentWorkflowScreen } from "../features/amendments/AmendmentWorkflowScreen";
+import { BillingScreenBeautiful } from "../features/billing/BillingScreenBeautiful";
+// Archived features - moved to _archive/features/
+// import { GstRegistersScreen } from "../features/registers/GstRegistersScreen";
+// import { AuditLogScreen } from "../features/audit/AuditLogScreen";
+// import { FilingDeadlineScreen } from "../features/deadlines/FilingDeadlineScreen";
+// import { ITCReconciliationScreen } from "../features/reconciliation/ITCReconciliationScreen";
+// import { TaxLiabilityScreen } from "../features/tax-liability/TaxLiabilityScreen";
+// import { AmendmentWorkflowScreen } from "../features/amendments/AmendmentWorkflowScreen";
 // TIER 3 imports
 import { ZohoIntegrationScreen } from "../features/integrations/ZohoIntegrationScreen";
 import { GstPortalIntegrationScreen } from "../features/integrations/GstPortalIntegrationScreen";
@@ -48,15 +49,9 @@ export function AppShell() {
   const location = useLocation();
   const { clientId: routeClientId, docId: routeDocId } = useParams();
 
-  const screen = location.pathname.startsWith("/deadlines")
-    ? "deadlines"
-    : location.pathname.startsWith("/reconciliation")
-      ? "reconciliation"
-      : location.pathname.startsWith("/tax-liability")
-        ? "tax_liability"
-        : location.pathname.startsWith("/amendments")
-          ? "amendments"
-          : location.pathname.startsWith("/integrations/zoho")
+  const screen = location.pathname.startsWith("/billing")
+            ? "billing"
+            : location.pathname.startsWith("/integrations/zoho")
             ? "zoho_integration"
             : location.pathname.startsWith("/integrations/gst-portal")
               ? "gst_portal_integration"
@@ -66,19 +61,15 @@ export function AppShell() {
                   ? "upload"
                   : location.pathname.startsWith("/records")
                     ? "records"
-                    : location.pathname.startsWith("/registers")
-                      ? "registers"
-                      : location.pathname.startsWith("/audit")
-                        ? "audit"
-                        : location.pathname.startsWith("/admin/observe")
-                          ? "observe"
-                          : location.pathname.startsWith("/settings")
-                          ? "settings"
-                          : location.pathname.startsWith("/clients")
-                          ? routeClientId
-                            ? "client_detail"
-                            : "clients"
-                          : "dashboard";
+                    : location.pathname.startsWith("/admin/observe")
+                      ? "observe"
+                      : location.pathname.startsWith("/settings")
+                      ? "settings"
+                      : location.pathname.startsWith("/clients")
+                      ? routeClientId
+                        ? "client_detail"
+                        : "clients"
+                      : "dashboard";
 
   const reviewId =
     routeDocId ?? new URLSearchParams(location.search).get("doc") ?? null;
@@ -117,6 +108,7 @@ export function AppShell() {
     s:
       | "dashboard"
       | "upload"
+      | "billing"
       | "records"
       | "review"
       | "clients"
@@ -135,6 +127,7 @@ export function AppShell() {
   ) {
     if (s === "dashboard") navigate("/");
     else if (s === "upload") navigate("/upload");
+    else if (s === "billing") navigate("/billing");
     else if (s === "records") navigate("/records");
     else if (s === "registers") navigate("/registers");
     else if (s === "audit") navigate("/audit");
@@ -181,6 +174,16 @@ export function AppShell() {
             isDark={isDark}
             onReview={openReview}
             isAdmin={session?.role === "admin"}
+            onDelete={deleteDocument}
+            retryDocument={retryDocument}
+          />
+        )}
+        {screen === "billing" && (
+          <BillingScreenBeautiful
+            clients={clients}
+            documents={docs}
+            onClose={() => navigate("/upload")}
+            onSuccess={() => refresh()}
           />
         )}
         {screen === "records" && (
@@ -206,22 +209,17 @@ export function AppShell() {
             onRetry={retryDocument}
           />
         )}
-        {screen === "registers" && (
-          <GstRegistersScreen
-            clients={clients}
-            isDark={isDark}
-            onReview={openReview}
-          />
-        )}
-        {screen === "audit" && <AuditLogScreen />}
         {screen === "observe" && <AdminObserveScreen isDark={isDark} />}
         {screen === "settings" && <PreferencesScreen />}
-        {/* TIER 2 Screens */}
+        {/* Archived features - commented out, moved to _archive/features/
+        {screen === "registers" && <GstRegistersScreen />}
+        {screen === "audit" && <AuditLogScreen />}
         {screen === "deadlines" && <FilingDeadlineScreen isDark={isDark} />}
         {screen === "reconciliation" && <ITCReconciliationScreen isDark={isDark} />}
         {screen === "tax_liability" && <TaxLiabilityScreen isDark={isDark} />}
         {screen === "amendments" && <AmendmentWorkflowScreen isDark={isDark} />}
-        {/* TIER 3 Integration Screens */}
+        */}
+        {/* Integration Screens */}
         {screen === "zoho_integration" && <ZohoIntegrationScreen isDark={isDark} />}
         {screen === "gst_portal_integration" && <GstPortalIntegrationScreen isDark={isDark} />}
         {screen === "email_forwarding" && <EmailForwardingScreen isDark={isDark} />}

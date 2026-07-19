@@ -21,6 +21,7 @@ import { handleVerticalListKeyDown } from "../../lib/a11y";
 export type Screen =
   | "dashboard"
   | "upload"
+  | "billing"
   | "records"
   | "review"
   | "clients"
@@ -67,11 +68,13 @@ export function Sidebar({
   const NAV = [
     { id: "dashboard", label: "Dashboard", icon: LayoutDashboard },
     { id: "upload", label: "Upload", icon: Upload },
+    { id: "billing", label: "Create Invoice", icon: ReceiptText },
     { id: "records", label: "Records", icon: ReceiptText },
-    { id: "registers", label: "GST Registers", icon: FileText },
     { id: "clients", label: "Clients", icon: Users },
-    { id: "audit", label: "Activity log", icon: Shield },
-    ...(userRole === "admin" ? [{ id: "observe" as const, label: "Observe", icon: Gauge }] : []),
+    // Advanced features hidden for simplified UI
+    // { id: "registers", label: "GST Registers", icon: FileText },
+    // { id: "audit", label: "Activity log", icon: Shield },
+    // ...(userRole === "admin" ? [{ id: "observe" as const, label: "Observe", icon: Gauge }] : []),
   ];
 
   const displayName = userName ?? "Signed in";

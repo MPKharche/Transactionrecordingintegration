@@ -221,26 +221,52 @@ export function AppDataProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const bulkDeleteDocuments = useCallback(async (ids: string[]) => {
-    const res = await api.documents.bulkDelete(ids);
-    const deletedSet = new Set(res.deleted);
-    setDocs((prev) => prev.filter((d) => !deletedSet.has(d.id)));
-    return res;
+    try {
+      toast.loading(`Deleting ${ids.length} document${ids.length > 1 ? 's' : ''}...`, { id: 'bulk-delete' });
+      const res = await api.documents.bulkDelete(ids);
+      const deletedSet = new Set(res.deleted);
+      setDocs((prev) => prev.filter((d) => !deletedSet.has(d.id)));
+      if (res.deleted.length > 0) {
+        toast.success(`${res.deleted.length} document${res.deleted.length > 1 ? 's' : ''} deleted`, { id: 'bulk-delete' });
+      }
+      if (res.errors.length > 0) {
+        toast.error(`${res.errors.length} document${res.errors.length > 1 ? 's' : ''} failed to delete`, { id: 'bulk-delete' });
+      }
+      return res;
+    } catch (err) {
+      toast.error('Bulk delete failed', { id: 'bulk-delete' });
+      throw err;
+    }
   }, []);
 
   const uploadFile = useCallback(
     async (file: File, clientId: string, docType: string, fy?: string) => {
-      const created = await api.documents.upload(file, clientId, docType, fy);
-      setDocs((prev) => [created, ...prev]);
-      return created;
+      try {
+        toast.loading(`Uploading ${file.name}...`, { id: 'upload' });
+        const created = await api.documents.upload(file, clientId, docType, fy);
+        setDocs((prev) => [created, ...prev]);
+        toast.success(`${file.name} uploaded successfully`, { id: 'upload' });
+        return created;
+      } catch (err) {
+        toast.error(`Failed to upload ${file.name}`, { id: 'upload' });
+        throw err;
+      }
     },
     []
   );
 
   const createManualDocument = useCallback(
     async (fields: Record<string, string>, attachment?: File) => {
-      const created = await api.documents.createManual(fields, attachment);
-      setDocs((prev) => [created, ...prev]);
-      return created;
+      try {
+        toast.loading('Creating document...', { id: 'manual-create' });
+        const created = await api.documents.createManual(fields, attachment);
+        setDocs((prev) => [created, ...prev]);
+        toast.success('Document created successfully', { id: 'manual-create' });
+        return created;
+      } catch (err) {
+        toast.error('Failed to create document', { id: 'manual-create' });
+        throw err;
+      }
     },
     []
   );
