@@ -14,7 +14,7 @@ import { ClientsScreen } from "../features/clients/ClientsScreen";
 import { ClientDetailScreen } from "../features/clients/ClientDetailScreen";
 import { BillingScreenBeautiful } from "../features/billing/BillingScreenBeautiful";
 // Archived features - moved to _archive/features/
-// import { GstRegistersScreen } from "../features/registers/GstRegistersScreen";
+import { GstRegistersScreen } from "../features/registers/GstRegistersScreen";
 // import { AuditLogScreen } from "../features/audit/AuditLogScreen";
 // import { FilingDeadlineScreen } from "../features/deadlines/FilingDeadlineScreen";
 // import { ITCReconciliationScreen } from "../features/reconciliation/ITCReconciliationScreen";
@@ -211,8 +211,14 @@ export function AppShell() {
         )}
         {screen === "observe" && <AdminObserveScreen isDark={isDark} />}
         {screen === "settings" && <PreferencesScreen />}
+        {screen === "registers" && (
+          <GstRegistersScreen
+            clients={clients}
+            isDark={isDark}
+            onReview={openReview}
+          />
+        )}
         {/* Archived features - commented out, moved to _archive/features/
-        {screen === "registers" && <GstRegistersScreen />}
         {screen === "audit" && <AuditLogScreen />}
         {screen === "deadlines" && <FilingDeadlineScreen isDark={isDark} />}
         {screen === "reconciliation" && <ITCReconciliationScreen isDark={isDark} />}

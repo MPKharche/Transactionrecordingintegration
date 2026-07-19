@@ -72,7 +72,7 @@ export function Sidebar({
     { id: "records", label: "Records", icon: ReceiptText },
     { id: "clients", label: "Clients", icon: Users },
     // Advanced features hidden for simplified UI
-    // { id: "registers", label: "GST Registers", icon: FileText },
+    { id: "registers", label: "GST Registers", icon: FileText },
     // { id: "audit", label: "Activity log", icon: Shield },
     // ...(userRole === "admin" ? [{ id: "observe" as const, label: "Observe", icon: Gauge }] : []),
   ];
