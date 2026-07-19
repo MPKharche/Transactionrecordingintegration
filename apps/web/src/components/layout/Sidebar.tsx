@@ -43,6 +43,7 @@ export function Sidebar({
   userName,
   userRole,
   onOpenSettings,
+  onOpenGuide,
 }: {
   screen: Screen;
   /** When on review, which nav item to highlight (upload vs records). */
