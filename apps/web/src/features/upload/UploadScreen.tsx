@@ -2,6 +2,7 @@ import { useState, useRef, useMemo } from "react";
 import type { Client, GSTDocument, DocStage, DocType } from "@ca-suite/shared";
 import { PageHeader } from "../../components/layout/PageHeader";
 import { exportCSV } from "../../lib/csv-export";
+import { exportToMunimFormat } from "../billing/utils/munimExport";
 import { DOC_TYPE_META, STAGE_META, FALLBACK_DOC_TYPE_META, FALLBACK_STAGE_META } from "../../lib/constants";
 import { clientByIdFrom } from "../../lib/format";
 import { useAppData } from "../../context/AppDataContext";
@@ -11,6 +12,7 @@ import { ALREADY_IN_RECORDS } from "../../lib/user-copy";
 import { DocumentWorklistTable } from "../../components/documents/DocumentWorklistTable";
 import { isPipelinePending } from "../../lib/pipeline";
 import { ManualEntryModal } from "./ManualEntryModal";
+import { toast } from "sonner";
 
 type WorklistFilter = "all" | "ready_for_review" | "processing" | "failed";
 
@@ -269,6 +271,16 @@ export function UploadScreen({
             );
           }} className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors">
             <Download size={14} /> Export CSV
+          </button>
+          <button onClick={() => {
+            try {
+              exportToMunimFormat(filtered);
+              toast.success("Sales invoices exported in Munim format");
+            } catch (error) {
+              toast.error((error as Error).message || "Export failed");
+            }
+          }} className="flex items-center gap-1.5 px-3 py-2 border border-border rounded-lg text-sm text-muted-foreground hover:text-foreground hover:border-primary/50 transition-colors">
+            <Download size={14} /> Munim Format (Sales)
           </button>
           {lockableIds.length > 0 && (
             <>

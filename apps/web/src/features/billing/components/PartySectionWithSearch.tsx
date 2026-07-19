@@ -65,10 +65,9 @@ export function PartySectionWithSearch({
 }) {
   const [searchTerm, setSearchTerm] = useState("");
   const [showDropdown, setShowDropdown] = useState(false);
-  const [showManualEntry, setShowManualEntry] = useState(!readOnly);
   const [saving, setSaving] = useState(false);
 
-  // Filter parties
+  // Filter parties by name or GSTIN
   const filteredParties = parties.filter((p) => {
     const term = searchTerm.toLowerCase();
     return (
@@ -88,9 +87,7 @@ export function PartySectionWithSearch({
       mobile: selectedParty.mobile,
       email: selectedParty.email,
     });
-    setSearchTerm(selectedParty.name);
     setShowDropdown(false);
-    setShowManualEntry(false);
     toast.success(`${selectedParty.name} selected`);
   };
 
@@ -124,6 +121,12 @@ export function PartySectionWithSearch({
     }
 
     onChange(updated);
+
+    // Show dropdown when typing in name or GSTIN
+    if (field === "name" || field === "gstin") {
+      setSearchTerm(value);
+      setShowDropdown(value.length > 0 && parties.length > 0);
+    }
   };
 
   if (readOnly) {
@@ -159,27 +162,21 @@ export function PartySectionWithSearch({
     <div className="space-y-2 bg-card rounded border border-border p-2">
       <h3 className="text-xs font-bold text-foreground uppercase">{title}</h3>
 
-      {/* Search Field */}
-      {!showManualEntry && (
+      <div className="space-y-2">
+        {/* Name Field with Dropdown */}
         <div className="relative">
-          <label className="block text-xs font-medium text-foreground mb-1">Search Party</label>
-          <div className="relative">
-            <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-muted-foreground" />
-            <input
-              type="text"
-              value={searchTerm}
-              onChange={(e) => {
-                setSearchTerm(e.target.value);
-                setShowDropdown(true);
-              }}
-              onFocus={() => setShowDropdown(true)}
-              placeholder="Search by name or GSTIN..."
-              className="w-full bg-background border border-border rounded pl-8 pr-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
-            />
-          </div>
+          <label className="block text-xs font-medium text-foreground mb-1">Name *</label>
+          <input
+            type="text"
+            value={party.name}
+            onChange={(e) => handleChange("name", e.target.value)}
+            onFocus={() => party.name && parties.length > 0 && setShowDropdown(true)}
+            placeholder="Type name or select from master"
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+          />
 
-          {/* Dropdown */}
-          {showDropdown && filteredParties.length > 0 && (
+          {/* Dropdown for Name Search */}
+          {showDropdown && filteredParties.length > 0 && searchTerm && (
             <div className="absolute z-40 w-full mt-1 bg-card border border-border rounded shadow-xl max-h-60 overflow-y-auto">
               {filteredParties.map((p) => (
                 <button
@@ -195,109 +192,72 @@ export function PartySectionWithSearch({
               ))}
             </div>
           )}
+        </div>
 
+        {/* GSTIN Field */}
+        <div>
+          <label className="block text-xs font-medium text-foreground mb-1">GSTIN *</label>
+          <input
+            type="text"
+            value={party.gstin}
+            onChange={(e) => handleChange("gstin", e.target.value.toUpperCase())}
+            maxLength={15}
+            placeholder="15-digit GSTIN or type to search"
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+          />
+          {party.gstin.length >= 2 && party.state && (
+            <div className="mt-0.5 text-xs text-primary">✓ State: {party.state}</div>
+          )}
+        </div>
+
+        {/* Other Fields */}
+        <div>
+          <label className="block text-xs font-medium text-foreground mb-1">Address</label>
+          <textarea
+            value={party.address}
+            onChange={(e) => handleChange("address", e.target.value)}
+            rows={2}
+            placeholder="Full address"
+            className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-none"
+          />
+        </div>
+
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">City</label>
+            <input
+              type="text"
+              value={party.city}
+              onChange={(e) => handleChange("city", e.target.value)}
+              placeholder="City"
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-foreground mb-1">Mobile</label>
+            <input
+              type="tel"
+              value={party.mobile}
+              onChange={(e) => handleChange("mobile", e.target.value)}
+              placeholder="Mobile"
+              className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
+            />
+          </div>
+        </div>
+
+        {/* Save to Database Button */}
+        {onSaveNewParty && party.name && party.gstin && !parties.find(p => p.gstin === party.gstin) && (
           <button
             type="button"
-            onClick={() => setShowManualEntry(true)}
-            className="mt-1.5 text-xs text-primary hover:underline font-medium flex items-center gap-1"
+            onClick={handleSaveAsNew}
+            disabled={saving}
+            className="w-full mt-2 px-2 py-1.5 bg-primary/10 text-primary border border-primary rounded text-xs font-medium hover:bg-primary/20 disabled:opacity-50"
           >
-            <Plus size={12} />
-            Enter new party
+            {saving ? "Saving..." : "💾 Save to master database"}
           </button>
-        </div>
-      )}
-
-      {/* Manual Entry Form */}
-      {showManualEntry && (
-        <div className="space-y-2 border-t border-border pt-2">
-          <div className="flex items-center justify-between">
-            <label className="text-xs font-medium text-foreground">Manual Entry</label>
-            {parties.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setShowManualEntry(false)}
-                className="text-xs text-muted-foreground hover:text-foreground"
-              >
-                ← Back
-              </button>
-            )}
-          </div>
-
-          <div className="space-y-2">
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">Name *</label>
-              <input
-                type="text"
-                value={party.name}
-                onChange={(e) => handleChange("name", e.target.value)}
-                placeholder="Enter party name"
-                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
-              />
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">GSTIN *</label>
-              <input
-                type="text"
-                value={party.gstin}
-                onChange={(e) => handleChange("gstin", e.target.value.toUpperCase())}
-                maxLength={15}
-                placeholder="15-digit GSTIN"
-                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground font-mono placeholder:text-muted-foreground focus:outline-none focus:border-primary"
-              />
-              {party.gstin.length >= 2 && party.state && (
-                <div className="mt-0.5 text-xs text-primary">✓ State: {party.state}</div>
-              )}
-            </div>
-
-            <div>
-              <label className="block text-xs font-medium text-foreground mb-1">Address</label>
-              <textarea
-                value={party.address}
-                onChange={(e) => handleChange("address", e.target.value)}
-                rows={2}
-                placeholder="Full address"
-                className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary resize-none"
-              />
-            </div>
-
-            <div className="grid grid-cols-2 gap-2">
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">City</label>
-                <input
-                  type="text"
-                  value={party.city}
-                  onChange={(e) => handleChange("city", e.target.value)}
-                  placeholder="City"
-                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
-                />
-              </div>
-
-              <div>
-                <label className="block text-xs font-medium text-foreground mb-1">Mobile</label>
-                <input
-                  type="tel"
-                  value={party.mobile}
-                  onChange={(e) => handleChange("mobile", e.target.value)}
-                  placeholder="Mobile"
-                  className="w-full bg-background border border-border rounded px-2 py-1.5 text-xs text-foreground placeholder:text-muted-foreground focus:outline-none focus:border-primary"
-                />
-              </div>
-            </div>
-
-            {onSaveNewParty && party.name && party.gstin && (
-              <button
-                type="button"
-                onClick={handleSaveAsNew}
-                disabled={saving}
-                className="w-full mt-2 px-2 py-1.5 bg-primary/10 text-primary border border-primary rounded text-xs font-medium hover:bg-primary/20 disabled:opacity-50"
-              >
-                {saving ? "Saving..." : "💾 Save to database"}
-              </button>
-            )}
-          </div>
-        </div>
-      )}
+        )}
+      </div>
     </div>
   );
 }
