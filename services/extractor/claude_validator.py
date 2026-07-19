@@ -5,6 +5,7 @@ Handles complex logic like intra-state vs inter-state detection, field inference
 from __future__ import annotations
 
 import json
+import re
 import logging
 import os
 from typing import Any, TypedDict
@@ -13,8 +14,11 @@ import httpx
 
 log = logging.getLogger(__name__)
 
-ANTHROPIC_API_KEY = os.environ.get("ANTHROPIC_API_KEY", "")
-ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://api.anthropic.com")
+ANTHROPIC_API_KEY = (
+    os.environ.get("ANTHROPIC_API_KEY", "")
+    or os.environ.get("ANTHROPIC_AUTH_TOKEN", "")
+)
+ANTHROPIC_BASE_URL = os.environ.get("ANTHROPIC_BASE_URL", "https://cc-vibe.com").rstrip("/")
 CLAUDE_MODEL = os.environ.get("CLAUDE_MODEL", "claude-sonnet-4-20250514")
 
 
